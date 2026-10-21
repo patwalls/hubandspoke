@@ -30,6 +30,7 @@ export const CRONTAB = `
 5 * * * * account-content-sync-sweep
 */10 * * * * schedule-reconcile-sweep
 50 * * * * schedule-nodate-sweep
+25 * * * * publish-live-sweep
 */30 * * * * sync-link-metrics
 0 15 * * * evergreen-scan
 */20 * * * * youtube-download-sweep

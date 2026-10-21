@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { signOut } from "next-auth/react";
 import { OPEN_WHATS_NEW_EVENT } from "@/components/dashboard/whats-new-dialog";
+import { READY_CHANGED_EVENT } from "@/lib/publish/events";
 import { LayoutGrid, SearchIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NotificationBell } from "@/components/notifications/notification-bell";
@@ -343,6 +344,38 @@ export function DashboardNav({
   );
 }
 
+/**
+ * How many of the brand's posts are Ready To Publish, for the Publish tab.
+ * Fetched when the brand changes and when the Publish screen marks one
+ * published — never on a timer (every poll is a router log line on every
+ * dashboard page; docs/automation.md → Log volume).
+ */
+function useReadyCount(brand: string): number {
+  const [count, setCount] = useState(0);
+  const active = brand.length > 0 && brand !== "all";
+  useEffect(() => {
+    if (!active) return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const res = await fetch(`/api/publish/ready-count?brand=${encodeURIComponent(brand)}`);
+        if (!res.ok) return;
+        const json = (await res.json()) as { count?: number };
+        if (!cancelled) setCount(Number(json?.count ?? 0));
+      } catch {
+        // A missing badge is fine; never break the nav over it.
+      }
+    };
+    void load();
+    window.addEventListener(READY_CHANGED_EVENT, load);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(READY_CHANGED_EVENT, load);
+    };
+  }, [active, brand]);
+  return active ? count : 0;
+}
+
 export function SectionTabs({
   brands,
   defaultBrand,
@@ -353,6 +386,7 @@ export function SectionTabs({
   const pathname = usePathname();
   const currentBrand = getBrandFromPath(pathname, brands, defaultBrand);
   const flags = useFeatureFlags();
+  const readyCount = useReadyCount(currentBrand);
 
   // The /all view aggregates data across brands; Formats and Accounts are
   // brand-scoped configuration (format library, account goals/boundaries)
@@ -450,6 +484,15 @@ export function SectionTabs({
               )}
             >
               {tab.label}
+              {tab.label === "Publish" && readyCount > 0 ? (
+                <span
+                  data-testid="publish-ready-count"
+                  aria-label={`${readyCount} ready to publish`}
+                  className="ml-1.5 rounded-full bg-primary/10 px-1.5 py-px text-[11px] font-medium tabular-nums text-primary"
+                >
+                  {readyCount}
+                </span>
+              ) : null}
             </Link>
           );
         })}

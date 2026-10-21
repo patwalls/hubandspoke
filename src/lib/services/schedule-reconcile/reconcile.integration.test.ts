@@ -1,7 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { accounts, productionItems, scheduledMatchSuggestions } from "@/lib/db/schema";
+import {
+  accounts,
+  contentEvents,
+  productionItems,
+  scheduledMatchSuggestions,
+} from "@/lib/db/schema";
 import {
   createTestAccount,
   createTestProductionItem,
@@ -14,6 +19,7 @@ import {
 import {
   runScheduleReconcile,
   runScheduleNodateReconcile,
+  runReadyToPublishReconcile,
   selectAccountsForScheduleSync,
 } from "./reconcile";
 
@@ -911,5 +917,123 @@ describe("runScheduleReconcile — needs-attention is not terminal", () => {
         ),
       );
     expect(suggestion.status).toBe("pending");
+  });
+});
+
+describe("runReadyToPublishReconcile", () => {
+  async function readyItem(accountId: string, readyAt: Date) {
+    const item = await createTestProductionItem({
+      accountId,
+      status: "Ready To Publish",
+      postType: "x",
+      sourceType: "cross_post",
+      publishedAt: null,
+      publishedDate: null,
+      title: "planned cross-post",
+    });
+    await db.insert(contentEvents).values({
+      contentItemId: item.id,
+      eventType: "status_change",
+      payload: { type: "status_change", from: "Review", to: "Ready To Publish" },
+      createdAt: readyAt,
+    });
+    return item;
+  }
+
+  it("merges a ≥85 sync-discovered post into the Ready item", async () => {
+    const acct = await createTestAccount();
+    const now = new Date();
+    const ready = await readyItem(acct.id, new Date(now.getTime() - 2 * HOUR));
+    const synced = await createTestProductionItem({
+      accountId: acct.id,
+      status: "Published",
+      postType: "x",
+      publishedAt: now,
+      publishedLink: "https://x.com/test/status/ready-1",
+      createdVia: "sync:account-content",
+    });
+
+    const summary = await runReadyToPublishReconcile({
+      client: stubClient(1, 92),
+      onlyItemIds: [ready.id],
+    });
+    expect(summary.autoMerged).toBe(1);
+
+    const [keeper] = await db
+      .select()
+      .from(productionItems)
+      .where(eq(productionItems.id, ready.id));
+    expect(keeper.status).toBe("Published");
+    expect(keeper.publishedLink).toBe("https://x.com/test/status/ready-1");
+    const [absorbed] = await db
+      .select({ deletedAt: productionItems.deletedAt })
+      .from(productionItems)
+      .where(eq(productionItems.id, synced.id));
+    expect(absorbed.deletedAt).not.toBeNull();
+  });
+
+  it("never offers a hand-made row or a post from before the item went ready", async () => {
+    const acct = await createTestAccount();
+    const now = new Date();
+    const ready = await readyItem(acct.id, new Date(now.getTime() - 2 * HOUR));
+    // Another plan the curator published by hand on the same account.
+    await createTestProductionItem({
+      accountId: acct.id,
+      status: "Published",
+      postType: "x",
+      publishedAt: now,
+      createdVia: "api:cross-post",
+    });
+    // A synced post, but from before this item was ready.
+    await createTestProductionItem({
+      accountId: acct.id,
+      status: "Published",
+      postType: "x",
+      publishedAt: new Date(now.getTime() - 5 * HOUR),
+      createdVia: "sync:account-content",
+    });
+
+    let called = false;
+    const client = {
+      messages: {
+        create: async () => {
+          called = true;
+          throw new Error("should not be asked");
+        },
+      },
+    } as never;
+    const summary = await runReadyToPublishReconcile({ client, onlyItemIds: [ready.id] });
+    expect(called).toBe(false);
+    expect(summary.skipped).toBe(1);
+  });
+
+  it("leaves a 55–84 match as a pending suggestion for the Publish screen", async () => {
+    const acct = await createTestAccount();
+    const now = new Date();
+    const ready = await readyItem(acct.id, new Date(now.getTime() - HOUR));
+    const cand = await createTestProductionItem({
+      accountId: acct.id,
+      status: "Published",
+      postType: "x",
+      publishedAt: now,
+      createdVia: "sync:account-content",
+    });
+
+    const summary = await runReadyToPublishReconcile({
+      client: stubClient(1, 70),
+      onlyItemIds: [ready.id],
+    });
+    expect(summary.suggested).toBe(1);
+
+    const rows = await db
+      .select()
+      .from(scheduledMatchSuggestions)
+      .where(eq(scheduledMatchSuggestions.scheduledItemId, ready.id));
+    expect(rows.map((r) => [r.candidateItemId, r.status])).toEqual([[cand.id, "pending"]]);
+    const [still] = await db
+      .select({ status: productionItems.status })
+      .from(productionItems)
+      .where(eq(productionItems.id, ready.id));
+    expect(still.status).toBe("Ready To Publish");
   });
 });

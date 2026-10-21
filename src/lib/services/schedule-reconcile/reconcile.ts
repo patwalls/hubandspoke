@@ -13,11 +13,12 @@
 //     (assume it was cancelled / will never publish)
 
 import type Anthropic from "@anthropic-ai/sdk";
-import { and, eq, gte, inArray, isNotNull, isNull, lte, or } from "drizzle-orm";
+import { and, eq, gte, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { accounts, productionItems, scheduledMatchSuggestions } from "@/lib/db/schema";
 import {
   findBestScheduledMatch,
+  loadMatchCandidates,
   type ScheduledItemForMatch,
 } from "./matcher";
 import { reconcileScheduledIntoPublished } from "@/lib/services/merge-production-items";
@@ -463,6 +464,133 @@ export async function runScheduleNodateReconcile(opts?: {
           .where(eq(productionItems.id, row.id));
         row.scheduleNeedsAttentionAt = null;
       }
+      summary.suggested++;
+    } else {
+      summary.skipped++;
+    }
+  }
+
+  return summary;
+}
+
+/**
+ * One pass over a brand-agnostic set of Ready To Publish items: "has this
+ * already gone live?" The curator often posts natively and never pastes the
+ * link back; the hourly account-content-sync then discovers the post as its
+ * own Published row. Same matcher + tier policy as the Scheduled sweep (≥85
+ * merge, 55–84 pending suggestion shown on the Publish screen row), with two
+ * differences: the window opens when the item entered Ready To Publish (its
+ * latest status_change, else created_at), and only sync-discovered rows are
+ * candidates. No needs-attention flagging — the Publish screen is that list.
+ * Called by the hourly publish-live-sweep.
+ */
+export async function runReadyToPublishReconcile(opts?: {
+  now?: Date;
+  client?: Anthropic;
+  onlyItemIds?: string[];
+}): Promise<ReconcileSummary> {
+  const now = opts?.now ?? new Date();
+  const summary: ReconcileSummary = {
+    considered: 0,
+    autoMerged: 0,
+    suggested: 0,
+    gaveUp: 0,
+    llmErrors: 0,
+    skipped: 0,
+  };
+
+  const items = await db
+    .select({
+      id: productionItems.id,
+      accountId: productionItems.accountId,
+      postType: productionItems.postType,
+      title: productionItems.title,
+      hook: productionItems.hook,
+      contentBody: productionItems.contentBody,
+      createdAt: productionItems.createdAt,
+      readyAt: sql<Date | null>`(
+        SELECT max(ce.created_at) FROM content_events ce
+        WHERE ce.content_item_id = ${productionItems.id}
+          AND ce.event_type = 'status_change'
+          AND ce.payload->>'to' = 'Ready To Publish'
+      )`.mapWith((v) => (v ? new Date(v as string) : null)),
+    })
+    .from(productionItems)
+    .where(
+      and(
+        eq(productionItems.status, "Ready To Publish"),
+        isNotNull(productionItems.accountId),
+        isNull(productionItems.deletedAt),
+        opts?.onlyItemIds && opts.onlyItemIds.length > 0
+          ? inArray(productionItems.id, opts.onlyItemIds)
+          : undefined,
+      ),
+    );
+
+  for (const row of items) {
+    summary.considered++;
+    const item: ScheduledItemForMatch = {
+      id: row.id,
+      accountId: row.accountId!,
+      postType: row.postType,
+      title: row.title,
+      hook: row.hook,
+      contentBody: row.contentBody,
+      scheduledAt: row.readyAt ?? row.createdAt,
+      expectedPublishAt: null,
+    };
+    const candidates = await loadMatchCandidates(item, { syncedOnly: true });
+    if (candidates.length === 0) {
+      summary.skipped++;
+      continue;
+    }
+    const result = await findBestScheduledMatch(item, {
+      client: opts?.client,
+      candidates,
+    });
+    if (!result.ok) {
+      summary.llmErrors++;
+      continue;
+    }
+    if (!result.value) {
+      summary.skipped++;
+      continue;
+    }
+
+    const { candidateId, score, reason } = result.value;
+    if (score >= AUTO_MATCH_SCORE) {
+      const merged = await reconcileScheduledIntoPublished(row.id, candidateId, null);
+      if (!merged.success) {
+        summary.skipped++;
+        continue;
+      }
+      summary.autoMerged++;
+      await db
+        .update(scheduledMatchSuggestions)
+        .set({ status: "superseded", resolvedAt: now, updatedAt: now })
+        .where(
+          and(
+            eq(scheduledMatchSuggestions.scheduledItemId, row.id),
+            eq(scheduledMatchSuggestions.status, "pending"),
+          ),
+        );
+    } else if (score >= SUGGEST_SCORE) {
+      await db
+        .insert(scheduledMatchSuggestions)
+        .values({
+          scheduledItemId: row.id,
+          candidateItemId: candidateId,
+          score,
+          reason,
+          status: "pending",
+        })
+        .onConflictDoUpdate({
+          target: [
+            scheduledMatchSuggestions.scheduledItemId,
+            scheduledMatchSuggestions.candidateItemId,
+          ],
+          set: { score, reason, status: "pending", updatedAt: now },
+        });
       summary.suggested++;
     } else {
       summary.skipped++;

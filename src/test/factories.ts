@@ -433,6 +433,8 @@ export async function createTestFormatTriggerSource(opts: {
 }
 
 export interface CreateTestProductionItemOptions {
+  /** e.g. "sync:account-content" for a row the account sync discovered. */
+  createdVia?: string | null;
   brand?: string;
   title?: string;
   status?: string;
@@ -539,6 +541,7 @@ export async function createTestProductionItem(
         opts.youtubeId === "auto" ? `vitest-${randomSuffix()}` : (opts.youtubeId ?? null),
       youtubeDownloadAttempts: opts.youtubeDownloadAttempts ?? 0,
       deletedAt: opts.deletedAt ?? null,
+      createdVia: opts.createdVia ?? null,
     })
     .returning();
   trackCleanup("productionItems", row.id);

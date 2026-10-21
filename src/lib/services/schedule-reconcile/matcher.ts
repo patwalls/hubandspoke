@@ -121,6 +121,12 @@ const TOOLS: Anthropic.Tool[] = [
  */
 export async function loadMatchCandidates(
   item: ScheduledItemForMatch,
+  opts: {
+    /** Only rows account-content-sync discovered (`created_via` sync:*).
+     *  The Ready To Publish pass needs this: a hand-published planning row on
+     *  the same account is another plan, never this one going live. */
+    syncedOnly?: boolean;
+  } = {},
 ): Promise<MatchCandidate[]> {
   const windowStart = new Date(item.scheduledAt.getTime() - PRE_SCHEDULE_GRACE_MS);
 
@@ -156,6 +162,9 @@ export async function loadMatchCandidates(
         sql`${productionItems.deletedAt} IS NULL`,
         ne(productionItems.id, item.id),
         sql`${productionItems.sourceType} IN ('original', 'cross_post', 'repurposed')`,
+        opts.syncedOnly
+          ? sql`${productionItems.createdVia} LIKE 'sync:%'`
+          : undefined,
         isNotNull(productionItems.publishedAt),
         gte(productionItems.publishedAt, windowStart),
         lte(productionItems.publishedAt, new Date()),

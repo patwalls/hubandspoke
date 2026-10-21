@@ -29,6 +29,19 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-10-21-publish-grouped-live",
+    shippedAt: "2026-10-21T23:30:00Z",
+    kind: "feature",
+    title: "Publish: grouped by video, caption copy, live posts spotted",
+    body:
+      "On the Publish tab, posts now sit under the video they came from, so you can post one video out to every " +
+      "platform in one go. Each post has Copy caption and Download media buttons. If a post is already live, " +
+      "Hub & Spoke finds it and asks \"That's it?\": one click marks it Published, nothing to paste. " +
+      "The Publish tab also shows how many posts are waiting.",
+    href: "/[brand]/publish",
+    screen: "/[brand]/publish",
+  },
+  {
     id: "2026-10-21-publish-screen",
     shippedAt: "2026-10-21T20:36:42Z",
     kind: "feature",
