@@ -5,7 +5,7 @@ import { db } from "@/lib/db";
 import { accounts, formats, newsletterDrafts, productionItems, transcripts } from "@/lib/db/schema";
 import { templateFor } from "@/lib/newsletter-template";
 import { formatConfigFor } from "./format-config";
-import { loadUsage, usageGroupFor, usageLabel } from "./usage";
+import { loadUsage, usageGroupFor, usageLabel, withInferredSources } from "./usage";
 import { computeWindow } from "./window";
 
 export interface NewsletterFormatOption {
@@ -107,8 +107,10 @@ export async function getNewsletterDraft(id: string) {
   if (!row) return null;
   const { formatTemplate, ...rest } = row;
   const config = formatConfigFor(row.formatName);
+  // Drafts written before the agent filled `source` get it from their links.
+  const sections = config.kind === "roundup" ? withInferredSources(row.sections, row.sources) : row.sections;
   // "N× before" for every section's story (this draft excluded from its own counts).
-  const withSources = row.sections.filter((x) => x.source?.key);
+  const withSources = sections.filter((x) => x.source?.key);
   const usage = withSources.length ? await loadUsage(usageGroupFor(row.formatName), { excludeDraftId: row.id }) : null;
   const sectionUsage: Record<string, { count: number; lastDate: string | null; label: string }> = {};
   for (const sec of withSources) {
@@ -117,6 +119,7 @@ export async function getNewsletterDraft(id: string) {
   }
   return {
     ...rest,
+    sections,
     specialLabel: config.promo?.label ?? null,
     kind: config.kind,
     template: templateFor(row.formatName, formatTemplate),

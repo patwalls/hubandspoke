@@ -3,7 +3,7 @@ import { storyKeyOf, submissionProblem, type NewsletterSubmission } from "./agen
 import { groupFromEmailName } from "./history";
 import { toStoredSections } from "./run";
 import { newStoryExclusions } from "./section";
-import { blockedKeys, caseStudyKey, extractStoryRefs, isEvergreenOk, usageLabel, youtubeIdFromUrl } from "./usage";
+import { blockedKeys, caseStudyKey, extractStoryRefs, isEvergreenOk, usageLabel, withInferredSources, youtubeIdFromUrl } from "./usage";
 import { DEFAULT_TEMPLATES } from "@/lib/newsletter-template";
 
 describe("story keys from links", () => {
@@ -97,5 +97,39 @@ describe("enforcing the rules on a submission", () => {
       { key: "eggs", markdown: "", source: { kind: "case_study" as const, key: "case:/stories/eggs", title: null, url: null } },
     ];
     expect([...newStoryExclusions(sections, "coffee")].sort()).toEqual(["case:/stories/before", "case:/stories/eggs", "case:/stories/now"]);
+  });
+});
+
+describe("withInferredSources", () => {
+  const sources = [
+    { kind: "video" as const, productionItemId: "v1", title: "Main video", url: "https://www.youtube.com/watch?v=RSlhgyAXsBI" },
+    { kind: "video" as const, productionItemId: "v2", title: "Second", url: "https://youtu.be/uvIcGuN2iO8" },
+  ];
+
+  it("fills a course's story from its link, matching youtu.be to watch links and case studies by path", () => {
+    const out = withInferredSources(
+      [
+        { key: "orange_juice", markdown: "**Hook**\n\n[Watch the whole story here](https://youtu.be/RSlhgyAXsBI)" },
+        { key: "coffee", markdown: "[Check it out](https://www.youtube.com/watch?v=uvIcGuN2iO8&t=4)" },
+        { key: "eggs", markdown: "[Read it](https://www.starterstory.com/stories/myzia-io?_kx=1)" },
+        { key: "signoff", markdown: "That's it!" },
+      ],
+      sources,
+    );
+    expect(out.map((s) => s.source?.key ?? null)).toEqual(["video:v1", "video:v2", "case:/stories/myzia-io", null]);
+    expect(out[0].source?.title).toBe("Main video");
+  });
+
+  it("keeps an explicit source, and gives a story teased in the intro to its full section", () => {
+    const explicit = { kind: "case_study" as const, key: "case:/stories/x", title: "X", url: null };
+    const out = withInferredSources(
+      [
+        { key: "intro", markdown: "This week's [episode](https://youtu.be/RSlhgyAXsBI)." },
+        { key: "orange_juice", markdown: "A much longer write-up of the episode, with the link at the end. [Watch](https://youtu.be/RSlhgyAXsBI)" },
+        { key: "coffee", markdown: "[Watch](https://youtu.be/uvIcGuN2iO8)", source: explicit },
+      ],
+      sources,
+    );
+    expect(out.map((s) => s.source?.key ?? null)).toEqual([null, "video:v1", "case:/stories/x"]);
   });
 });

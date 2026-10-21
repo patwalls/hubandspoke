@@ -13,7 +13,8 @@
 
 import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { formats, newsletterDrafts, newsletterIssueHistory, productionItems } from "@/lib/db/schema";
+import { formats, newsletterDrafts, newsletterIssueHistory, productionItems, type NewsletterDraftSource } from "@/lib/db/schema";
+import type { NewsletterSection } from "@/lib/newsletter-template";
 import { formatConfigFor, groupFormatNames } from "./format-config";
 
 /** Never reuse a story this newsletter ran within this many days of the new issue's send date. */
@@ -75,6 +76,48 @@ export function extractStoryRefs(html: string): { caseKeys: string[]; youtubeIds
     if (y) youtubeIds.add(y);
   }
   return { caseKeys: [...caseKeys], youtubeIds: [...youtubeIds] };
+}
+
+/**
+ * Sections with no `source` get one from the story link in their Markdown, matched
+ * against the issue's `sources` (videos by YouTube id, case studies by path; a
+ * starterstory.com story link not in `sources` still counts). The agent doesn't
+ * always fill `source`, but every course links its story. A story linked from
+ * several sections (an intro teasing the main video) stays with the longest one.
+ * Pure; exported for tests.
+ */
+export function withInferredSources(sections: NewsletterSection[], sources: NewsletterDraftSource[]): NewsletterSection[] {
+  const inferred = new Map<string, NewsletterSection["source"]>();
+  for (const sec of sections) {
+    if (sec.source?.key) continue;
+    const links = [...sec.markdown.matchAll(/https?:\/\/[^\s)\]>"]+/g)].map((m) => m[0]);
+    for (const link of links) {
+      const yt = youtubeIdFromUrl(link);
+      const video = yt ? sources.find((x) => x.kind === "video" && youtubeIdFromUrl(x.url) === yt) : undefined;
+      if (video?.kind === "video") {
+        inferred.set(sec.key, { kind: "video", key: `video:${video.productionItemId}`, title: video.title ?? null, url: video.url ?? null });
+        break;
+      }
+      const ck = caseStudyKey(link);
+      if (ck) {
+        const cs = sources.find((x) => x.kind === "case_study" && caseStudyKey(x.url) === ck);
+        inferred.set(sec.key, { kind: "case_study", key: ck, title: cs?.title ?? null, url: cs?.url ?? link });
+        break;
+      }
+    }
+  }
+  const claimed = new Set(sections.map((x) => x.source?.key).filter(Boolean));
+  const owner = new Map<string, NewsletterSection>();
+  for (const sec of sections) {
+    const k = inferred.get(sec.key)?.key;
+    if (!k || claimed.has(k)) continue;
+    const cur = owner.get(k);
+    if (!cur || sec.markdown.length > cur.markdown.length) owner.set(k, sec);
+  }
+  return sections.map((sec) => {
+    const src = inferred.get(sec.key);
+    return src && owner.get(src.key) === sec ? { ...sec, source: src } : sec;
+  });
 }
 
 /** YouTube ids → "video:<production item id>" keys (ids with no matching item are dropped). */

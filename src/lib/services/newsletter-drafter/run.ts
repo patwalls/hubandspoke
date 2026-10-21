@@ -7,7 +7,7 @@ import { eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { brands, formats, newsletterDrafts, type NewsletterDraftSource } from "@/lib/db/schema";
 import { NEWSLETTER_MODEL, runNewsletterAgent, storyKeyOf, type NewsletterSubmission } from "./agent";
-import { blockedKeys, loadUsage, usageGroupFor } from "./usage";
+import { blockedKeys, loadUsage, usageGroupFor, withInferredSources } from "./usage";
 import { composeIssue, templateFor, type NewsletterSection } from "@/lib/newsletter-template";
 import { formatConfigFor } from "./format-config";
 import { findSpecial } from "./promo";
@@ -132,6 +132,7 @@ export async function runNewsletterDraft(
     const sources = video
       ? [{ kind: "video" as const, productionItemId: video.productionItemId, title: video.title, url: video.url }]
       : toStoredSources(s.sources);
+    const sections = template ? withInferredSources(toStoredSections(s.sections ?? []), sources) : [];
     await db
       .update(newsletterDrafts)
       .set({
@@ -139,10 +140,10 @@ export async function runNewsletterDraft(
         subjectOptions: s.subject_options,
         subject: s.subject,
         previewText: s.preview_text,
-        sections: template ? toStoredSections(s.sections ?? []) : [],
+        sections,
         // Templated: the composed issue (what the HubSpot push sends); free-form: the agent's body.
         bodyMarkdown: template
-          ? composeIssue(template, toStoredSections(s.sections ?? []), sponsored ? { copy: sponsored.copy, landingUrl: sponsored.source.landingUrl } : null)
+          ? composeIssue(template, sections, sponsored ? { copy: sponsored.copy, landingUrl: sponsored.source.landingUrl } : null)
           : (s.body_markdown ?? ""),
         revision: sql`${newsletterDrafts.revision} + 1`,
         regenerating: [],

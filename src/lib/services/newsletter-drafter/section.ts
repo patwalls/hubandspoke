@@ -10,7 +10,7 @@ import { db } from "@/lib/db";
 import { brands, formats, newsletterDrafts } from "@/lib/db/schema";
 import { composeIssue, templateFor, type NewsletterSection } from "@/lib/newsletter-template";
 import { regenerateSection, storyKeyOf } from "./agent";
-import { blockedKeys, loadUsage, usageGroupFor } from "./usage";
+import { blockedKeys, loadUsage, usageGroupFor, withInferredSources } from "./usage";
 import { formatConfigFor } from "./format-config";
 import { loadSourceVideo } from "./run";
 
@@ -79,6 +79,8 @@ export async function regenerateDraftSection(
 
   try {
     const config = formatConfigFor(row.formatName);
+    // Drafts written before the agent filled `source` get it from their links (and keep it on save).
+    if (config.kind === "roundup") row.sections = withInferredSources(row.sections, row.sources);
     const [brand] = await db
       .select({ label: brands.label, guidelines: brands.brandGuidelines })
       .from(brands)
