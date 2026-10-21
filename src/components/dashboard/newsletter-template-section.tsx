@@ -118,21 +118,6 @@ export function NewsletterTemplateSection({ formatId }: { formatId: string }) {
   );
 }
 
-function ColorField({ label, value, onChange, allowNone }: { label: string; value: string | null; onChange: (v: string | null) => void; allowNone?: boolean }) {
-  return (
-    <label className="flex items-center gap-2 text-xs">
-      <span className="w-28 shrink-0 text-muted-foreground">{label}</span>
-      <input type="color" className="h-7 w-9 cursor-pointer rounded border" value={value ?? "#ffffff"} onChange={(e) => onChange(e.target.value)} />
-      <Input className="h-7 w-24 font-mono text-xs" value={value ?? ""} placeholder={allowNone ? "none" : ""} onChange={(e) => onChange(e.target.value || (allowNone ? null : "#000000"))} />
-      {allowNone && value && (
-        <button type="button" className="text-muted-foreground underline" onClick={() => onChange(null)}>
-          none
-        </button>
-      )}
-    </label>
-  );
-}
-
 function TemplateEditorDialog({
   formatId,
   initial,
@@ -151,8 +136,9 @@ function TemplateEditorDialog({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const dirty = JSON.stringify(t) !== JSON.stringify(initial);
+  /** The section fills a block in the HubSpot template email (its key is that link). */
+  const mapped = (key: string) => !!t.hubspot?.blocks[key];
 
-  const setStyle = (patch: Partial<NewsletterTemplate["style"]>) => setT({ ...t, style: { ...t.style, ...patch } });
   const setSec = (i: number, patch: Partial<NewsletterTemplateSection>) => setT({ ...t, sections: t.sections.map((s, j) => (j === i ? { ...s, ...patch } : s)) });
   const move = (i: number, d: -1 | 1) => {
     const next = [...t.sections];
@@ -200,32 +186,13 @@ function TemplateEditorDialog({
         <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,460px)_minmax(0,1fr)]">
           <div className="flex min-h-0 flex-col gap-5 overflow-y-auto border-r p-5">
             <section className="flex flex-col gap-2">
-              <span className="text-sm font-medium">Look</span>
-              <label className="flex flex-col gap-1 text-xs">
-                <span className="text-muted-foreground">Masthead image URL</span>
-                <Input className="h-8 text-xs" value={t.style.mastheadImageUrl ?? ""} placeholder="https://… (empty = no masthead)" onChange={(e) => setStyle({ mastheadImageUrl: e.target.value || null })} />
-              </label>
-              <label className="flex flex-col gap-1 text-xs">
-                <span className="text-muted-foreground">Masthead link</span>
-                <Input className="h-8 text-xs" value={t.style.mastheadLinkUrl ?? ""} placeholder="https://…" onChange={(e) => setStyle({ mastheadLinkUrl: e.target.value || null })} />
-              </label>
-              <ColorField label="Masthead background" value={t.style.mastheadBackground} allowNone onChange={(v) => setStyle({ mastheadBackground: v })} />
-              <label className="flex flex-col gap-1 text-xs">
-                <span className="text-muted-foreground">Font</span>
-                <Input className="h-8 text-xs" value={t.style.fontFamily} onChange={(e) => setStyle({ fontFamily: e.target.value })} />
-              </label>
-              <ColorField label="Text" value={t.style.textColor} onChange={(v) => setStyle({ textColor: v ?? "#616161" })} />
-              <ColorField label="Headings" value={t.style.headingColor} onChange={(v) => setStyle({ headingColor: v ?? "#030212" })} />
-              <ColorField label="Links" value={t.style.linkColor} onChange={(v) => setStyle({ linkColor: v ?? "#197bbd" })} />
-              <ColorField label="Page background" value={t.style.pageBackground} onChange={(v) => setStyle({ pageBackground: v ?? "#f4f4f5" })} />
-              <label className="flex items-center gap-2 text-xs">
-                <input type="checkbox" checked={t.style.dividers} onChange={(e) => setStyle({ dividers: e.target.checked })} />
-                <span>Dividers between sections</span>
-              </label>
-            </section>
-
-            <section className="flex flex-col gap-2">
               <span className="text-sm font-medium">Sections</span>
+              {t.hubspot && (
+                <p className="text-xs text-muted-foreground">
+                  The look (masthead, colors, course labels, footer) comes from the HubSpot template email; only each section&apos;s text is sent
+                  to it.
+                </p>
+              )}
               <p className="rounded-md bg-muted/60 p-2 text-xs text-muted-foreground">
                 {storyCtx.singleVideoNote ??
                   "Each section's Story setting says where the drafter looks for it (this week's newest videos, case studies, a recent video…); its instructions say what to pick and how to write it. It's the usual shape, not a quota, and a story this newsletter ran in the last 3 weeks is never reused."}
@@ -244,20 +211,19 @@ function TemplateEditorDialog({
                   {open === i && (
                     <div className="flex flex-col gap-2 border-t px-3 py-3">
                       <label className="flex flex-col gap-1 text-xs">
-                        <span className="text-muted-foreground">Heading (empty = the section writes its own)</span>
+                        <span className="text-muted-foreground">Section name (empty = the section writes its own headline)</span>
                         <Input className="h-8 text-xs" value={sec.heading ?? ""} onChange={(e) => setSec(i, { heading: e.target.value || null })} />
                       </label>
                       <div className="flex flex-wrap gap-2">
                         <label className="flex flex-col gap-1 text-xs">
                           <span className="text-muted-foreground">Key</span>
-                          <Input className="h-8 w-36 font-mono text-xs" value={sec.key} onChange={(e) => setSec(i, { key: e.target.value })} />
-                        </label>
-                        <label className="flex flex-col gap-1 text-xs">
-                          <span className="text-muted-foreground">Size</span>
-                          <select className="h-8 rounded-md border border-input bg-background px-1 text-xs" value={sec.headingLevel} onChange={(e) => setSec(i, { headingLevel: Number(e.target.value) as 2 | 3 })}>
-                            <option value={2}>Large</option>
-                            <option value={3}>Small</option>
-                          </select>
+                          <Input
+                            className="h-8 w-36 font-mono text-xs"
+                            value={sec.key}
+                            readOnly={mapped(sec.key)}
+                            title={mapped(sec.key) ? "Linked to a HubSpot block, so it can't be renamed" : undefined}
+                            onChange={(e) => setSec(i, { key: e.target.value })}
+                          />
                         </label>
                         <label className="flex flex-col gap-1 text-xs">
                           <span className="text-muted-foreground">Type</span>
@@ -283,8 +249,12 @@ function TemplateEditorDialog({
                           </select>
                         </label>
                       )}
-                      <ColorField label="Heading pill" value={sec.pillColor} allowNone onChange={(v) => setSec(i, { pillColor: v })} />
-                      <ColorField label="Content box" value={sec.boxColor} allowNone onChange={(v) => setSec(i, { boxColor: v })} />
+                      {t.hubspot && !mapped(sec.key) && (
+                        <p className="rounded-md bg-amber-50 p-2 text-xs text-amber-900 dark:bg-amber-900/30 dark:text-amber-200">
+                          Not linked to a block in the HubSpot template email yet, so this section is drafted here but won&apos;t appear in the
+                          HubSpot draft. Ask to have it linked.
+                        </p>
+                      )}
                       <label className="flex flex-col gap-1 text-xs">
                         <span className="text-muted-foreground">Instructions: what the drafter picks and writes here</span>
                         <Textarea className="min-h-20 text-xs" value={sec.hint} onChange={(e) => setSec(i, { hint: e.target.value })} />
