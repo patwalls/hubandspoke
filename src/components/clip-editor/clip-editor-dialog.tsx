@@ -64,6 +64,7 @@ import { framingFor, useFraming } from "./framing";
 import { TranscriptEditor, type SpeakerLabels } from "./transcript-editor";
 import { speakerColor, speakerLabel } from "@/components/dashboard/transcript-speakers";
 import { Transport } from "./transport";
+import { trackUsage } from "@/lib/usage/track";
 
 const AUTOSAVE_DELAY_MS = 900;
 
@@ -87,6 +88,10 @@ export function ClipEditorDialog({
   onUnsupported,
 }: ClipEditorDialogProps) {
   const [session, setSession] = useState<ClipEditorSession | null>(null);
+
+  useEffect(() => {
+    if (open) trackUsage("modal:clip-editor", brand);
+  }, [open, brand]);
 
   useEffect(() => {
     if (!open || !clipIdeaId) {

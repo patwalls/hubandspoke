@@ -73,6 +73,7 @@ import { DesignPostPreview } from "./post-preview";
 import { Inspector, PicturePicker, formatSec, frameCandidate } from "./inspector";
 import { PageCanvas, PlaybackContext, type PlaybackState } from "./page-canvas";
 import { DesignStoreContext, commands, createDesignStore, useDesign, useDesignStoreApi } from "./store";
+import { trackUsage } from "@/lib/usage/track";
 
 const AUTOSAVE_DELAY_MS = 900;
 const FRAMES_POLL_MS = 2500;
@@ -99,6 +100,10 @@ export interface DesignEditorDialogProps {
 
 export function DesignEditorDialog({ open, onOpenChange, productionItemId, brand, onDone, onUnsupported }: DesignEditorDialogProps) {
   const [session, setSession] = useState<DesignEditorSession | null>(null);
+
+  useEffect(() => {
+    if (open) trackUsage("modal:design-editor", brand);
+  }, [open, brand]);
 
   useEffect(() => {
     if (!open) {

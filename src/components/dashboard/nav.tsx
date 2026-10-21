@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { signOut } from "next-auth/react";
+import { OPEN_WHATS_NEW_EVENT } from "@/components/dashboard/whats-new-dialog";
 import { LayoutGrid, SearchIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NotificationBell } from "@/components/notifications/notification-bell";
@@ -314,6 +315,12 @@ export function DashboardNav({
                   className="cursor-pointer"
                 >
                   Settings
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => window.dispatchEvent(new Event(OPEN_WHATS_NEW_EVENT))}
+                  className="cursor-pointer"
+                >
+                  What&apos;s new
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem

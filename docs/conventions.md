@@ -360,6 +360,18 @@ It needs no secrets (Sentry source-map upload skips itself without
   `.github/` is left for a human, since it could rewrite what `build` checks.
 - Third-party actions are pinned by commit SHA; Dependabot bumps the pins.
 
+## Shipping a user-facing feature: What's new + usage
+
+- **Tell people.** Add a card at the TOP of `src/lib/whats-new/entries.ts` (newest first, unique
+  `<YYYY-MM-DD>-<slug>` id, `shippedAt` = now in ISO). Plain words for editors, not engineers.
+  A feature behind a flag or admin-only names it in `audience`, or people who can't use it get the pop-up.
+- **Make it measurable.** Routes are tracked automatically (`UsageTracker`). Something that isn't a
+  route — a modal, a panel, a button that matters — calls `trackUsage("<area>:<thing>")` from
+  `src/lib/usage/track.ts` when it opens, and the card's `screen` names that mark or route pattern,
+  so the next look at `usage_events` can say whether it landed.
+- `screenFor()` (src/lib/usage/screen.ts) decides what a URL is stored as. A new route param that
+  identifies a record must collapse to `[id]` there — never store raw ids or free text.
+
 ## End-to-end testing (Playwright)
 
 E2e tests live in `tests/e2e/`. They drive a real Chromium against

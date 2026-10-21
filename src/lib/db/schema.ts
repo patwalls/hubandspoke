@@ -1817,6 +1817,10 @@ export const users = pgTable(
     contentRole: text("content_role", {
       enum: ["producer", "curator", "member"],
     }),
+    // Last time this user dismissed the "What's new" pop-up. Entries in
+    // src/lib/whats-new/entries.ts shipped after this (or after createdAt when
+    // null) pop up on their next page load. See docs/features.md → What's new.
+    whatsNewSeenAt: timestamp("whats_new_seen_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -1825,6 +1829,33 @@ export const users = pgTable(
       .notNull(),
   },
   (table) => [uniqueIndex("idx_users_email_lower").on(sql`lower(${table.email})`)]
+);
+
+// One row per screen a signed-in user opened (route-level, recorded by
+// UsageTracker in the dashboard layout) plus explicit `trackUsage()` marks for
+// things that aren't routes — an editor opened, a What's new card clicked. The
+// product loop (`/build`) reads this through the read-only `loop_ro` role to
+// see what people actually use. Screen names come from `screenFor()` in
+// src/lib/usage/screen.ts — patterns, never raw ids or free text.
+export const usageEvents = pgTable(
+  "usage_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+    // "view" (a route) or "action" (a trackUsage mark).
+    kind: text("kind", { enum: ["view", "action"] }).notNull().default("view"),
+    // `/[brand]/queue/clips?tab=ready`, `modal:clip-editor`, `whats-new:click:<id>`.
+    screen: text("screen").notNull(),
+    // The brand slug the screen was opened under (`all` included), else null.
+    brand: text("brand"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("idx_usage_events_created").on(table.createdAt),
+    index("idx_usage_events_user_created").on(table.userId, table.createdAt),
+  ],
 );
 
 export const invites = pgTable(

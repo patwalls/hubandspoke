@@ -1,5 +1,6 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
 import { Toaster } from "sonner";
 import { eq } from "drizzle-orm";
 import { DashboardNav, SectionTabs } from "@/components/dashboard/nav";
@@ -7,10 +8,13 @@ import { ScCreditsBanner } from "@/components/dashboard/sc-credits-banner";
 import { DescriptCreditsBanner } from "@/components/dashboard/descript-credits-banner";
 import { ScheduledAttentionBanner } from "@/components/dashboard/scheduled-attention-banner";
 import { SentryUser } from "@/components/sentry-user";
+import { UsageTracker } from "@/components/dashboard/usage-tracker";
+import { WhatsNewDialog, type WhatsNewCard } from "@/components/dashboard/whats-new-dialog";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { getBrands, getDefaultBrandSlug } from "@/lib/db/brands";
 import { setSentrySessionUser } from "@/lib/sentry-user";
+import { hrefFor, unseenFor, visibleTo, type WhatsNewEntry } from "@/lib/whats-new";
 
 export default async function DashboardLayout({
   children,
@@ -25,7 +29,12 @@ export default async function DashboardLayout({
 
   const [userRow] = session.user.id
     ? await db
-        .select({ name: users.name, avatarUrl: users.avatarUrl })
+        .select({
+          name: users.name,
+          avatarUrl: users.avatarUrl,
+          whatsNewSeenAt: users.whatsNewSeenAt,
+          createdAt: users.createdAt,
+        })
         .from(users)
         .where(eq(users.id, session.user.id))
         .limit(1)
@@ -49,6 +58,22 @@ export default async function DashboardLayout({
     color: "from-slate-700 to-slate-900",
     disabled: false,
   };
+  // What's new: the cards this user hasn't seen pop up once; the nav menu
+  // reopens the full list. Links get the default brand filled in.
+  const viewer = { email: session.user.email, role: session.user.role };
+  const toCard = (e: WhatsNewEntry): WhatsNewCard => ({
+    id: e.id,
+    shippedAt: e.shippedAt,
+    kind: e.kind,
+    title: e.title,
+    body: e.body,
+    href: hrefFor(e, defaultBrand),
+  });
+  const whatsNewUnseen = userRow
+    ? unseenFor(viewer, userRow.whatsNewSeenAt, userRow.createdAt).map(toCard)
+    : [];
+  const whatsNewAll = visibleTo(viewer).slice(0, 30).map(toCard);
+
   const brands = [
     allEntry,
     ...brandRows.map((b) => ({
@@ -83,6 +108,10 @@ export default async function DashboardLayout({
         <ScheduledAttentionBanner />
         {children}
       </main>
+      <Suspense fallback={null}>
+        <UsageTracker />
+      </Suspense>
+      <WhatsNewDialog unseen={whatsNewUnseen} all={whatsNewAll} />
       <Toaster position="bottom-right" richColors closeButton />
     </div>
   );
