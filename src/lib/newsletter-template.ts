@@ -86,13 +86,80 @@ export const hubspotMappingSchema = z.object({
 export type HubspotMapping = z.infer<typeof hubspotMappingSchema>;
 
 /**
- * Where a draft goes in beehiiv (Futurepedia): whose edition it is — Kevin
- * (Futurepedia channel) or Saj (Skill Leap). The push (beehiiv-draft.ts)
- * rebuilds the Kevin/Saj template's cards as native blocks under that author;
- * it only ever creates an unsent draft.
+ * The beehiiv email's layout (Futurepedia): the Kevin/Saj template's cards,
+ * rebuilt as native blocks by the push (beehiiv-draft.ts) and drawn by the
+ * format page's preview — one definition, so what you see is what lands in
+ * beehiiv. Each card is a bordered section with an optional blue label
+ * ("{tool} Guide" — {tool} = the tool named in the Why section) holding one or
+ * more template sections. The base beehiiv template supplies fonts + footer.
+ */
+export const beehiivCardSchema = z.object({
+  label: z.string().max(80).default(""),
+  border: color.default("#273653"),
+  background: color.default("#FFFFFF"),
+  sections: z
+    .array(
+      z.object({
+        key: z.string().min(1).max(40),
+        /** Show the section's name as a heading inside the card (e.g. "How We Did It"). */
+        showHeading: z.boolean().default(false),
+        /** A line that is only a link becomes a button (the offer CTA, "Watch The Full Video"). */
+        linkButtons: z.boolean().default(false),
+      }),
+    )
+    .default([]),
+});
+export type BeehiivCard = z.infer<typeof beehiivCardSchema>;
+
+export const beehiivLayoutSchema = z.object({
+  mastheadImageUrl: z.string().url().nullable().default(null),
+  outroImageUrl: z.string().url().nullable().default(null),
+  /** Card labels ("Claude Guide", "Free Resource"). */
+  labelColor: color.default("#00AEEF"),
+  buttonColor: color.default("#273653"),
+  /** The "How was Futurepedia today?" feedback poll after the cards. */
+  poll: z.boolean().default(true),
+  cards: z.array(beehiivCardSchema).min(1).max(12),
+});
+export type BeehiivLayout = z.infer<typeof beehiivLayoutSchema>;
+
+const BEEHIIV_IMG = "https://media.beehiiv.com/cdn-cgi/image/fit=scale-down,format=auto,onerror=redirect,quality=80,width=1920,height=3840/uploads/asset/file";
+const NAVY = "#273653";
+const BLUE = "#00AEEF";
+/** The Kevin/Saj template's layout, read off both templates 2026-10-21. */
+export const DEFAULT_BEEHIIV_LAYOUT: BeehiivLayout = {
+  mastheadImageUrl: `${BEEHIIV_IMG}/b45bfe96-6326-4341-b2e9-60f6f12a0768/Futurepedia_Masthead.png`,
+  outroImageUrl: `${BEEHIIV_IMG}/c6c68c83-619a-439a-9406-b2246b1aa1f6/Futurepedia_Outro_Pic.png`,
+  labelColor: BLUE,
+  buttonColor: NAVY,
+  poll: true,
+  cards: [
+    { label: "", border: NAVY, background: "#FFFFFF", sections: [{ key: "intro", showHeading: false, linkButtons: false }] },
+    {
+      label: "{tool} Guide",
+      border: BLUE,
+      background: "#FCFCFC",
+      sections: [
+        { key: "article", showHeading: false, linkButtons: false },
+        { key: "why", showHeading: false, linkButtons: false },
+        { key: "steps", showHeading: true, linkButtons: false },
+      ],
+    },
+    { label: "Free Resource", border: NAVY, background: "#FFFFFF", sections: [{ key: "free_resource", showHeading: false, linkButtons: true }] },
+    { label: "{tool} Guide Continued", border: BLUE, background: "#FFFFFF", sections: [{ key: "steps_continued", showHeading: false, linkButtons: true }] },
+    { label: "Use Cases", border: NAVY, background: "#FFFFFF", sections: [{ key: "use_cases", showHeading: false, linkButtons: false }] },
+    { label: "Bonus Tips", border: BLUE, background: "#FFFFFF", sections: [{ key: "bonus_tips", showHeading: false, linkButtons: false }] },
+  ],
+};
+
+/**
+ * Where a draft goes in beehiiv (Futurepedia): whose edition it is (Kevin /
+ * Saj — the video's channel overrides it for the one-format newsletter) and
+ * the email's card layout. The push only ever creates an unsent draft.
  */
 export const beehiivMappingSchema = z.object({
   author: z.enum(["kevin", "saj"]),
+  layout: beehiivLayoutSchema.default(DEFAULT_BEEHIIV_LAYOUT),
 });
 export type BeehiivMapping = z.infer<typeof beehiivMappingSchema>;
 
@@ -263,7 +330,7 @@ export const DEFAULT_TEMPLATES: Record<string, NewsletterTemplate> = {
         version: 1 as const,
         style: NEUTRAL_STYLE,
         hubspot: null,
-        beehiiv: { author },
+        beehiiv: { author, layout: DEFAULT_BEEHIIV_LAYOUT },
         sections: [
           s("intro", null, "2 to 4 short first-person lines in the channel voice, the signature on its own line, then a one-line teaser text link to the Free Resource offer."),
           s("article", null, "The article headline as an H2 (the how-to, benefit-first), the video thumbnail as a Markdown image, then the one-line concrete example."),

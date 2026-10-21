@@ -66,7 +66,7 @@ const plain = (runs: TextRun[]) => runs.map((r) => r.text).join("");
  * bold) becomes a button — the offer CTA and "Watch The Full Video" — instead
  * of a text link.
  */
-export function markdownToBlocks(md: string, opts: { buttons?: boolean } = {}): Block[] {
+export function markdownToBlocks(md: string, opts: { buttons?: boolean; buttonColor?: string } = {}): Block[] {
   const blocks: Block[] = [];
   let list: TextRun[][] = [];
   const flushList = () => {
@@ -107,7 +107,7 @@ export function markdownToBlocks(md: string, opts: { buttons?: boolean } = {}): 
         href: linkOnly[2],
         alignment: "left",
         target: "_blank",
-        visual_settings: { background_color: "#273653", text_color: "#FFFFFF" },
+        visual_settings: { background_color: opts.buttonColor ?? "#273653", text_color: "#FFFFFF" },
       });
       continue;
     }

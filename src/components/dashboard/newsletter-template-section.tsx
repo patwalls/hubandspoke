@@ -16,7 +16,15 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useFeatureFlags } from "@/components/clip-editor/use-feature-flags";
 import { EmailPreview } from "@/components/dashboard/email-preview";
-import { STORY_KIND_LABELS, STORY_KINDS, type NewsletterTemplate, type NewsletterTemplateSection, type StoryKind } from "@/lib/newsletter-template";
+import {
+  STORY_KIND_LABELS,
+  STORY_KINDS,
+  type BeehiivCard,
+  type BeehiivLayout,
+  type NewsletterTemplate,
+  type NewsletterTemplateSection,
+  type StoryKind,
+} from "@/lib/newsletter-template";
 
 /** Story settings context from the template API. */
 interface StoryContext {
@@ -185,6 +193,8 @@ function TemplateEditorDialog({
         </div>
         <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,460px)_minmax(0,1fr)]">
           <div className="flex min-h-0 flex-col gap-5 overflow-y-auto border-r p-5">
+            {t.beehiiv?.layout && <BeehiivLayoutEditor template={t} onChange={(layout) => setT({ ...t, beehiiv: { ...t.beehiiv!, layout } })} />}
+
             <section className="flex flex-col gap-2">
               <span className="text-sm font-medium">Sections</span>
               {t.hubspot && (
@@ -304,5 +314,158 @@ function TemplateEditorDialog({
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** A hex color: swatch + text field. */
+function HexField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  return (
+    <label className="flex items-center gap-2 text-xs">
+      <span className="w-24 shrink-0 text-muted-foreground">{label}</span>
+      <input type="color" className="h-7 w-9 cursor-pointer rounded border" value={value} onChange={(e) => onChange(e.target.value)} />
+      <Input className="h-7 w-24 font-mono text-xs" value={value} onChange={(e) => onChange(e.target.value)} />
+    </label>
+  );
+}
+
+/**
+ * The beehiiv email's card layout (Futurepedia): what the push builds and the
+ * preview draws. Each card: an optional label ("{tool} Guide" — {tool} is the
+ * tool named in the Why section), its border/background, and which sections
+ * it holds (a section sits in one card).
+ */
+function BeehiivLayoutEditor({ template, onChange }: { template: NewsletterTemplate; onChange: (layout: BeehiivLayout) => void }) {
+  const layout = template.beehiiv!.layout;
+  const [open, setOpen] = useState<number | null>(null);
+  const set = (patch: Partial<BeehiivLayout>) => onChange({ ...layout, ...patch });
+  const setCard = (i: number, patch: Partial<BeehiivCard>) => set({ cards: layout.cards.map((c, j) => (j === i ? { ...c, ...patch } : c)) });
+  const moveCard = (i: number, d: -1 | 1) => {
+    const next = [...layout.cards];
+    const [x] = next.splice(i, 1);
+    next.splice(i + d, 0, x);
+    set({ cards: next });
+    setOpen(i + d);
+  };
+  /** Put a section in card i (taking it out of any other card), or take it out. */
+  const toggleSection = (i: number, key: string, on: boolean) =>
+    set({
+      cards: layout.cards.map((c, j) => {
+        const rest = c.sections.filter((x) => x.key !== key);
+        if (j !== i) return { ...c, sections: on ? rest : c.sections };
+        if (!on) return { ...c, sections: rest };
+        const order = template.sections.map((x) => x.key);
+        const added = [...rest, { key, showHeading: false, linkButtons: false }];
+        return { ...c, sections: added.sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key)) };
+      }),
+    });
+  const setSectionOpt = (i: number, key: string, patch: { showHeading?: boolean; linkButtons?: boolean }) =>
+    setCard(i, { sections: layout.cards[i].sections.map((x) => (x.key === key ? { ...x, ...patch } : x)) });
+  const placed = new Set(layout.cards.flatMap((c) => c.sections.map((x) => x.key)));
+  const unplaced = template.sections.filter((x) => !placed.has(x.key));
+  const nameOf = (key: string) => template.sections.find((x) => x.key === key)?.heading || key.replace(/_/g, " ");
+
+  return (
+    <section className="flex flex-col gap-2">
+      <span className="text-sm font-medium">beehiiv layout</span>
+      <p className="rounded-md bg-muted/60 p-2 text-xs text-muted-foreground">
+        How the email is laid out in beehiiv: the cards, their colors and labels, and which sections go in each. The preview shows it; Create beehiiv
+        draft builds exactly this. Fonts and the footer come from the &ldquo;Hub &amp; Spoke&rdquo; template in beehiiv. Use {"{tool}"} in a label for the
+        tool named in the Why section.
+      </p>
+      <label className="flex flex-col gap-1 text-xs">
+        <span className="text-muted-foreground">Masthead image URL</span>
+        <Input className="h-8 text-xs" value={layout.mastheadImageUrl ?? ""} placeholder="https://… (empty = none)" onChange={(e) => set({ mastheadImageUrl: e.target.value || null })} />
+      </label>
+      <label className="flex flex-col gap-1 text-xs">
+        <span className="text-muted-foreground">Outro image URL</span>
+        <Input className="h-8 text-xs" value={layout.outroImageUrl ?? ""} placeholder="https://… (empty = none)" onChange={(e) => set({ outroImageUrl: e.target.value || null })} />
+      </label>
+      <HexField label="Card labels" value={layout.labelColor} onChange={(v) => set({ labelColor: v })} />
+      <HexField label="Buttons" value={layout.buttonColor} onChange={(v) => set({ buttonColor: v })} />
+      <label className="flex items-center gap-2 text-xs">
+        <input type="checkbox" checked={layout.poll} onChange={(e) => set({ poll: e.target.checked })} />
+        <span>&ldquo;How was Futurepedia today?&rdquo; poll after the cards</span>
+      </label>
+      {layout.cards.map((c, i) => (
+        <div key={i} className="rounded-md border" style={{ borderLeft: `4px solid ${c.border}` }}>
+          <button type="button" className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm" onClick={() => setOpen(open === i ? null : i)}>
+            {open === i ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
+            <span className="flex-1 truncate">{c.label || <span className="text-muted-foreground">(no label)</span>}</span>
+            <span className="truncate text-[10px] text-muted-foreground">{c.sections.map((x) => nameOf(x.key)).join(", ") || "empty"}</span>
+          </button>
+          {open === i && (
+            <div className="flex flex-col gap-2 border-t px-3 py-3">
+              <label className="flex flex-col gap-1 text-xs">
+                <span className="text-muted-foreground">Label (empty = none)</span>
+                <Input className="h-8 text-xs" value={c.label} onChange={(e) => setCard(i, { label: e.target.value })} />
+              </label>
+              <HexField label="Border" value={c.border} onChange={(v) => setCard(i, { border: v })} />
+              <HexField label="Background" value={c.background} onChange={(v) => setCard(i, { background: v })} />
+              <div className="flex flex-col gap-1 text-xs">
+                <span className="text-muted-foreground">Sections in this card</span>
+                {template.sections.map((sec) => {
+                  const inThis = c.sections.find((x) => x.key === sec.key);
+                  return (
+                    <div key={sec.key} className="flex flex-wrap items-center gap-3">
+                      <label className="flex items-center gap-1.5">
+                        <input type="checkbox" checked={!!inThis} onChange={(e) => toggleSection(i, sec.key, e.target.checked)} />
+                        <span>{nameOf(sec.key)}</span>
+                      </label>
+                      {inThis && sec.heading && (
+                        <label className="flex items-center gap-1 text-muted-foreground">
+                          <input type="checkbox" checked={inThis.showHeading} onChange={(e) => setSectionOpt(i, sec.key, { showHeading: e.target.checked })} />
+                          show its name as a heading
+                        </label>
+                      )}
+                      {inThis && (
+                        <label className="flex items-center gap-1 text-muted-foreground">
+                          <input type="checkbox" checked={inThis.linkButtons} onChange={(e) => setSectionOpt(i, sec.key, { linkButtons: e.target.checked })} />
+                          links on their own line become buttons
+                        </label>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="flex items-center gap-1">
+                <Button size="icon-xs" variant="ghost" onClick={() => moveCard(i, -1)} disabled={i === 0} aria-label="Move card up">
+                  <ArrowUp />
+                </Button>
+                <Button size="icon-xs" variant="ghost" onClick={() => moveCard(i, 1)} disabled={i === layout.cards.length - 1} aria-label="Move card down">
+                  <ArrowDown />
+                </Button>
+                <Button
+                  size="icon-xs"
+                  variant="ghost"
+                  onClick={() => {
+                    set({ cards: layout.cards.filter((_, j) => j !== i) });
+                    setOpen(null);
+                  }}
+                  disabled={layout.cards.length === 1}
+                  aria-label="Remove card"
+                >
+                  <Trash2 />
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+      ))}
+      {unplaced.length > 0 && (
+        <p className="rounded-md bg-amber-50 p-2 text-xs text-amber-900 dark:bg-amber-900/30 dark:text-amber-200">
+          Not in any card: {unplaced.map((x) => nameOf(x.key)).join(", ")}. They&apos;re added in a plain card at the end.
+        </p>
+      )}
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={() => {
+          set({ cards: [...layout.cards, { label: "New card", border: "#273653", background: "#FFFFFF", sections: [] }] });
+          setOpen(layout.cards.length);
+        }}
+      >
+        <Plus /> Add card
+      </Button>
+    </section>
   );
 }

@@ -91,4 +91,46 @@ describe("beehiiv draft request", () => {
     expect(cards[3].blocks!.at(-1)).toMatchObject({ type: "button", href: "https://youtu.be/x" });
     expect(cards[2].blocks!.at(-1)).toMatchObject({ type: "button", href: "https://example.com/guide" });
   });
+
+  it("builds from the template's layout: relabel a card, move a section, drop the poll", () => {
+    const base = DEFAULT_TEMPLATES["how-to newsletter - skill leap (pilot)"];
+    const layout = base.beehiiv!.layout;
+    const edited = {
+      ...base,
+      beehiiv: {
+        ...base.beehiiv!,
+        layout: {
+          ...layout,
+          poll: false,
+          outroImageUrl: null,
+          // Use Cases + Bonus Tips merged into one "Extras" card.
+          cards: [
+            ...layout.cards.slice(0, 4),
+            { label: "Extras", border: "#111111", background: "#FFFFFF", sections: [{ key: "use_cases", showHeading: true, linkButtons: false }, { key: "bonus_tips", showHeading: true, linkButtons: false }] },
+          ],
+        },
+      },
+    };
+    const out = buildBeehiivDraftRequest({
+      template: edited,
+      subject: "S",
+      previewText: null,
+      sendDate: "2026-10-30",
+      sections: [
+        { key: "intro", markdown: "Hi" },
+        { key: "why", markdown: "### Why Claude Works" },
+        { key: "use_cases", markdown: "- one" },
+        { key: "bonus_tips", markdown: "- two" },
+      ],
+      sponsor: null,
+      thumbnailUrl: null,
+    }) as { blocks: B[] };
+    const cards = out.blocks.filter((b) => b.type === "section");
+    const last = cards.at(-1)!;
+    expect((last.blocks![0] as { formattedText: { text: string }[] }).formattedText[0].text).toBe("Extras");
+    expect(last.visual_settings).toMatchObject({ border_color: "#111111" });
+    expect(last.blocks!.filter((b) => b.type === "heading").map((h) => (h as { text?: string }).text)).toEqual([undefined, "Use Cases", "Bonus Tips"]);
+    expect(out.blocks.some((b) => b.type === "poll" || (b.blocks ?? []).some((x) => x.type === "poll"))).toBe(false);
+    expect(out.blocks.filter((b) => b.type === "image")).toHaveLength(1); // masthead only
+  });
 });

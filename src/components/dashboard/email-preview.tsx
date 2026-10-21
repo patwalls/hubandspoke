@@ -7,6 +7,7 @@
 
 import type { CSSProperties } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
+import { BeehiivPreview } from "@/components/dashboard/beehiiv-preview";
 import { emailCss, sponsorBlock, type CssProps, type NewsletterSection, type NewsletterTemplate } from "@/lib/newsletter-template";
 
 const asStyle = (c: CssProps) => c as CSSProperties;
@@ -29,6 +30,10 @@ export function EmailPreview({
   clipHeight?: number;
   className?: string;
 }) {
+  // beehiiv formats (Futurepedia): draw the card layout the push builds.
+  if (template.beehiiv?.layout) {
+    return <BeehiivPreview template={template} sections={sections} sponsor={sponsor} showHints={showHints} scale={scale} clipHeight={clipHeight} className={className} />;
+  }
   const st = template.style;
   const css = emailCss(st);
   const t = css.tags;
