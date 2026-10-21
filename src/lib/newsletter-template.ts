@@ -41,8 +41,8 @@ export const STORY_KINDS = ["none", "newest_video", "recent_video", "case_study"
 export type StoryKind = (typeof STORY_KINDS)[number];
 export const STORY_KIND_LABELS: Record<StoryKind, string> = {
   none: "No story (intro, sign-off…)",
-  newest_video: "Newest video of the week",
-  recent_video: "A recent video",
+  newest_video: "Most recent video",
+  recent_video: "Another recent video",
   case_study: "Case study (else a recent video)",
   any: "Video or case study",
 };
