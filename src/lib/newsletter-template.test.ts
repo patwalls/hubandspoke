@@ -14,6 +14,7 @@ const sec = (key: string, heading: string | null, extra: Partial<NewsletterTempl
 const T: NewsletterTemplate = {
   version: 1,
   style: styleSchema.parse({}),
+  hubspot: null,
   sections: [sec("intro", null), sec("special", "The Special 🍽️", { kind: "sponsor" }), sec("tips", "Bonus Tips", { headingLevel: 3 })],
 };
 
@@ -45,5 +46,24 @@ describe("newsletter templates", () => {
     expect(composeIssue(T, sections, { copy: "Sponsor copy", landingUrl: "https://lp.example" })).toContain(
       "## The Special 🍽️\n\nSponsor copy\n\n**[Check it out HERE](https://lp.example)**",
     );
+  });
+});
+
+describe("blockMarkdown", () => {
+  it("fills each mapped email-tool block in template order, stacking sections that share a block, sponsor copy first", async () => {
+    const { blockMarkdown, DEFAULT_TEMPLATES } = await import("./newsletter-template");
+    const t = DEFAULT_TEMPLATES["sunday breakfast"];
+    const out = blockMarkdown(
+      t,
+      [
+        { key: "pancakes", markdown: "Pancakes teaser" },
+        { key: "signoff", markdown: "That's it!" },
+        { key: "special", markdown: "agent fallback" },
+      ],
+      { copy: "Free CRM", landingUrl: null },
+    );
+    expect(out[t.hubspot!.blocks.pancakes]).toBe("Pancakes teaser\n\nThat's it!");
+    expect(out[t.hubspot!.blocks.special]).toBe("Free CRM");
+    expect(Object.keys(out)).toHaveLength(2);
   });
 });

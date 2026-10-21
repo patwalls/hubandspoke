@@ -1,41 +1,31 @@
 import { describe, expect, it } from "vitest";
-import { BODY_MARKER, assertAllowedHubspotCall, buildBodyWidgetPatch, templateEmailIdFor } from "./hubspot-marketing-email";
+import { assertAllowedHubspotCall, buildWidgets } from "./hubspot-marketing-email";
 
-describe("templateEmailIdFor", () => {
-  const env = { HUBSPOT_NEWSLETTER_TEMPLATE_EMAILS: JSON.stringify({ "Daily Seinfeld": "111", "Sunday Breakfast": 222 }) };
-
-  it("matches the format name case-insensitively and accepts numeric ids", () => {
-    expect(templateEmailIdFor("daily seinfeld", env)).toBe("111");
-    expect(templateEmailIdFor("Sunday Breakfast", env)).toBe("222");
-  });
-
-  it("returns null for an unknown format, a missing env var, or malformed JSON", () => {
-    expect(templateEmailIdFor("Playbook", env)).toBeNull();
-    expect(templateEmailIdFor("Daily Seinfeld", {})).toBeNull();
-    expect(templateEmailIdFor("Daily Seinfeld", { HUBSPOT_NEWSLETTER_TEMPLATE_EMAILS: "{nope" })).toBeNull();
-  });
-});
-
-describe("buildBodyWidgetPatch", () => {
-  it("replaces only the module holding the marker, keeping its other settings", () => {
-    const email = {
-      id: "9",
-      content: {
-        widgets: {
-          header: { body: { html: "<p>Logo</p>" } },
-          main: { type: "rich_text", body: { html: `<p>${BODY_MARKER}</p>`, css_class: "x" } },
-        },
+describe("buildWidgets", () => {
+  const email = {
+    id: "9",
+    content: {
+      widgets: {
+        masthead: { body: { path: "@hubspot/image_email" } },
+        intro: { body: { path: "@hubspot/rich_text", html: "<p>old</p>", css_class: "x" } },
+        label: { body: { label_text: "The Orange Juice 🍊" } },
+        preview_text: { body: { value: "old preview" } },
       },
-    };
-    expect(buildBodyWidgetPatch(email, "<p>Hello</p>")).toEqual({
-      main: { type: "rich_text", body: { html: "<p>Hello</p>", css_class: "x" } },
-    });
+    },
+  };
+
+  it("fills the mapped rich-text blocks and preview text, and sends every other widget unchanged", () => {
+    const out = buildWidgets(email, { intro: "<p>new</p>" }, "Starter Story Sunday Breakfast");
+    expect(out.intro).toEqual({ body: { path: "@hubspot/rich_text", html: "<p>new</p>", css_class: "x" } });
+    expect(out.preview_text.body?.value).toBe("Starter Story Sunday Breakfast");
+    expect(out.masthead).toEqual(email.content.widgets.masthead);
+    expect(out.label).toEqual(email.content.widgets.label);
+    expect(Object.keys(out)).toHaveLength(4);
   });
 
-  it("fails loudly when the template has no marker module", () => {
-    expect(() => buildBodyWidgetPatch({ id: "9", content: { widgets: { a: { body: { html: "x" } } } } }, "y")).toThrow(
-      /has no rich-text module/,
-    );
+  it("fails loudly on a stale mapping: a missing block, or one that isn't rich text", () => {
+    expect(() => buildWidgets(email, { gone: "<p>x</p>" }, null)).toThrow(/has no block gone/);
+    expect(() => buildWidgets(email, { label: "<p>x</p>" }, null)).toThrow(/isn't a rich-text block/);
   });
 });
 

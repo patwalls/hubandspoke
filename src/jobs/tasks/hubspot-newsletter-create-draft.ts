@@ -8,9 +8,9 @@ import type { Task } from "graphile-worker";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { formats, newsletterDrafts } from "@/lib/db/schema";
-import { createDraftEmailFromTemplate, templateEmailIdFor } from "@/lib/hubspot-marketing-email";
+import { createDraftEmailFromTemplate } from "@/lib/hubspot-marketing-email";
 import { markdownToEmailHtml } from "@/lib/newsletter-email-html";
-import { SPECIAL_MARKER, composeBody } from "@/lib/services/newsletter-drafter/special-compose";
+import { blockMarkdown, templateFor } from "@/lib/newsletter-template";
 
 export interface HubspotNewsletterCreateDraftPayload {
   newsletterDraftId: string;
@@ -23,12 +23,16 @@ export const hubspotNewsletterCreateDraftTask: Task = async (rawPayload, helpers
       id: newsletterDrafts.id,
       status: newsletterDrafts.status,
       subject: newsletterDrafts.subject,
+      previewText: newsletterDrafts.previewText,
+      sendDate: newsletterDrafts.sendDate,
+      sections: newsletterDrafts.sections,
       bodyMarkdown: newsletterDrafts.bodyMarkdown,
       specialCopy: newsletterDrafts.specialCopy,
       specialSource: newsletterDrafts.specialSource,
       hubspotEmailId: newsletterDrafts.hubspotEmailId,
       createdAt: newsletterDrafts.createdAt,
       formatName: formats.name,
+      formatTemplate: formats.newsletterTemplate,
     })
     .from(newsletterDrafts)
     .innerJoin(formats, eq(formats.id, newsletterDrafts.formatId))
@@ -46,18 +50,21 @@ export const hubspotNewsletterCreateDraftTask: Task = async (rawPayload, helpers
     helpers.logger.info(`hubspot-newsletter-create-draft: ${row.id} failed: ${message}`);
   };
 
-  if (row.status !== "ready" || !row.subject || !row.bodyMarkdown) return fail("draft is not ready");
-  const body = composeBody(row.bodyMarkdown, { copy: row.specialCopy, landingUrl: row.specialSource?.landingUrl ?? null });
-  if (body.includes(SPECIAL_MARKER)) return fail("The Special has no copy yet — pull it from Asana or fill it in first");
-  const templateEmailId = templateEmailIdFor(row.formatName);
-  if (!templateEmailId) return fail(`no HubSpot template email configured for "${row.formatName}" (HUBSPOT_NEWSLETTER_TEMPLATE_EMAILS)`);
+  if (row.status !== "ready" || !row.subject) return fail("draft is not ready");
+  const template = templateFor(row.formatName, row.formatTemplate);
+  if (!template?.hubspot) return fail(`"${row.formatName}" has no HubSpot template email set up yet`);
+  const sponsor = row.specialCopy ? { copy: row.specialCopy, landingUrl: row.specialSource?.landingUrl ?? null } : null;
+  const blocks = blockMarkdown(template, row.sections, sponsor);
+  if (Object.keys(blocks).length === 0) return fail("this draft has no sections to send (redraft it with the template)");
+  const blockHtml = Object.fromEntries(Object.entries(blocks).map(([id, md]) => [id, markdownToEmailHtml(md)]));
 
   try {
     const email = await createDraftEmailFromTemplate({
-      templateEmailId,
-      name: `${row.formatName} — ${row.subject} (${new Date().toISOString().slice(0, 10)})`,
+      templateEmailId: template.hubspot.templateEmailId,
+      name: `${row.formatName} — ${row.subject} (${row.sendDate ?? new Date().toISOString().slice(0, 10)}) · Hub & Spoke draft`,
       subject: row.subject,
-      bodyHtml: markdownToEmailHtml(body),
+      previewText: row.previewText,
+      blockHtml,
     });
     await db
       .update(newsletterDrafts)

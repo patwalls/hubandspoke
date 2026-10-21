@@ -3,26 +3,21 @@
 // draft. It never publishes, schedules or sends — those stay manual in
 // HubSpot.
 //
-// Approach: clone the format's template email (an existing, fully styled
-// email in portal 53), then replace the template's body marker with the
-// draft. The template's rich-text module must contain the literal text
-// `[[NEWSLETTER_BODY]]`; that module's HTML is swapped for the draft body.
-// Square brackets (not `{{ }}`) so HubL never interprets the marker.
-//
-// ASSUMED SHAPE — confirm against a real portal-53 email (read-only GET)
-// before the first push: `POST /marketing/v3/emails/clone` with
-// `{ id, cloneName }`, `PATCH /marketing/v3/emails/{id}` accepting `name`,
-// `subject` and `content.widgets`, and rich-text widgets storing their HTML
-// at `widgets[key].body.html`. If any of these differ, adjust here only.
+// Approach: copy the format's TEMPLATE EMAIL (a fully styled, never-sent
+// email in the account, e.g. "[TEMPLATE] Sunday Breakfast – Hub & Spoke (do
+// not send)"), then fill the rich-text blocks the format's newsletter template
+// maps its sections to (`template.hubspot.blocks`), plus the subject and the
+// preview text. Everything else in the copy — masthead, course labels,
+// dividers, footer — stays exactly as the template email has it. Confirmed
+// against account 20627419 on 2026-10-21: clone returns a DRAFT with the same
+// widget ids; PATCH accepts name / subject / content.widgets.
 //
 // Env:
-//   HUBSPOT_PORTAL_53_ACCESS_TOKEN   private-app / service-key token (marketing email scopes)
-//   HUBSPOT_NEWSLETTER_TEMPLATE_EMAILS  JSON map of format name → template email id,
-//                                       e.g. {"Daily Seinfeld":"123","Sunday Breakfast":"456"}
+//   HUBSPOT_PORTAL_53_ACCESS_TOKEN   service key with ONLY the `content` scope
+//                                    (account 20627419 despite the name)
 
 const BASE_URL = "https://api.hubapi.com";
-export const HUBSPOT_PORTAL_ID = "53";
-export const BODY_MARKER = "[[NEWSLETTER_BODY]]";
+export const HUBSPOT_PORTAL_ID = "20627419";
 
 export class HubspotEmailError extends Error {
   readonly status: number;
@@ -36,23 +31,6 @@ function token(): string {
   const t = process.env.HUBSPOT_PORTAL_53_ACCESS_TOKEN;
   if (!t) throw new HubspotEmailError(503, "HUBSPOT_PORTAL_53_ACCESS_TOKEN not set");
   return t;
-}
-
-/** Template email id for a format, from HUBSPOT_NEWSLETTER_TEMPLATE_EMAILS. Case-insensitive. */
-export function templateEmailIdFor(
-  formatName: string,
-  env: Record<string, string | undefined> = process.env,
-): string | null {
-  const raw = env.HUBSPOT_NEWSLETTER_TEMPLATE_EMAILS;
-  if (!raw) return null;
-  let map: Record<string, unknown>;
-  try {
-    map = JSON.parse(raw) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-  const hit = Object.entries(map).find(([k]) => k.trim().toLowerCase() === formatName.trim().toLowerCase());
-  return hit && (typeof hit[1] === "string" || typeof hit[1] === "number") ? String(hit[1]) : null;
 }
 
 export function emailEditUrl(emailId: string): string {
@@ -107,7 +85,7 @@ async function hubspotFetch<T>(path: string, init: { method: "GET" | "POST" | "P
 }
 
 interface Widget {
-  body?: { html?: string; [k: string]: unknown };
+  body?: { html?: string; path?: string; value?: string; [k: string]: unknown };
   [k: string]: unknown;
 }
 export interface HubspotEmail {
@@ -119,38 +97,48 @@ export interface HubspotEmail {
 }
 
 /**
- * The `content.widgets` patch that swaps the marker module's HTML for the
- * draft body. Pure — exported for tests. Throws when the template has no
- * module containing BODY_MARKER, so a misconfigured template fails loudly
- * instead of producing an email with the template's placeholder copy.
+ * The full `content.widgets` for the copy: every widget unchanged except the
+ * filled rich-text blocks and the preview text. Sends ALL widgets so a PATCH
+ * can never drop one. Throws when a mapped block is missing or isn't a
+ * rich-text block, so a stale mapping fails loudly instead of producing a
+ * half-filled email. Pure — exported for tests.
  */
-export function buildBodyWidgetPatch(email: HubspotEmail, bodyHtml: string): Record<string, Widget> {
-  const widgets = email.content?.widgets ?? {};
-  const key = Object.keys(widgets).find((k) => widgets[k]?.body?.html?.includes(BODY_MARKER));
-  if (!key) {
-    throw new HubspotEmailError(422, `template email ${email.id} has no rich-text module containing ${BODY_MARKER}`);
+export function buildWidgets(
+  email: HubspotEmail,
+  blockHtml: Record<string, string>,
+  previewText: string | null,
+): Record<string, Widget> {
+  const widgets: Record<string, Widget> = { ...(email.content?.widgets ?? {}) };
+  for (const [id, html] of Object.entries(blockHtml)) {
+    const w = widgets[id];
+    if (!w) throw new HubspotEmailError(422, `template email ${email.id} has no block ${id} — update the format's HubSpot mapping`);
+    if (w.body?.path !== "@hubspot/rich_text") throw new HubspotEmailError(422, `block ${id} in template email ${email.id} isn't a rich-text block`);
+    widgets[id] = { ...w, body: { ...w.body, html } };
   }
-  const widget = widgets[key];
-  return { [key]: { ...widget, body: { ...widget.body, html: bodyHtml } } };
+  if (previewText !== null && widgets.preview_text) {
+    widgets.preview_text = { ...widgets.preview_text, body: { ...widgets.preview_text.body, value: previewText } };
+  }
+  return widgets;
 }
 
 export async function createDraftEmailFromTemplate(args: {
   templateEmailId: string;
   name: string;
   subject: string;
-  bodyHtml: string;
+  previewText: string | null;
+  /** HubSpot widget id → HTML for that rich-text block. */
+  blockHtml: Record<string, string>;
 }): Promise<{ id: string; editUrl: string }> {
   const clone = await hubspotFetch<HubspotEmail>("/marketing/v3/emails/clone", {
     method: "POST",
     body: { id: args.templateEmailId, cloneName: args.name },
   });
-  // Re-read rather than trusting the clone response to carry full content.
-  const full = await hubspotFetch<HubspotEmail>(`/marketing/v3/emails/${clone.id}`, { method: "GET" });
-  const widgets = buildBodyWidgetPatch(full, args.bodyHtml);
   // Belt and braces: only ever edit the email this call just created, never the template.
   if (String(clone.id) === String(args.templateEmailId)) {
     throw new HubspotEmailError(500, "clone returned the template's own id; refusing to edit the template");
   }
+  const full = await hubspotFetch<HubspotEmail>(`/marketing/v3/emails/${clone.id}`, { method: "GET" });
+  const widgets = buildWidgets(full, args.blockHtml, args.previewText);
   await hubspotFetch<HubspotEmail>(`/marketing/v3/emails/${clone.id}`, {
     method: "PATCH",
     body: { name: args.name, subject: args.subject, content: { widgets } },

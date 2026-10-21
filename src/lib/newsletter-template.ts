@@ -49,10 +49,25 @@ export const sectionSchema = z.object({
   boxColor: color.nullable().default(null),
 });
 
+/**
+ * Where each section goes in the email tool's own template email (HubSpot
+ * today): the push copies `templateEmailId` and fills each mapped rich-text
+ * block. Several sections may share a block (Sunday Breakfast's sign-off goes
+ * at the end of the Pancakes block). Unmapped blocks (masthead, labels,
+ * dividers, the fixed footer) are left exactly as they are in the template.
+ */
+export const hubspotMappingSchema = z.object({
+  templateEmailId: z.string().regex(/^\d+$/, "the HubSpot email id (digits)"),
+  /** section key → HubSpot widget id of the rich-text block it fills. */
+  blocks: z.record(z.string(), z.string().min(1)),
+});
+export type HubspotMapping = z.infer<typeof hubspotMappingSchema>;
+
 export const newsletterTemplateSchema = z
   .object({
     version: z.literal(1),
     style: styleSchema.default(styleSchema.parse({})),
+    hubspot: hubspotMappingSchema.nullable().default(null),
     sections: z.array(sectionSchema).min(1).max(20),
   })
   .refine((t) => new Set(t.sections.map((s) => s.key)).size === t.sections.length, "section keys must be unique")
@@ -103,13 +118,28 @@ export const DEFAULT_TEMPLATES: Record<string, NewsletterTemplate> = {
   "sunday breakfast": {
     version: 1,
     style: STARTER_STORY_STYLE,
+    // HubSpot account 20627419: "[TEMPLATE] Sunday Breakfast – Hub & Spoke (do
+    // not send)", a copy of the Oct 11 2026 issue. Block ids read off that email.
+    hubspot: {
+      templateEmailId: "225070550319",
+      blocks: {
+        intro: "module_17900293533527",
+        orange_juice: "module_17900290499731",
+        coffee: "module_17900291783105",
+        special: "module_17900294859938",
+        eggs: "module_17900291707464",
+        toast: "module_17900290992183",
+        pancakes: "module_17900290904092",
+        signoff: "module_17900290904092",
+      },
+    },
     sections: [
       s("intro", null, "'Hey!' then 3 to 8 short personal lines from Pat about his week, ending with 'Welcome to Sunday Breakfast!!' (or similar)."),
       s("orange_juice", "The Orange Juice 🍊", `The week's flagship YouTube video. ${COURSE_HINT}`, { pillColor: "#fed7aa" }),
       s("coffee", "The Coffee ☕", `A second video or a strong case study. ${COURSE_HINT}`, { pillColor: "#fae8ff" }),
       s("special", "The Special 🍽️", "The sponsored promo, or a lead magnet pitched like an ad when no sponsor is booked.", { kind: "sponsor", pillColor: "#fae8ff", boxColor: "#EBECFC" }),
       s("eggs", "The Eggs 🍳", `A case study. ${COURSE_HINT}`, { pillColor: "#fef9c3" }),
-      s("toast", "The Toast 🥪", `A case study or video. ${COURSE_HINT}`, { pillColor: "#dcfce7" }),
+      s("toast", "The Toast 🍞", `A case study or video. ${COURSE_HINT}`, { pillColor: "#dcfce7" }),
       s("pancakes", "The Pancakes 🥞", `A case study or video. ${COURSE_HINT}`, { pillColor: "#e0f2fe" }),
       s("signoff", null, "'That's it!', a one-line weekend wish, then 'Pat' and 'Founder, StarterStory.com' on their own lines. No footer."),
     ],
@@ -117,6 +147,7 @@ export const DEFAULT_TEMPLATES: Record<string, NewsletterTemplate> = {
   "daily seinfeld": {
     version: 1,
     style: { ...STARTER_STORY_STYLE, dividers: false },
+    hubspot: null,
     sections: [
       s("story", null, "'Read time: N sec.' on the first line, then the one story or observation and its lesson, in short lines."),
       s("pitch", null, "The pivot from the lesson to the offer from the editor's notes (or a CTA to the episode/case study when there is none), the CTA link, then '– Pat'. No footer."),
@@ -128,6 +159,7 @@ export const DEFAULT_TEMPLATES: Record<string, NewsletterTemplate> = {
       {
         version: 1 as const,
         style: NEUTRAL_STYLE,
+        hubspot: null,
         sections: [
           s("intro", null, "2 to 4 short first-person lines in the channel voice, the signature on its own line, then a one-line teaser text link to the Free Resource offer."),
           s("article", null, "The article headline as an H2 (the how-to, benefit-first), the video thumbnail as a Markdown image, then the one-line concrete example."),
@@ -229,4 +261,31 @@ export function emailCss(st: NewsletterStyle) {
       code: { fontFamily: "Menlo, monospace", fontSize: 14, background: "#f4f4f5", padding: "1px 4px", borderRadius: 3 },
     } satisfies Record<string, CssProps>,
   };
+}
+
+/**
+ * The Markdown for each mapped email-tool block: every section mapped to the
+ * block, in template order, joined by a blank line (the sponsor section uses
+ * the promo copy when there is one). Headings are not included — the email
+ * tool's template carries them (Sunday Breakfast's course labels). Pure.
+ */
+export function blockMarkdown(
+  template: NewsletterTemplate,
+  sections: NewsletterSection[],
+  sponsor: ComposeSponsor | null,
+): Record<string, string> {
+  if (!template.hubspot) return {};
+  const byKey = new Map(sections.map((x) => [x.key, x.markdown]));
+  const out: Record<string, string> = {};
+  for (const sec of template.sections) {
+    const block = template.hubspot.blocks[sec.key];
+    if (!block) continue;
+    const md =
+      sec.kind === "sponsor" && sponsor?.copy?.trim()
+        ? sponsorBlock(sponsor.copy, sponsor.landingUrl)
+        : (byKey.get(sec.key) ?? "").trim();
+    if (!md) continue;
+    out[block] = out[block] ? `${out[block]}\n\n${md}` : md;
+  }
+  return out;
 }
