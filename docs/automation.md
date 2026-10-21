@@ -1565,6 +1565,10 @@ Regression guard: `src/lib/services/underlord-auto-fire.regression.test.ts` grep
 - **Env:** `HUBSPOT_PORTAL_53_ACCESS_TOKEN` — service key for account **20627419** (the name predates finding the right account) with the **`content` scope ONLY**. HubSpot's Marketing Email API rejected a `marketing-email` key with `MISSING_SCOPES — one of marketing.email.read / marketing.email.write / content`; service keys only offer `content`. `HUBSPOT_NEWSLETTER_TEMPLATE_EMAILS` is no longer used (the template email lives on the format's template).
 - **Failure:** NOT re-thrown (a HubSpot 4xx won't fix itself, and a retry after a successful clone would leave a second email): writes `hubspot_status=failed` + `hubspot_error`; the page shows it and the button stays available.
 
+### beehiiv (Futurepedia) — read-only client (2026-10-21)
+
+- `src/lib/beehiiv.ts`, key `BEEHIIV_API_KEY` (Heroku config; beehiiv keys can't be scoped and this one covers every publication in the workspace). **Read-only allowlist** (`assertAllowedBeehiivCall`, path + every query param checked): list publications; the Futurepedia publication's (`pub_535435b5…`) posts, one post, post templates, one template, and the Skill Leap members segment's details. Everything else is refused before a request is sent: any write (create / update / delete / publish), subscribers, segment members/results, other publications, `stats` expands. No task uses it yet; draft create/update is a separate reviewed allowlist change.
+
 ### `design-style-extract` — a published cover read into a cover STYLE (2026-10-14, flag `designEditor`)
 
 - **Why:** Pat (2026-10-14): the AI drafting a cover from scratch is "not deterministic enough"; what he wants is a gallery of the covers we've already posted, and "click one and it recreates that in the editor". So a style is read ONCE into a fixed template (deterministic from then on) and applying it is only the per-post text fill.
