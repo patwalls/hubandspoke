@@ -6,7 +6,9 @@
 // "<Tool> Guide" card (headline, thumbnail, example, Why <Tool> Works, How We
 // Did It) → navy Free Resource card → blue "<Tool> Guide Continued" card
 // (ending in the Watch The Full Video button) → navy Use Cases → blue Bonus
-// Tips → outro image → navy feedback-poll card → the HubSpot Media cross-promo.
+// Tips → outro image → navy feedback-poll card. The base template ("Hub &
+// Spoke", an emptied copy of the Saj template) supplies the fonts, colors and
+// footer (social icons, HubSpot Media cross-promo, privacy, unsubscribe).
 // Mirrors the team's Claude-skill push: subject + preview from the draft, slug
 // "<subject>-MM-DD-YYYY", display flags off, free tier, Skill Leap members
 // excluded, headings never bold. If the team redesigns the template, update
@@ -20,13 +22,6 @@ const MASTHEAD = `${IMG}/b45bfe96-6326-4341-b2e9-60f6f12a0768/Futurepedia_Masthe
 const OUTRO = `${IMG}/c6c68c83-619a-439a-9406-b2246b1aa1f6/Futurepedia_Outro_Pic.png`;
 const NAVY = "#273653";
 const BLUE = "#00AEEF";
-const CROSS_PROMO: [string, string, string][] = [
-  ["Business as unusual", "The Hustle", "https://thehustle.co/join"],
-  ["Grow your business", "Starter Story", "https://www.starterstory.com/"],
-  ["Expert insights", "Marketing Against the Grain", "https://marketingagainstthegrain.com/subscribe"],
-  ["Sell better", "The Science of Scaling", "https://blog.hubspot.com/the-science-of-scaling-subscribe"],
-  ["Making AI make sense", "Mindstream", "https://mindstream.news/subscribe"],
-];
 
 /** A template card: a bordered section (navy or blue border, as the Kevin/Saj templates alternate). */
 function card(border: string, background: string, blocks: Block[]): Block {
@@ -92,11 +87,6 @@ export function buildBeehiivDraftRequest(args: {
     card(BLUE, "#FFFFFF", [eyebrow("Bonus Tips"), ...blocks("bonus_tips")]),
     { type: "image", imageUrl: OUTRO, alt_text: "Futurepedia" },
     card(NAVY, "#FFFFFF", [heading3("How was Futurepedia today?"), { type: "poll", poll_id: HOWTO_POLL_ID }]),
-    { type: "paragraph", formattedText: [{ text: "Subscribe to HubSpot Media's other newsletters:", styling: ["bold"] }] },
-    ...CROSS_PROMO.map(([lead, name, href]): Block => ({
-      type: "paragraph",
-      formattedText: [{ text: `${lead}: ` }, { text: name, link: { href, target: "_blank" } }],
-    })),
   ];
   const nonEmpty = content.filter((b) => b.type !== "section" || (b.blocks as Block[]).length > 1);
   return {

@@ -100,7 +100,15 @@ export function markdownToBlocks(md: string, opts: { buttons?: boolean } = {}): 
     const linkOnly = line.match(/^(?:\*\*)?\[([^\]]+)\]\(([^)\s]+)\)(?:\*\*)?$/);
     if (linkOnly && opts.buttons) {
       const text = linkOnly[1].replace(/\s*(->|→)\s*$/, "").replace(/\*\*/g, "").trim();
-      blocks.push({ type: "button", text: `${text} →`, href: linkOnly[2], alignment: "left", target: "_blank" });
+      // The Kevin/Saj templates' buttons: navy #273653, white text (unset, beehiiv shows its own pink/black).
+      blocks.push({
+        type: "button",
+        text: `${text} →`,
+        href: linkOnly[2],
+        alignment: "left",
+        target: "_blank",
+        visual_settings: { background_color: "#273653", text_color: "#FFFFFF" },
+      });
       continue;
     }
     blocks.push({ type: "paragraph", formattedText: inlineRuns(line) });

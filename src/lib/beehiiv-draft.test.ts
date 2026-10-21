@@ -22,7 +22,7 @@ describe("markdown → beehiiv blocks", () => {
   it("makes headings, bullet lists, images and (when asked) link-only lines into buttons", () => {
     const blocks = markdownToBlocks("## Title\n- ✅ **One** thing\n- two\n![thumb](https://img/x.jpg)\n[Watch The Full Video ->](https://youtu.be/x)", { buttons: true });
     expect(blocks.map((b) => b.type)).toEqual(["heading", "list", "image", "button"]);
-    expect(blocks[3]).toMatchObject({ text: "Watch The Full Video →", href: "https://youtu.be/x" });
+    expect(blocks[3]).toMatchObject({ text: "Watch The Full Video →", href: "https://youtu.be/x", visual_settings: { background_color: "#273653" } });
     expect(markdownToBlocks("[Grab the guide →](https://g.com)")[0].type).toBe("paragraph");
     expect(markdownToBlocks("Hey\n- Saj").map((b) => b.type)).toEqual(["paragraph", "paragraph"]);
   });

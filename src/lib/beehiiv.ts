@@ -20,12 +20,15 @@ export const HOWTO_POST_TEMPLATE_IDS = {
   saj: "post_template_b3286956-4e4e-40a2-a465-090aacde5aec",
 } as const;
 /**
- * The only template a draft may be created from: an EMPTY one ("New
- * template" — just beehiiv's standard footer), so the post holds exactly the
- * blocks we send. beehiiv's API can't fill a template's placeholders, so the
- * Kevin/Saj cards are rebuilt as native blocks (beehiiv-draft.ts).
+ * The only template a draft may be created from: "Hub & Spoke" — a copy of
+ * the Saj template with its content removed (Sam, 2026-10-21), so the post
+ * holds exactly the blocks we send but keeps the template's DESIGN: fonts,
+ * colors and the footer (social icons, HubSpot Media cross-promo, privacy,
+ * unsubscribe). beehiiv's API can't fill a template's placeholders, so the
+ * Kevin/Saj cards are rebuilt as native blocks (beehiiv-draft.ts). Footer or
+ * font edits to this template carry over to every draft.
  */
-export const HOWTO_BASE_TEMPLATE_ID = "post_template_c3dd4220-7ca4-4163-97e2-9f8082bcc5a3";
+export const HOWTO_BASE_TEMPLATE_ID = "post_template_44db1934-36eb-41c5-a448-e08161e4edbb";
 /** The guest authors shown on each edition. */
 export const HOWTO_AUTHOR_IDS = {
   kevin: "guest_925e71d0-7b16-4fe1-80c0-5190b91d3ef1",
