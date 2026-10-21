@@ -18,9 +18,16 @@
 // 13:00 UTC = 9am EDT during DST (Mar–Nov), 8am EST in winter. If a strict
 // 9am-Eastern-wall-clock cadence becomes important, switch to 14:00 UTC and
 // accept 10am EDT in summer instead.
+//
+// `performance-decay` runs on its own named queue so hourly runs never
+// overlap. On 2026-10-21 four deploys in an hour kept interrupting it; the
+// retried 21:00 run and the 22:00 run then ran side by side, held both
+// worker slots for 30+ min (re-fetching the same items, ~10x the usual SC
+// calls), and starved `worker-heartbeat` until the health monitor paged.
+// Serialized, at most one slot is ever decay's.
 export const CRONTAB = `
 * * * * * worker-heartbeat
-0 * * * * performance-decay
+0 * * * * performance-decay ?queue=performance-decay
 15 * * * * threshold-monitor-sweep
 30 * * * * notion-sync
 20 * * * * enrichment-sweep

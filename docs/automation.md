@@ -154,7 +154,7 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
 ## Cron sweeps
 
 ### `performance-decay` — refresh metrics
-- **Trigger:** cron `0 * * * *` (every hour at :00)
+- **Trigger:** cron `0 * * * *` (every hour at :00), on graphile queue `performance-decay` — runs are serialized so a retried run and the next hour's never hold both worker slots at once (that starved `worker-heartbeat` and paged on 2026-10-21; see the comment in `src/jobs/crontab.ts`)
 - **Files:** `src/jobs/tasks/scheduled.ts:41`, `src/lib/services/performance-decay.ts`, `src/app/api/cron/performance-sync/route.ts`
 - **Inputs:** every published `productionItems` row with a `publishedDate`
 - **Outputs:** `productionItems.views`, `likes`, `comments`, `clicks`, `leads`, `salesNum`, `salesAmount`, `lastPerformanceSyncAt`. Calls Scrape Creators (~1 credit/item/platform) for social platforms. Newsletters have no metrics source (Klaviyo cancelled 2026-10).
