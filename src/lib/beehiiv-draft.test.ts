@@ -127,7 +127,7 @@ describe("beehiiv draft request", () => {
     }) as { blocks: B[] };
     const cards = out.blocks.filter((b) => b.type === "section");
     const last = cards.at(-1)!;
-    expect((last.blocks![0] as { formattedText: { text: string }[] }).formattedText[0].text).toBe("Extras");
+    expect((last.blocks![0] as unknown as { formattedText: { text: string }[] }).formattedText[0].text).toBe("Extras");
     expect(last.visual_settings).toMatchObject({ border_color: "#111111" });
     expect(last.blocks!.filter((b) => b.type === "heading").map((h) => (h as { text?: string }).text)).toEqual([undefined, "Use Cases", "Bonus Tips"]);
     expect(out.blocks.some((b) => b.type === "poll" || (b.blocks ?? []).some((x) => x.type === "poll"))).toBe(false);
