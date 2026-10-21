@@ -18,8 +18,8 @@ describe("story settings live on the template", () => {
     ]);
   });
 
-  it("a template without story settings gets no lineup (one-video How-To, Daily Seinfeld)", () => {
-    expect(storySections(DEFAULT_TEMPLATES["daily seinfeld"])).toEqual([]);
+  it("Daily Seinfeld picks ONE story (video or case study); the How-To has no per-section stories", () => {
+    expect(storySections(DEFAULT_TEMPLATES["daily seinfeld"])).toEqual([{ key: "story", story: "any" }]);
     expect(singleVideoSourceNote("How-To Newsletter - Futurepedia (pilot)")).toMatch(/ONE video.*@futurepedia_io or @SkillLeapAI/);
     expect(singleVideoSourceNote("Sunday Breakfast")).toBeNull();
   });

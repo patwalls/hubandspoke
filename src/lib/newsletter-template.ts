@@ -214,10 +214,25 @@ export const DEFAULT_TEMPLATES: Record<string, NewsletterTemplate> = {
       emailName: "{brand} | Daily | {Mon}. {D}",
     },
     sections: [
-      s("read_time", null, "Exactly 'Read Time: N sec.' (or 'Read Time: 1 min. N sec.') for the whole email at ~200 words per minute. Nothing else."),
-      s("hook", null, "The opening: 2 to 6 short lines that set up the one story or observation (a founder, a message, a number, a contrarian claim)."),
-      s("story", null, "The heart of it in short lines: the story and its one lesson (ship fast, simplicity wins, distribution matters…)."),
-      s("pitch", null, "The pivot from the lesson to the offer from the editor's notes (or a CTA to the episode/case study when there is none), the CTA link, then '– Pat'. No footer."),
+      s("read_time", null, "Exactly 'Read Time: N sec.' (or 'Read Time: 1 min. N sec.') for the whole email at ~200 words per minute. Nothing else.", { story: "none" }),
+      s(
+        "hook",
+        null,
+        "Open with something concrete about the one story: a founder Pat just talked to, a message from a customer, a number, or a contrarian claim ('Vibe coders do not build real apps').",
+        { story: "none" },
+      ),
+      s(
+        "story",
+        null,
+        "Build to ONE lesson (ship fast, simplicity wins, distribution matters, you're not too late). Link the episode or case study once if it helps.",
+        { story: "any" },
+      ),
+      s(
+        "pitch",
+        null,
+        "Connect the lesson to the offer in the editor's notes: one or two lines on the promise and a clear call-to-action link ('Click here to secure your spot in the next bootcamp.'). No offer in the notes: a CTA to watch the full episode or read the case study. Never invent an offer, price or deadline. Then '– Pat' on its own line. No footer.",
+        { story: "none" },
+      ),
     ],
   },
   ...Object.fromEntries(
