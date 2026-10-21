@@ -29,6 +29,18 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-10-21-publish-screen",
+    shippedAt: "2026-10-21T20:36:42Z",
+    kind: "feature",
+    title: "Publish: paste the link, press Enter, next",
+    body:
+      "The new Publish tab lists every post that's Ready To Publish. Post it, paste the live link on its row " +
+      "and press Enter: it's marked Published and you jump to the next one, no need to open each post. " +
+      "A link from the wrong platform gets flagged before it's saved.",
+    href: "/[brand]/publish",
+    screen: "/[brand]/publish",
+  },
+  {
     id: "2026-10-21-whats-new",
     shippedAt: "2026-10-21T20:00:00Z",
     kind: "feature",
