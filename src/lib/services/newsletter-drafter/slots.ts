@@ -1,7 +1,9 @@
 // Scheduled newsletter SLOTS: one `newsletter_drafts` row (status "idea") per
 // schedule group per upcoming send date, created 2 weeks ahead so the
 // Newsletters tab works like a queue. Sunday Breakfast = Sundays, Daily
-// Seinfeld = Tue/Thu, the Futurepedia How-To = Tuesdays (format-config.ts).
+// Seinfeld = Tue/Thu. The Futurepedia How-To is VIDEO-TRIGGERED instead: each
+// published video queues one edition on the next open Tue/Fri (≤3 a week; see
+// videoSendDate and ensureVideoEditions), and no empty slots are made ahead.
 //
 // How-To slots also get a SUGGESTED source video: the newest long-form video
 // with a transcript, from any channel in the group (Futurepedia or Skill
@@ -16,13 +18,15 @@
 
 import { and, desc, eq, gte, inArray, isNotNull, isNull, like, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { accounts, formats, newsletterDrafts, productionItems, transcripts } from "@/lib/db/schema";
-import { formatConfigFor, groupFormatNames, scheduledPrimaries, upcomingSendDates } from "./format-config";
+import { accounts, formats, newsletterDrafts, newsletterIssueHistory, productionItems, transcripts } from "@/lib/db/schema";
+import { formatConfigFor, groupFormatNames, scheduledPrimaries, upcomingSendDates, type NewsletterSchedule } from "./format-config";
 import { findSpecial } from "./promo";
 
 export const SLOT_HORIZON_DAYS = 14;
 /** How far back a How-To slot looks for its suggested video. */
 const SUGGEST_LOOKBACK_DAYS = 21;
+/** Video-triggered groups: videos published this recently with no edition get one (covers outages; older ones aren't backfilled). */
+const VIDEO_LOOKBACK_DAYS = 7;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export function slotKeyFor(group: string, sendDate: string): string {
@@ -86,6 +90,118 @@ async function committedVideoIds(group: string): Promise<Set<string>> {
   return new Set(rows.map((r) => r.id!).filter(Boolean));
 }
 
+/** Videos an edition the team already sent used (beehiiv history, matched by the video link). */
+async function historyVideoIds(group: string): Promise<Set<string>> {
+  const rows = await db.select({ keys: newsletterIssueHistory.sourceKeys }).from(newsletterIssueHistory).where(eq(newsletterIssueHistory.scheduleGroup, group));
+  return new Set(rows.flatMap((r) => r.keys).filter((k) => k.startsWith("video:")).map((k) => k.slice("video:".length)));
+}
+
+/** YYYY-MM-DD of an instant in US Eastern (sends go out 9:30am ET). */
+export function easternDate(iso: string | Date): string {
+  return new Date(iso).toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+}
+
+function addDays(date: string, n: number): string {
+  return new Date(Date.parse(`${date}T12:00:00Z`) + n * DAY_MS).toISOString().slice(0, 10);
+}
+
+const weekdayOf = (d: string) => new Date(`${d}T12:00:00Z`).getUTCDay();
+const mondayOf = (d: string) => addDays(d, -((weekdayOf(d) + 6) % 7));
+
+/**
+ * The send date for a video published (Eastern) on `publishedOn`, given the
+ * dates that already have an edition. Sends start the next weekday after it
+ * lands (and never before tomorrow): the first open `days` day (Tue/Fri) in
+ * that week; if the week's Tue/Fri are taken, that next weekday itself as the
+ * week's extra send (≤ maxPerWeek); else the next open Tue/Fri after. So a
+ * Sunday and a Monday video both go Tuesday, a Wednesday video goes Friday.
+ * Pure; exported for tests.
+ */
+export function videoSendDate(publishedOn: string, today: string, days: number[], maxPerWeek: number, taken: Set<string>): string {
+  let start = addDays(publishedOn > today ? publishedOn : today, 1);
+  while (weekdayOf(start) === 0 || weekdayOf(start) === 6) start = addDays(start, 1);
+  const weekCount = (d: string) => {
+    const m = mondayOf(d);
+    let n = 0;
+    for (let i = 0; i < 7; i++) if (taken.has(addDays(m, i))) n++;
+    return n;
+  };
+  const open = (d: string) => !taken.has(d) && weekCount(d) < maxPerWeek;
+  // 1) The first open Tue/Fri in the week the video lands in.
+  for (let d = start; mondayOf(d) === mondayOf(start); d = addDays(d, 1)) if (days.includes(weekdayOf(d)) && open(d)) return d;
+  // 2) That week's Tue/Fri are taken: the next weekday itself, as the week's extra send.
+  if (open(start)) return start;
+  // 3) Otherwise the next open Tue/Fri after it.
+  for (let d = addDays(mondayOf(start), 7), i = 0; i < 7 * 52; d = addDays(d, 1), i++) if (days.includes(weekdayOf(d)) && open(d)) return d;
+  return start;
+}
+
+/**
+ * Queue one edition for every video published in the last VIDEO_LOOKBACK_DAYS
+ * that has a transcript and no edition yet (here or in the beehiiv history).
+ * Each is pinned to its video and sits on its channel's format (Kevin / Saj).
+ */
+async function ensureVideoEditions(
+  schedule: NewsletterSchedule,
+  groupFormats: GroupFormat[],
+  primary: GroupFormat,
+  now: Date,
+): Promise<number> {
+  const byAccount = new Map(groupFormats.filter((f) => f.accountId).map((f) => [f.accountId!, f.id]));
+  if (!schedule.trigger || byAccount.size === 0) return 0;
+  const slotRows = await db
+    .select({ id: newsletterDrafts.id, sendDate: newsletterDrafts.sendDate, sourceItemId: newsletterDrafts.sourceItemId, status: newsletterDrafts.status })
+    .from(newsletterDrafts)
+    .where(like(newsletterDrafts.slotKey, `${schedule.group}:%`));
+  const today = easternDate(now);
+  // Empty future slots from the old fixed-Tuesday schedule: nothing to send, so drop them.
+  const empty = slotRows.filter((r) => r.status === "idea" && !r.sourceItemId && r.sendDate && r.sendDate >= today).map((r) => r.id);
+  if (empty.length) await db.delete(newsletterDrafts).where(inArray(newsletterDrafts.id, empty));
+  const used = new Set([...slotRows.map((r) => r.sourceItemId!).filter(Boolean), ...(await historyVideoIds(schedule.group))]);
+  const taken = new Set(slotRows.filter((r) => r.sourceItemId && r.sendDate).map((r) => r.sendDate!));
+
+  const published = sql`COALESCE(${productionItems.publishedAt}, ${productionItems.publishedDate}::timestamptz)`;
+  const videos = await db
+    .select({ id: productionItems.id, accountId: productionItems.accountId, publishedAt: sql<string>`${published}` })
+    .from(productionItems)
+    .innerJoin(transcripts, eq(transcripts.productionItemId, productionItems.id))
+    .where(
+      and(
+        inArray(productionItems.accountId, [...byAccount.keys()]),
+        eq(productionItems.postType, "youtube_long"),
+        eq(productionItems.status, "Published"),
+        isNull(productionItems.deletedAt),
+        sql`${published} >= ${new Date(now.getTime() - VIDEO_LOOKBACK_DAYS * DAY_MS).toISOString()}::timestamptz`,
+      ),
+    )
+    .orderBy(published);
+  let created = 0;
+  for (const v of videos) {
+    if (used.has(v.id) || !v.accountId) continue;
+    const sendDate = videoSendDate(easternDate(v.publishedAt), today, schedule.days, schedule.trigger.maxPerWeek, taken);
+    const w = slotWindow(sendDate);
+    const inserted = await db
+      .insert(newsletterDrafts)
+      .values({
+        brand: primary.brand,
+        formatId: byAccount.get(v.accountId)!,
+        status: "idea",
+        slotKey: slotKeyFor(schedule.group, sendDate),
+        sendDate,
+        windowStart: w.start,
+        windowEnd: w.end,
+        sourceItemId: v.id,
+        sourcePinned: true,
+      })
+      .onConflictDoNothing()
+      .returning({ id: newsletterDrafts.id });
+    taken.add(sendDate);
+    used.add(v.id);
+    if (inserted.length) created++;
+  }
+  return created;
+}
+
 /** The newest unused long-form video with a transcript from the group's channels, before `sendDate`. */
 async function suggestVideo(
   groupFormats: GroupFormat[],
@@ -126,6 +242,10 @@ export async function ensureSlots(now: Date = new Date()): Promise<{ created: nu
     const primary = groupFormats.find((f) => f.name.trim().toLowerCase() === formatName);
     if (!primary) continue; // the format doesn't exist in this DB
     const singleVideo = formatConfigFor(primary.name).kind === "single_video";
+    if (schedule.trigger?.kind === "video") {
+      created += await ensureVideoEditions(schedule, groupFormats, primary, now);
+      continue;
+    }
     const used = singleVideo ? await committedVideoIds(schedule.group) : new Set<string>();
 
     for (const sendDate of upcomingSendDates(schedule.days, SLOT_HORIZON_DAYS, now)) {

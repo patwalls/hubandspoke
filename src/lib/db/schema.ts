@@ -2641,6 +2641,11 @@ export const newsletterDrafts = pgTable(
     /** null | pending | created | failed */
     hubspotStatus: text("hubspot_status"),
     hubspotError: text("hubspot_error"),
+    /** beehiiv (Futurepedia) draft post this draft was pushed to (never published/scheduled by us). */
+    beehiivPostId: text("beehiiv_post_id"),
+    beehiivPostUrl: text("beehiiv_post_url"),
+    beehiivStatus: text("beehiiv_status"),
+    beehiivError: text("beehiiv_error"),
     createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),

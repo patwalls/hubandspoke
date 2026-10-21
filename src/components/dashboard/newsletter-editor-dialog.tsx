@@ -52,6 +52,9 @@ export interface EditorDraft {
   hubspotStatus: string | null;
   hubspotEmailUrl: string | null;
   hubspotError: string | null;
+  beehiivPostUrl: string | null;
+  beehiivStatus: string | null;
+  beehiivError: string | null;
   updatedAt: string;
   /** Per section with a story: how often this newsletter ran it before. */
   sectionUsage?: Record<string, { count: number; lastDate: string | null; label: string; published?: string | null }>;
@@ -113,12 +116,13 @@ export function NewsletterEditorDialog({
     };
   }, [open, draftId]);
 
-  const busy = draft?.status === "drafting" || (draft?.regenerating.length ?? 0) > 0 || draft?.hubspotStatus === "pending";
+  const busy =
+    draft?.status === "drafting" || (draft?.regenerating.length ?? 0) > 0 || draft?.hubspotStatus === "pending" || draft?.beehiivStatus === "pending";
   useEffect(() => {
     if (!open || !busy) return;
     return startVisibleInterval(() => {
       void load().then((d) => {
-        if (d && d.status !== "drafting" && d.regenerating.length === 0 && d.hubspotStatus !== "pending") onChanged();
+        if (d && d.status !== "drafting" && d.regenerating.length === 0 && d.hubspotStatus !== "pending" && d.beehiivStatus !== "pending") onChanged();
       });
     }, POLL_MS);
   }, [open, busy, load, onChanged]);
@@ -251,6 +255,11 @@ function Workspace({
     await post(`/api/newsletter-drafts/${draft.id}/draft`, {}, "redraft");
   }
 
+  async function pushToBeehiiv() {
+    if (dirty && !(await save())) return;
+    await post(`/api/newsletter-drafts/${draft.id}/beehiiv`, {}, "beehiiv");
+  }
+
   async function pushToHubspot() {
     if (dirty && !(await save())) return;
     await post(`/api/newsletter-drafts/${draft.id}/hubspot`, {}, "hubspot");
@@ -265,7 +274,7 @@ function Workspace({
           {draft.model && ` · ${draft.model}`}
         </span>
       </div>
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2 pr-8">
         {message && <span className="text-xs text-muted-foreground">{message}</span>}
         {draft.status === "ready" && (
           <>
@@ -277,7 +286,23 @@ function Workspace({
               {saving && <Loader2 className="animate-spin" />}
               Save
             </Button>
-            {draft.hubspotEmailUrl ? (
+            {draft.template?.beehiiv ? (
+              draft.beehiivPostUrl ? (
+                <a href={draft.beehiivPostUrl} target="_blank" rel="noreferrer" className={buttonVariants({ size: "sm", variant: "secondary" })}>
+                  Open in beehiiv <ExternalLink />
+                </a>
+              ) : (
+                <Button
+                  size="sm"
+                  onClick={pushToBeehiiv}
+                  disabled={busyAction !== null || draft.beehiivStatus === "pending"}
+                  title="Creates an unsent DRAFT post in beehiiv from Kevin's or Saj's template. Never publishes or schedules."
+                >
+                  {(busyAction === "beehiiv" || draft.beehiivStatus === "pending") && <Loader2 className="animate-spin" />}
+                  Create beehiiv draft
+                </Button>
+              )
+            ) : draft.hubspotEmailUrl ? (
               <a href={draft.hubspotEmailUrl} target="_blank" rel="noreferrer" className={buttonVariants({ size: "sm", variant: "secondary" })}>
                 Open in HubSpot <ExternalLink />
               </a>
@@ -299,6 +324,9 @@ function Workspace({
       {draft.kind === "single_video" && <VideoBar draft={draft} disabled={draft.status === "drafting" || busyAction !== null} onPick={(itemId) => post(`/api/newsletter-drafts/${draft.id}/video`, { itemId }, "video")} />}
       {draft.hubspotStatus === "failed" && draft.hubspotError && (
         <p className="mx-5 mt-3 rounded-md bg-red-50 p-2 text-xs text-red-800 dark:bg-red-900/30 dark:text-red-200">Email push: {draft.hubspotError}</p>
+      )}
+      {draft.beehiivStatus === "failed" && draft.beehiivError && (
+        <p className="mx-5 mt-3 rounded-md bg-red-50 p-2 text-xs text-red-800 dark:bg-red-900/30 dark:text-red-200">beehiiv push: {draft.beehiivError}</p>
       )}
       {draft.error && draft.status === "ready" && (
         <p className="mx-5 mt-3 rounded-md bg-red-50 p-2 text-xs text-red-800 dark:bg-red-900/30 dark:text-red-200">{draft.error}</p>

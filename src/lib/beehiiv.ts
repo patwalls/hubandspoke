@@ -1,8 +1,7 @@
-// Server-only client for the beehiiv v2 API (Futurepedia's newsletter). READ
-// ONLY for now: we're learning how the Futurepedia How-To runs (send days,
-// which tools/tasks past editions covered, the Kevin/Saj templates) before
-// building a "Create beehiiv draft" push. Creating/updating drafts will be a
-// separate, reviewed allowlist change.
+// Server-only client for the beehiiv v2 API (Futurepedia's newsletter):
+// reads past editions/templates, and creates UNSENT DRAFT posts for the
+// How-To push. It can never publish, schedule, update, delete or reach
+// subscribers — see ALLOWED_CALLS and assertSafeDraftCreate.
 //
 // beehiiv API keys can't be scoped (the key Sam created covers every
 // publication in the workspace, with full write access), so the guarantee
@@ -14,6 +13,12 @@
 //   BEEHIIV_API_KEY   workspace key (Heroku config only; never in code/chat)
 
 const BASE_URL = "https://api.beehiiv.com/v2";
+
+/** The only post templates a draft may start from: Kevin's (Futurepedia channel) and Saj's (Skill Leap channel). */
+export const HOWTO_POST_TEMPLATE_IDS = {
+  kevin: "post_template_76011007-958d-4538-89dc-40bbe45f87a1",
+  saj: "post_template_b3286956-4e4e-40a2-a465-090aacde5aec",
+} as const;
 
 /** The Futurepedia publication: both the Kevin (Futurepedia) and Saj (Skill Leap) How-To editions go out from it. */
 export const FUTUREPEDIA_PUBLICATION_ID = "pub_535435b5-116b-4462-b22b-4fdd5f71a1b7";
@@ -74,6 +79,12 @@ const ALLOWED_CALLS: ReadonlyArray<{ method: string; path: RegExp; query: Record
     why: "read a post template's layout",
   },
   {
+    method: "POST",
+    path: new RegExp(`^/publications/${PUB}/posts$`),
+    query: {},
+    why: "create ONE unsent draft post (the request body is checked by assertSafeDraftCreate: status must be draft, no schedule)",
+  },
+  {
     method: "GET",
     path: new RegExp(`^/publications/${PUB}/segments/${SKILL_LEAP_MEMBERS_SEGMENT_ID.replace(/-/g, "\\-")}$`),
     query: {},
@@ -98,26 +109,82 @@ export function assertAllowedBeehiivCall(method: string, pathWithQuery: string):
   if (!ok) throw new BeehiivError(403, `Blocked beehiiv call ${method} ${pathWithQuery}: not on the allowlist`);
 }
 
-async function beehiivGet<T>(pathWithQuery: string): Promise<T> {
-  assertAllowedBeehiivCall("GET", pathWithQuery);
+async function beehiivFetch<T>(method: "GET" | "POST", pathWithQuery: string, body?: unknown): Promise<T> {
+  assertAllowedBeehiivCall(method, pathWithQuery);
+  if (method === "POST") assertSafeDraftCreate(body);
   for (let attempt = 0; ; attempt++) {
     const res = await fetch(`${BASE_URL}${pathWithQuery}`, {
-      method: "GET",
-      headers: { Authorization: `Bearer ${apiKey()}`, Accept: "application/json" },
+      method,
+      headers: { Authorization: `Bearer ${apiKey()}`, Accept: "application/json", ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
+      body: body === undefined ? undefined : JSON.stringify(body),
       signal: AbortSignal.timeout(30_000),
       cache: "no-store",
     });
-    if (res.status === 429 && attempt < 2) {
+    // Only reads are retried: a create that timed out may have succeeded, and a retry would make a second draft.
+    if (res.status === 429 && method === "GET" && attempt < 2) {
       const wait = Number(res.headers.get("retry-after")) || 2;
       await new Promise((r) => setTimeout(r, wait * 1000));
       continue;
     }
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      throw new BeehiivError(res.status, `beehiiv GET ${pathWithQuery} → ${res.status}: ${text.slice(0, 500)}`);
+      throw new BeehiivError(res.status, `beehiiv ${method} ${pathWithQuery} → ${res.status}: ${text.slice(0, 500)}`);
     }
     return (await res.json()) as T;
   }
+}
+
+const beehiivGet = <T,>(pathWithQuery: string) => beehiivFetch<T>("GET", pathWithQuery);
+
+/** The fields a draft-create body may carry (anything else — scheduled_at, newsletter_list_id, headers… — is refused). */
+const DRAFT_FIELDS = new Set([
+  "title",
+  "subtitle",
+  "post_template_id",
+  "body_content",
+  "status",
+  "recipients",
+  "email_settings",
+  "web_settings",
+  "thumbnail_image_url",
+  "content_tags",
+]);
+const EMAIL_SETTINGS = new Set(["email_subject_line", "email_preview_text", "display_title_in_email", "display_subtitle_in_email"]);
+const WEB_SETTINGS = new Set(["slug", "display_title_on_web", "display_subtitle_on_web"]);
+
+/**
+ * Throws unless `body` can only make an UNSENT DRAFT: status is exactly
+ * "draft" (beehiiv publishes immediately on "confirmed"), nothing schedules
+ * it, it starts from Kevin's or Saj's template, and the email audience
+ * excludes Skill Leap members and adds no segment. Exported for tests.
+ */
+export function assertSafeDraftCreate(body: unknown): void {
+  const no = (why: string) => {
+    throw new BeehiivError(403, `Blocked beehiiv draft: ${why}`);
+  };
+  if (!body || typeof body !== "object" || Array.isArray(body)) return no("body must be an object");
+  const b = body as Record<string, unknown>;
+  const extra = Object.keys(b).filter((k) => !DRAFT_FIELDS.has(k));
+  if (extra.length) no(`fields not allowed: ${extra.join(", ")}`);
+  if (b.status !== "draft") no(`status must be "draft" (got ${JSON.stringify(b.status)})`);
+  if (!Object.values(HOWTO_POST_TEMPLATE_IDS).includes(b.post_template_id as never)) no("post_template_id must be the Kevin or Saj template");
+  if (typeof b.title !== "string" || !b.title.trim()) no("title is required");
+  const sub = (key: string, allowed: Set<string>) => {
+    const v = b[key];
+    if (v === undefined) return;
+    if (!v || typeof v !== "object" || Array.isArray(v)) no(`${key} must be an object`);
+    const bad = Object.keys(v as object).filter((k) => !allowed.has(k));
+    if (bad.length) no(`${key} fields not allowed: ${bad.join(", ")}`);
+  };
+  sub("email_settings", EMAIL_SETTINGS);
+  sub("web_settings", WEB_SETTINGS);
+  const r = b.recipients as { email?: { tier_ids?: unknown; include_segment_ids?: unknown; exclude_segment_ids?: unknown }; web?: { tier_ids?: unknown } } | undefined;
+  if (!r || typeof r !== "object") return no("recipients are required (the Skill Leap members segment must be excluded)");
+  const okKeys = (o: object, keys: string[]) => Object.keys(o).every((k) => keys.includes(k));
+  if (!okKeys(r, ["email", "web"]) || !r.email || !okKeys(r.email, ["tier_ids", "include_segment_ids", "exclude_segment_ids"])) no("recipients has unexpected fields");
+  if (!Array.isArray(r.email!.exclude_segment_ids) || !r.email!.exclude_segment_ids.includes(SKILL_LEAP_MEMBERS_SEGMENT_ID)) no("the Skill Leap members segment must be excluded");
+  if (r.email!.include_segment_ids !== undefined && (!Array.isArray(r.email!.include_segment_ids) || r.email!.include_segment_ids.length > 0)) no("no segment may be added");
+  if (r.web && !okKeys(r.web, ["tier_ids"])) no("recipients.web has unexpected fields");
 }
 
 function qs(params: Record<string, string | number | string[] | undefined>): string {
@@ -193,4 +260,26 @@ export async function getFuturepediaPostTemplate(templateId: string, expand: ("f
 export async function getSkillLeapMembersSegment(): Promise<{ id: string; name: string; [k: string]: unknown }> {
   const r = await beehiivGet<{ data: { id: string; name: string } }>(`/publications/${FUTUREPEDIA_PUBLICATION_ID}/segments/${SKILL_LEAP_MEMBERS_SEGMENT_ID}`);
   return r.data;
+}
+
+/** beehiiv's editor link for a post id ("post_<uuid>" → /posts/<uuid>/edit). */
+export function beehiivEditUrl(postId: string): string {
+  return `https://app.beehiiv.com/posts/${postId.replace(/^post_/, "")}/edit`;
+}
+
+/**
+ * Create ONE unsent draft post, then read it back and confirm beehiiv saved
+ * it as a draft with no publish date. Never retried (a retry after a create
+ * that went through would leave a second draft; drafts can't be deleted from
+ * here). Throws loudly if the read-back isn't a draft.
+ */
+export async function createFuturepediaDraft(body: Record<string, unknown>): Promise<{ id: string; editUrl: string }> {
+  const created = await beehiivFetch<{ data: BeehiivPost }>("POST", `/publications/${FUTUREPEDIA_PUBLICATION_ID}/posts`, body);
+  const id = created.data?.id;
+  if (!id || !/^post_/.test(id)) throw new BeehiivError(502, "beehiiv didn't return a post id");
+  const check = await getFuturepediaPost(id);
+  if (check.status !== "draft") {
+    throw new BeehiivError(500, `beehiiv saved post ${id} as "${check.status}", not draft — check it in beehiiv NOW (${beehiivEditUrl(id)})`);
+  }
+  return { id, editUrl: beehiivEditUrl(id) };
 }

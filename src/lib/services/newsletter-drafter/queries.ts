@@ -56,6 +56,7 @@ const listColumns = {
   windowStart: newsletterDrafts.windowStart,
   windowEnd: newsletterDrafts.windowEnd,
   hubspotStatus: newsletterDrafts.hubspotStatus,
+  beehiivStatus: newsletterDrafts.beehiivStatus,
   createdAt: newsletterDrafts.createdAt,
 };
 
@@ -91,6 +92,10 @@ export async function getNewsletterDraft(id: string) {
       hubspotEmailId: newsletterDrafts.hubspotEmailId,
       hubspotEmailUrl: newsletterDrafts.hubspotEmailUrl,
       hubspotError: newsletterDrafts.hubspotError,
+      beehiivPostId: newsletterDrafts.beehiivPostId,
+      beehiivPostUrl: newsletterDrafts.beehiivPostUrl,
+      beehiivStatus: newsletterDrafts.beehiivStatus,
+      beehiivError: newsletterDrafts.beehiivError,
       updatedAt: newsletterDrafts.updatedAt,
       slotKey: newsletterDrafts.slotKey,
       sections: newsletterDrafts.sections,

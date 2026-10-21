@@ -1,3 +1,4 @@
+import { videoSendDate } from "./slots";
 import { describe, expect, it } from "vitest";
 import { describeTemplate, submissionProblem, type NewsletterSubmission } from "./agent";
 import { formatConfigFor, groupFormatNames, scheduledPrimaries, upcomingSendDates } from "./format-config";
@@ -64,5 +65,27 @@ describe("templated submissions", () => {
     ];
     expect(spliceSection(sections, "b", "new")).toEqual([{ key: "a", markdown: "1" }, { key: "b", markdown: "new" }]);
     expect(spliceSection(sections, "c", "3")).toHaveLength(3);
+  });
+});
+
+describe("video-triggered How-To send dates", () => {
+  // Oct 2026: Mon 19, Tue 20, Wed 21, Thu 22, Fri 23, Sat 24, Sun 25, Mon 26, Tue 27.
+  const tueFri = [2, 5];
+  const send = (published: string, today: string, taken: string[] = []) => videoSendDate(published, today, tueFri, 3, new Set(taken));
+
+  it("goes out on the next open Tuesday or Friday — a Sunday and a Monday video both go Tuesday", () => {
+    expect(send("2026-10-25", "2026-10-25")).toBe("2026-10-27");
+    expect(send("2026-10-26", "2026-10-26")).toBe("2026-10-27");
+    expect(send("2026-10-24", "2026-10-24")).toBe("2026-10-27");
+    expect(send("2026-10-21", "2026-10-21")).toBe("2026-10-23");
+  });
+
+  it("takes the next weekday as the week's third send when Tue and Fri are taken, then waits for next week", () => {
+    expect(send("2026-10-21", "2026-10-21", ["2026-10-20", "2026-10-23"])).toBe("2026-10-22");
+    expect(send("2026-10-22", "2026-10-22", ["2026-10-20", "2026-10-22", "2026-10-23"])).toBe("2026-10-27");
+  });
+
+  it("never schedules in the past for a video noticed late", () => {
+    expect(send("2026-10-14", "2026-10-21")).toBe("2026-10-23");
   });
 });

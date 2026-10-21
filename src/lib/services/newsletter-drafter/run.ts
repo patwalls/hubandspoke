@@ -3,9 +3,9 @@
 // Called by the `newsletter-draft` worker task. Idempotent: a row that is no
 // longer `drafting` is left alone, so a retry after success is a no-op.
 
-import { and, eq, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, like, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { brands, formats, newsletterDrafts } from "@/lib/db/schema";
+import { brands, formats, newsletterDrafts, newsletterIssueHistory } from "@/lib/db/schema";
 import { newsletterModel, NewsletterCancelledError, runNewsletterAgent, storyKeyOf, type NewsletterSubmission } from "./agent";
 import { blockedKeys, loadUsage, toStoredSources, usageGroupFor, withInferredSources } from "./usage";
 import { buildStoryPlan, withPlanDates } from "./story-plan";
@@ -30,6 +30,35 @@ export function toStoredSections(sections: NonNullable<NewsletterSubmission["sec
       source: key && sec.source ? { kind: sec.source.kind, key, title: sec.source.title ?? null, url: sec.source.url ?? null } : null,
     };
   });
+}
+
+/**
+ * A one-video newsletter's last 15 editions: sent ones (beehiiv / HubSpot
+ * history) + Hub & Spoke drafts that are written, newest first.
+ */
+export async function loadRecentEditions(formatName: string, excludeDraftId: string): Promise<{ date: string | null; subject: string }[]> {
+  const group = usageGroupFor(formatName);
+  const hist = await db
+    .select({ date: newsletterIssueHistory.sentDate, subject: newsletterIssueHistory.subject })
+    .from(newsletterIssueHistory)
+    .where(eq(newsletterIssueHistory.scheduleGroup, group))
+    .orderBy(desc(newsletterIssueHistory.sentDate))
+    .limit(15);
+  const drafts = await db
+    .select({ id: newsletterDrafts.id, date: newsletterDrafts.sendDate, subject: newsletterDrafts.subject })
+    .from(newsletterDrafts)
+    .where(and(like(newsletterDrafts.slotKey, `${group}:%`), eq(newsletterDrafts.status, "ready"), isNotNull(newsletterDrafts.subject)))
+    .orderBy(desc(newsletterDrafts.sendDate))
+    .limit(15);
+  const all = [
+    ...hist.filter((h) => h.subject).map((h) => ({ date: h.date, subject: h.subject! })),
+    ...drafts.filter((d) => d.id !== excludeDraftId).map((d) => ({ date: d.date, subject: d.subject! })),
+  ];
+  const seen = new Set<string>();
+  return all
+    .sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""))
+    .filter((e) => !seen.has(e.subject.toLowerCase()) && seen.add(e.subject.toLowerCase()))
+    .slice(0, 15);
 }
 
 /** The picked video + its full transcript for a single_video draft. Throws a readable error when unusable. */
@@ -104,6 +133,7 @@ export async function runNewsletterDraft(
     ]);
     const sponsored = special?.ok ? special : null;
     // The suggested lineup (a hint for the agent; a content-API hiccup just drops it).
+    const recentEditions = video ? await loadRecentEditions(row.formatName, row.id) : undefined;
     const storyPlan =
       !video
         ? await buildStoryPlan({ brand: row.brand, window: { start: row.windowStart, end: row.windowEnd }, template, blocked }).catch(
@@ -129,6 +159,7 @@ export async function runNewsletterDraft(
       usage,
       blocked,
       storyPlan,
+      recentEditions,
       model: config.model,
       log: opts.log,
       shouldStop,

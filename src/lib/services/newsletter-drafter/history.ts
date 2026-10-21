@@ -6,13 +6,20 @@
 //     "Starter Story | Daily | …" → Daily Seinfeld)
 //   - Klaviyo era: published `production_items` newsletter rows with HTML (all
 //     of them — a few dozen rows, and old usage still counts toward "N× before")
+//   - beehiiv (Futurepedia, read-only client): published How-To editions
+//     (they carry "How We Did It" / "Watch The Full Video"), keyed by the
+//     YouTube video they link, so a video never gets a second edition and the
+//     drafter knows which topics ran recently. Other beehiiv issues (the news
+//     roundup, announcements) are stored as group "futurepedia-other" so they
+//     aren't re-read.
 // Emails our own push created are skipped (the draft already counts them).
 // Idempotent: upsert by external_id.
 
-import { and, eq, isNotNull } from "drizzle-orm";
+import { and, eq, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { newsletterDrafts, newsletterIssueHistory, productionItems } from "@/lib/db/schema";
 import { emailRichTextHtml, listEmailsCreatedAfter } from "@/lib/hubspot-marketing-email";
+import { getFuturepediaPost, listFuturepediaPosts } from "@/lib/beehiiv";
 import { extractStoryRefs, usageGroupFor, videoKeysForYoutubeIds } from "./usage";
 
 const STARTER_STORY_BUSINESS_UNIT = "4057751";
@@ -41,9 +48,58 @@ async function upsert(row: typeof newsletterIssueHistory.$inferInsert) {
     });
 }
 
-export async function syncNewsletterHistory(opts: { since: Date }): Promise<{ hubspot: number; items: number }> {
+/** True for a Futurepedia How-To edition's HTML (its fixed card labels). Pure; exported for tests. */
+export function isHowToEdition(html: string): boolean {
+  return /How We Did It|Watch The Full Video/i.test(html);
+}
+
+/** YYYY-MM-DD (US Eastern) of a beehiiv unix timestamp. */
+function beehiivDate(ts: number | null | undefined): string | null {
+  return ts ? new Date(ts * 1000).toLocaleDateString("en-CA", { timeZone: "America/New_York" }) : null;
+}
+
+/** Published Futurepedia editions since `since` (read-only). Already-stored posts aren't re-fetched. */
+async function syncBeehiivHistory(since: Date): Promise<number> {
+  if (!process.env.BEEHIIV_API_KEY) return 0;
+  const have = new Set(
+    (await db.select({ id: newsletterIssueHistory.externalId }).from(newsletterIssueHistory).where(sql`${newsletterIssueHistory.externalId} LIKE 'beehiiv:%'`)).map(
+      (r) => r.id,
+    ),
+  );
+  const ours = new Set(
+    (await db.select({ id: newsletterDrafts.beehiivPostId }).from(newsletterDrafts).where(isNotNull(newsletterDrafts.beehiivPostId))).map((r) => r.id!),
+  );
+  let n = 0;
+  for (let page = 1; page <= 20; page++) {
+    const r = await listFuturepediaPosts({ page, limit: 50, status: "confirmed" });
+    for (const p of r.data) {
+      const ts = p.publish_date ?? p.displayed_date ?? null;
+      if (ts && ts * 1000 < since.getTime()) return n;
+      if (have.has(`beehiiv:${p.id}`) || ours.has(p.id)) continue;
+      const full = await getFuturepediaPost(p.id, ["free_email_content"]);
+      const html = full.content?.free?.email ?? "";
+      const howTo = isHowToEdition(html);
+      await upsert({
+        brand: "futurepedia",
+        scheduleGroup: howTo ? "futurepedia-howto" : "futurepedia-other",
+        externalId: `beehiiv:${p.id}`,
+        origin: "beehiiv",
+        name: p.title ?? null,
+        subject: (p.subject_line as string | undefined) ?? p.title ?? null,
+        sentDate: beehiivDate(ts),
+        sourceKeys: howTo ? await videoKeysForYoutubeIds(extractStoryRefs(html).youtubeIds) : [],
+      });
+      n++;
+    }
+    if (page >= r.total_pages) break;
+  }
+  return n;
+}
+
+export async function syncNewsletterHistory(opts: { since: Date }): Promise<{ hubspot: number; items: number; beehiiv: number }> {
   let hubspot = 0;
   let items = 0;
+  const beehiiv = await syncBeehiivHistory(opts.since);
 
   const pushed = await db
     .select({ id: newsletterDrafts.hubspotEmailId })
@@ -101,5 +157,5 @@ export async function syncNewsletterHistory(opts: { since: Date }): Promise<{ hu
     });
     items++;
   }
-  return { hubspot, items };
+  return { hubspot, items, beehiiv };
 }

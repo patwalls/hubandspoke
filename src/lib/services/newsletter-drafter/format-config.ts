@@ -33,6 +33,13 @@ export interface NewsletterSchedule {
   /** 0 = Sunday … 6 = Saturday. */
   days: number[];
   primary?: boolean;
+  /**
+   * single_video groups: "video" = an edition is queued as soon as a video is
+   * published (like clip ideas), sent on the next open `days` day, or — when
+   * that week's `days` are taken — the next weekday, up to `maxPerWeek` per
+   * Mon–Sun week (slots.ts → videoSendDate). No empty slots are made ahead.
+   */
+  trigger?: { kind: "video"; maxPerWeek: number };
 }
 
 export interface NewsletterFormatConfig {
@@ -78,14 +85,15 @@ const FORMAT_CONFIG: Record<string, NewsletterFormatConfig> = {
   "how-to newsletter - futurepedia (pilot)": {
     kind: "single_video",
     sourceAccountHandle: "futurepedia_io",
-    schedule: { group: "futurepedia-howto", days: [2], primary: true },
+    // One edition per published video, usually Tue/Fri, ≤3 a week (Bryce + Sam, 2026-10-21).
+    schedule: { group: "futurepedia-howto", days: [2, 5], primary: true, trigger: { kind: "video", maxPerWeek: 3 } },
     model: "claude-sonnet-5-5",
     promo: { projectGid: FUTUREPEDIA_PROMO_PROJECT, section: "Native Ad", label: "Free Resource", onMiss: "placeholder" },
   },
   "how-to newsletter - skill leap (pilot)": {
     kind: "single_video",
     sourceAccountHandle: "SkillLeapAI",
-    schedule: { group: "futurepedia-howto", days: [2] },
+    schedule: { group: "futurepedia-howto", days: [2, 5], trigger: { kind: "video", maxPerWeek: 3 } },
     model: "claude-sonnet-5-5",
     promo: { projectGid: FUTUREPEDIA_PROMO_PROJECT, section: "Native Ad", label: "Free Resource", onMiss: "placeholder" },
   },

@@ -85,11 +85,22 @@ export const hubspotMappingSchema = z.object({
 });
 export type HubspotMapping = z.infer<typeof hubspotMappingSchema>;
 
+/**
+ * Where a draft goes in beehiiv (Futurepedia): the post template it starts
+ * from — Kevin's for Futurepedia-channel editions, Saj's for Skill Leap. The
+ * push (beehiiv-draft.ts) only ever creates an unsent draft.
+ */
+export const beehiivMappingSchema = z.object({
+  postTemplateId: z.string().regex(/^post_template_[0-9a-f-]{36}$/, "a beehiiv post template id"),
+});
+export type BeehiivMapping = z.infer<typeof beehiivMappingSchema>;
+
 export const newsletterTemplateSchema = z
   .object({
     version: z.literal(1),
     style: styleSchema.default(styleSchema.parse({})),
     hubspot: hubspotMappingSchema.nullable().default(null),
+    beehiiv: beehiivMappingSchema.nullable().default(null),
     sections: z.array(sectionSchema).min(1).max(20),
   })
   .refine((t) => new Set(t.sections.map((s) => s.key)).size === t.sections.length, "section keys must be unique")
@@ -169,6 +180,7 @@ export const DEFAULT_TEMPLATES: Record<string, NewsletterTemplate> = {
       },
       emailName: "{brand} | Newsletter | {Month} {D}",
     },
+    beehiiv: null,
     sections: [
       // Instructions hold only what's special about each section: how every
       // course is written (headline, teaser, link line) lives in the Skill, and
@@ -213,6 +225,7 @@ export const DEFAULT_TEMPLATES: Record<string, NewsletterTemplate> = {
       },
       emailName: "{brand} | Daily | {Mon}. {D}",
     },
+    beehiiv: null,
     sections: [
       s("read_time", null, "Exactly 'Read Time: N sec.' (or 'Read Time: 1 min. N sec.') for the whole email at ~200 words per minute. Nothing else.", { story: "none" }),
       s(
@@ -236,12 +249,17 @@ export const DEFAULT_TEMPLATES: Record<string, NewsletterTemplate> = {
     ],
   },
   ...Object.fromEntries(
-    ["how-to newsletter - futurepedia (pilot)", "how-to newsletter - skill leap (pilot)"].map((name) => [
+    [
+      // beehiiv post templates "Kevin Template" / "Saj Template" (publication pub_535435b5…).
+      ["how-to newsletter - futurepedia (pilot)", "post_template_76011007-958d-4538-89dc-40bbe45f87a1"],
+      ["how-to newsletter - skill leap (pilot)", "post_template_b3286956-4e4e-40a2-a465-090aacde5aec"],
+    ].map(([name, postTemplateId]) => [
       name,
       {
         version: 1 as const,
         style: NEUTRAL_STYLE,
         hubspot: null,
+        beehiiv: { postTemplateId },
         sections: [
           s("intro", null, "2 to 4 short first-person lines in the channel voice, the signature on its own line, then a one-line teaser text link to the Free Resource offer."),
           s("article", null, "The article headline as an H2 (the how-to, benefit-first), the video thumbnail as a Markdown image, then the one-line concrete example."),

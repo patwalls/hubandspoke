@@ -15,6 +15,7 @@ const T: NewsletterTemplate = {
   version: 1,
   style: styleSchema.parse({}),
   hubspot: null,
+      beehiiv: null,
   sections: [sec("intro", null), sec("special", "The Special 🍽️", { kind: "sponsor" }), sec("tips", "Bonus Tips", { headingLevel: 3 })],
 };
 

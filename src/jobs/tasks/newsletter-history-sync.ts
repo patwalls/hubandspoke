@@ -15,5 +15,5 @@ export const newsletterHistorySyncTask: Task = async (rawPayload, helpers) => {
   const { sinceIso } = (rawPayload ?? {}) as NewsletterHistorySyncPayload;
   const since = sinceIso ? new Date(sinceIso) : new Date(Date.now() - 45 * 24 * 60 * 60 * 1000);
   const r = await syncNewsletterHistory({ since });
-  helpers.logger.info(`newsletter-history-sync: since ${since.toISOString().slice(0, 10)} — ${r.hubspot} HubSpot issues, ${r.items} older issues`);
+  helpers.logger.info(`newsletter-history-sync: since ${since.toISOString().slice(0, 10)} — ${r.hubspot} HubSpot issues, ${r.items} older issues, ${r.beehiiv} beehiiv editions`);
 };

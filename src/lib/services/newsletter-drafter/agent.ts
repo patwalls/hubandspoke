@@ -261,6 +261,8 @@ export interface NewsletterAgentArgs {
   blocked?: Set<string>;
   /** Roundups with a story plan (story-plan.ts): the suggested lineup, given to the agent (not enforced). */
   storyPlan?: StoryPlan | null;
+  /** single_video: this newsletter's recent editions (newest first), so the drafter picks a fresh task. */
+  recentEditions?: { date: string | null; subject: string }[];
   /** Checked before every model call; true = the editor cancelled, stop (throws NewsletterCancelledError). */
   shouldStop?: () => Promise<boolean>;
   /** Worker logger, e.g. helpers.logger.info: one line per turn with the tools called. */
@@ -428,6 +430,13 @@ export function buildUserTurn(args: NewsletterAgentArgs): string {
         .join("\n"),
       `TRANSCRIPT${v.truncated ? " (truncated — very long video)" : ""}:\n${v.transcript}`,
     );
+    if (args.recentEditions?.length) {
+      parts.push(
+        `RECENT EDITIONS of this newsletter (newest first). Teach a different task / use case than these; the same tool from a fresh angle is fine:\n${args.recentEditions
+          .map((e) => `- ${e.date ?? "?"}: ${e.subject}`)
+          .join("\n")}`,
+      );
+    }
   } else {
     parts.push(
       `Draft the next "${args.formatName}" issue. Today is ${today}.${sendLine} The draft's default window is ${args.window.start.toISOString().slice(0, 10)} to ${today}.${brandHasCaseStudies(args.brand) ? ` Case studies are listed at ${CASE_STUDY_SITE}.` : ""}`,

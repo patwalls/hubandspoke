@@ -3,7 +3,7 @@ import { and, eq, like, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { accounts, formats, newsletterDrafts } from "@/lib/db/schema";
 import { createTestProductionItem, createTestTranscript } from "@/test/factories";
-import { ensureSlots, setSlotVideo } from "./slots";
+import { ensureSlots } from "./slots";
 
 // Runs ensureSlots "in" 2031 so its slots can't collide with real ones, and
 // deletes exactly those slots afterwards (slot rows aren't factory-tracked).
@@ -40,39 +40,32 @@ describe("ensureSlots", () => {
     expect(second.created).toBe(0);
   });
 
-  it("suggests the newest unused video from either How-To channel, puts the slot on that channel's format, and lets the editor switch it", async () => {
+  it("queues one How-To edition per published video, on that video's channel's format, never twice", async () => {
     const fp = await formatId("how-to newsletter - futurepedia (pilot)");
     const sl = await formatId("how-to newsletter - skill leap (pilot)");
     const fpAcct = await youtubeAccount("futurepedia_io");
     const slAcct = await youtubeAccount("SkillLeapAI");
     if (!fp || !sl || !fpAcct || !slAcct) return; // this DB has no How-To formats/channels
 
-    const older = await createTestProductionItem({ postType: "youtube_long", accountId: fpAcct, brand: "futurepedia", publishedAt: new Date("2031-02-27T12:00:00Z") });
-    await createTestTranscript({ productionItemId: older.id, segments: [{ startSec: 0, endSec: 1, text: "a" }] });
-    const newest = await createTestProductionItem({ postType: "youtube_long", accountId: slAcct, brand: "futurepedia", publishedAt: new Date("2031-03-02T12:00:00Z") });
-    await createTestTranscript({ productionItemId: newest.id, segments: [{ startSec: 0, endSec: 1, text: "b" }] });
+    // Thu Feb 27 (Futurepedia) and Sun Mar 2 (Skill Leap); "today" is Tue Mar 4.
+    const kevinVideo = await createTestProductionItem({ postType: "youtube_long", accountId: fpAcct, brand: "futurepedia", publishedAt: new Date("2031-02-27T17:00:00Z") });
+    await createTestTranscript({ productionItemId: kevinVideo.id, segments: [{ startSec: 0, endSec: 1, text: "a" }] });
+    const sajVideo = await createTestProductionItem({ postType: "youtube_long", accountId: slAcct, brand: "futurepedia", publishedAt: new Date("2031-03-02T17:00:00Z") });
+    await createTestTranscript({ productionItemId: sajVideo.id, segments: [{ startSec: 0, endSec: 1, text: "b" }] });
 
     await ensureSlots(NOW);
-    const [first] = await db
-      .select({ id: newsletterDrafts.id, sourceItemId: newsletterDrafts.sourceItemId, formatId: newsletterDrafts.formatId })
+    const rows = await db
+      .select({ id: newsletterDrafts.id, slotKey: newsletterDrafts.slotKey, sourceItemId: newsletterDrafts.sourceItemId, formatId: newsletterDrafts.formatId, pinned: newsletterDrafts.sourcePinned })
       .from(newsletterDrafts)
-      .where(eq(newsletterDrafts.slotKey, "futurepedia-howto:2031-03-11"));
-    // Newest video is Skill Leap's, so the slot moves to the Skill Leap (Saj) format.
-    expect(first).toMatchObject({ sourceItemId: newest.id, formatId: sl });
+      .where(like(newsletterDrafts.slotKey, "futurepedia-howto:2031-03-%"));
+    const byVideo = new Map(rows.map((r) => [r.sourceItemId, r]));
+    // First come, first served: Friday Mar 7 for the older video, then Wed Mar 5 as the week's extra send.
+    expect(byVideo.get(kevinVideo.id)).toMatchObject({ slotKey: "futurepedia-howto:2031-03-07", formatId: fp, pinned: true });
+    expect(byVideo.get(sajVideo.id)).toMatchObject({ slotKey: "futurepedia-howto:2031-03-05", formatId: sl, pinned: true });
+    expect(rows.length).toBe(2); // no empty Tue/Fri slots
 
-    // The next Tuesday's slot gets the other (older) video, never the same one twice.
-    const [next] = await db
-      .select({ sourceItemId: newsletterDrafts.sourceItemId, formatId: newsletterDrafts.formatId })
-      .from(newsletterDrafts)
-      .where(eq(newsletterDrafts.slotKey, "futurepedia-howto:2031-03-18"));
-    expect(next.sourceItemId).not.toBe(newest.id);
-
-    // Switching to the Futurepedia video moves the slot back to Kevin's format.
-    // (listSlotVideoOptions looks at the last 6 weeks of real time, so only assert when it's in range.)
-    const r = await setSlotVideo(first.id, older.id);
-    if ("ok" in r) {
-      const [after] = await db.select({ formatId: newsletterDrafts.formatId }).from(newsletterDrafts).where(eq(newsletterDrafts.id, first.id));
-      expect(after.formatId).toBe(fp);
-    }
+    await ensureSlots(NOW);
+    const again = await db.select({ id: newsletterDrafts.id }).from(newsletterDrafts).where(like(newsletterDrafts.slotKey, "futurepedia-howto:2031-03-%"));
+    expect(again.length).toBe(2);
   });
 });
