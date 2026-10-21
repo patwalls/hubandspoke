@@ -28,6 +28,7 @@ CRON ENTRIES (src/jobs/crontab.ts, UTC)
   */30  account-content-sync-sweep → fan-out → account-content-sync (per active SC account, latest mode)
   */10  schedule-reconcile-sweep  → targeted account-content-sync (accounts w/ pending Scheduled items) + runScheduleReconcile() → auto-merge / suggest / needs-attention (date-known items only)
   :50   schedule-nodate-sweep     → same as above but for scheduledNoDate=true items; 60-min cadence, 14-day give-up window
+  :25   publish-live-sweep        → runReadyToPublishReconcile(): Ready To Publish items vs sync-discovered posts since they went ready → auto-merge / Publish-screen suggestion (no syncing of its own)
   15:00 evergreen-scan            → AI classifier + Idea-queue refill
   (per-post) capture-velocity-snapshot → scheduled at publish+{15m,30m,1h,2h,4h,8h,24h,48h} per item; writes one view_snapshots row each
   (live)     cross-post candidate queue → GET /api/cross-post-queue, no scheduled job — runs on every page load of /[brand]/queue Cross-post tab
@@ -405,6 +406,34 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
   alongside the status chip in the content detail view.
 - **Surface:** `/[brand]/scheduled` (page) + `GET /api/scheduled-matches` +
   `POST /api/scheduled-matches/[id]` (`confirm` → reconcile, `reject` → exclude).
+
+### `publish-live-sweep` — spot Ready To Publish posts that already went live (hourly)
+- **Trigger:** cron `25 * * * *` — 20 min after `account-content-sync-sweep` (:05)
+  has pulled every account's latest posts.
+- **Files:** `src/jobs/tasks/scheduled.ts` (`publishLiveSweepTask`),
+  `src/lib/services/schedule-reconcile/reconcile.ts` (`runReadyToPublishReconcile`),
+  `matcher.ts` (`loadMatchCandidates(item, { syncedOnly: true })`).
+- **Why:** the curator posts Ready To Publish cross-posts natively and often
+  never pastes the link back; the account sync then finds the post as its own
+  Published row. Same problem the Scheduled sweep solves, without the operator
+  having marked anything Scheduled.
+- **What it does:** for every Ready To Publish item with an account, the window
+  opens at its latest `status_change` → Ready To Publish event (else
+  `created_at`, minus the matcher's 1h grace). Candidates: same account,
+  Published, same post_type, published in the window, and **`created_via LIKE
+  'sync:%'` only** — a hand-published planning row is another plan, never this
+  one. No candidates → no LLM call. Otherwise the Haiku matcher + the Scheduled
+  tier policy: **≥85** `reconcileScheduledIntoPublished` (the item becomes the
+  Published row, the synced duplicate is absorbed, `status_change` event,
+  velocity snapshots), **55–84** upsert a pending `scheduled_match_suggestions`
+  row that the Publish screen shows on the item's row (That's it / Not it via
+  `POST /api/scheduled-matches/[id]`), **<55** nothing.
+- **No syncing, no needs-attention:** costs Haiku calls only — no SC credits —
+  and never flags anything; the Publish screen already is the list of what's
+  waiting.
+- **Idempotency:** re-running re-scores the same pairs (upsert on the
+  suggestion pair); rejected pairs are excluded by the matcher; a merged item
+  is no longer Ready To Publish so it drops out.
 
 ### Feedhook push receiver — new-post webhooks (DARK as of 2026-07-13)
 - **Trigger:** `POST /api/webhooks/feedhook` — signed deliveries from Feedhook

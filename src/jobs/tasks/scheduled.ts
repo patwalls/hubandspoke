@@ -28,6 +28,7 @@ import { and, eq, gte, inArray, isNotNull, isNull } from "drizzle-orm";
 import {
   runScheduleReconcile,
   runScheduleNodateReconcile,
+  runReadyToPublishReconcile,
   selectAccountsForScheduleSync,
   NODATE_ABANDON_HOURS,
 } from "@/lib/services/schedule-reconcile/reconcile";
@@ -332,6 +333,22 @@ export const scheduleNodateSweepTask: Task = async (_payload, helpers) => {
       `merged=${summary.autoMerged} suggested=${summary.suggested} ` +
       `gaveUp=${summary.gaveUp} llmErrors=${summary.llmErrors} ` +
       `skipped=${summary.skipped} (${Date.now() - start}ms)`,
+  );
+};
+
+/**
+ * Hourly: spot Ready To Publish posts that already went live. No syncing of
+ * its own — runs at :25, after account-content-sync-sweep (:05) has pulled in
+ * every account's latest posts, so it costs Haiku calls only (and none for an
+ * item whose account has nothing new since it went ready).
+ */
+export const publishLiveSweepTask: Task = async (_payload, helpers) => {
+  const start = Date.now();
+  const summary = await runReadyToPublishReconcile();
+  helpers.logger.info(
+    `publish-live-sweep considered=${summary.considered} ` +
+      `merged=${summary.autoMerged} suggested=${summary.suggested} ` +
+      `llmErrors=${summary.llmErrors} skipped=${summary.skipped} (${Date.now() - start}ms)`,
   );
 };
 

@@ -36,19 +36,29 @@ starter-story-app), so none of Pat's words were read this lap.
 1. **Publish screen** (2026-10-21, shipped): `/[brand]/publish` lists every Ready To Publish post
    with a link box per row. Paste + Enter publishes it and jumps to the next row, and a link from
    the wrong platform is caught.
-2. **Grouped by pillar, with the post kit on the row**: one pillar's cross-posts sit together.
-   Each row gets copy-caption and download-media buttons, so the curator posts from this screen
-   instead of opening each item.
-3. **"Looks live" detection**: for Ready To Publish items on synced accounts, reuse the
-   schedule-reconcile matcher (account-content-sync + Haiku) to propose the live post. One click
-   confirms it and nothing is pasted.
-4. **A way in where they work**: a ready count on the Publish tab and a link from the content
-   page's Publish dialog ("publish the rest of this pillar").
+2. **Grouped by pillar, with the post kit on the row** (2026-10-21, shipped with 3 and 4; Pat approved
+   idea 95ec60 from the Cockpit inbox): rows sit under their pillar with "n of m left". Each open row
+   has Copy caption (its own body, else the body of the post it was cross-posted from) and Download
+   media (presigned attachment links).
+3. **"Looks live" detection** (2026-10-21, shipped): the hourly `publish-live-sweep` runs the
+   schedule-reconcile matcher over Ready To Publish items against sync-discovered posts since the
+   item went ready. ≥85 merges on its own, 55–84 shows "Looks like this is already live" on the row
+   with That's it / Not it. Haiku only, no SC credits.
+4. **A way in where they work** (2026-10-21, half shipped): the Publish tab shows the brand's ready
+   count. Not yet: a link from the content page's Publish dialog ("publish the rest of this pillar").
+
+## Watch next
+
+- Do the 55–84 suggestions get confirmed or rejected (`publish:live-confirmed` vs
+  `publish:live-rejected`)? A lot of rejects means the Ready window is too wide.
+- How many Ready items the sweep merges on its own (`publish-live-sweep merged=` in worker logs,
+  `status_change` to Published with `user_id IS NULL` on non-Scheduled items).
+- Is Download media used at all (`publish:media-downloaded`)? Most cross-posts have no media of their own.
 
 ## Done when
 
 At least 60% of the week's Ready To Publish → Published transitions happen on `/[brand]/publish`
 or through detection rather than the per-item dialog.
 
-**The number**: `publish:link-pasted` marks (plus confirmed detections, once milestone 3 ships)
+**The number**: `publish:link-pasted` + `publish:live-confirmed` marks + sweep auto-merges
 ÷ `status_change` events to Published, weekly.
