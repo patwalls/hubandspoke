@@ -64,6 +64,7 @@ import { ContentActivity } from "./content-activity";
 import { ClipRenderStatusPill } from "./clip-render-status-pill";
 import { DesignRenderStatusPill } from "./design-render-status-pill";
 import { DesignEditorLauncher } from "./design-editor-launcher";
+import { NewsletterEditorLauncher } from "./newsletter-item-editor";
 const AttachDmKeywordDialog = dynamic(() => import("@/components/dashboard/attach-dm-keyword-dialog").then((m) => m.AttachDmKeywordDialog), { ssr: false });
 const TiktokDraftDialog = dynamic(() => import("./tiktok-draft-dialog").then((m) => m.TiktokDraftDialog), { ssr: false });
 const PublishScheduleDialog = dynamic(() => import("./publish-schedule-dialog").then((m) => m.PublishScheduleDialog), { ssr: false });
@@ -2757,6 +2758,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
               item={{ id: item.id, brand: item.brand ?? "starter-story", sourceType: item.sourceType ?? null, format: item.format ?? null }}
               onDone={() => void load()}
             />
+            <NewsletterEditorLauncher item={{ id: item.id, postType: item.postType ?? null }} onDone={() => void load()} />
             <TranscriptButton
               itemId={item.id}
               hasMedia={!!item.mediaS3Key}

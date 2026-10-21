@@ -5,6 +5,7 @@ import { requireFeature } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
 import { newsletterDrafts } from "@/lib/db/schema";
 import { enqueue } from "@/jobs/enqueue";
+import { advanceNewsletterItem } from "@/lib/services/newsletter-drafter/queue-status";
 import { NEWSLETTER_START_DELAY_MS } from "@/lib/services/newsletter-drafter/format-config";
 
 interface RouteContext {
@@ -40,6 +41,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
   if (!row) return NextResponse.json({ error: "Already drafting, or not found" }, { status: 409 });
   // Two attempts: the retry only does work after a deploy abort; a real
   // failure marks the row `failed` first, so the retry is a no-op.
+  await advanceNewsletterItem(id, "Assigned");
   await enqueue("newsletter-draft", { newsletterDraftId: id }, {
     jobKey: `newsletter-draft:${id}`,
     maxAttempts: 2,

@@ -10,6 +10,7 @@ import { db } from "@/lib/db";
 import { brands, formats, newsletterDrafts } from "@/lib/db/schema";
 import { createDraftEmailFromTemplate } from "@/lib/hubspot-marketing-email";
 import { markdownToEmailHtml } from "@/lib/newsletter-email-html";
+import { advanceNewsletterItem } from "@/lib/services/newsletter-drafter/queue-status";
 import { blockMarkdown, hubspotEmailName, templateFor } from "@/lib/newsletter-template";
 
 export interface HubspotNewsletterCreateDraftPayload {
@@ -72,6 +73,7 @@ export const hubspotNewsletterCreateDraftTask: Task = async (rawPayload, helpers
       .update(newsletterDrafts)
       .set({ hubspotEmailId: email.id, hubspotEmailUrl: email.editUrl, hubspotStatus: "created", hubspotError: null, updatedAt: new Date() })
       .where(eq(newsletterDrafts.id, row.id));
+    await advanceNewsletterItem(row.id, "Ready To Publish");
     helpers.logger.info(`hubspot-newsletter-create-draft: ${row.id} → HubSpot email ${email.id}`);
   } catch (err) {
     // Not re-thrown: a HubSpot 4xx won't fix itself on retry, and a retry

@@ -6,7 +6,8 @@
 // else gets the regular triage dialog.
 
 import { useEffect, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { Loader2, Mail } from "lucide-react";
+import { useFeatureFlags } from "@/components/clip-editor/use-feature-flags";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { NewsletterEditorDialog } from "@/components/dashboard/newsletter-editor-dialog";
 
@@ -55,5 +56,31 @@ export function NewsletterItemEditor({
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** Content-page entry to the newsletter editor for a newsletter item (flagged). Renders nothing otherwise. */
+export function NewsletterEditorLauncher({
+  item,
+  onDone,
+}: {
+  item: { id: string; postType: string | null };
+  onDone: () => void;
+}) {
+  const flags = useFeatureFlags();
+  const [open, setOpen] = useState(false);
+  if (item.postType !== "newsletter" || !flags?.newsletterDrafter) return null;
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="inline-flex h-6 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted/40"
+      >
+        <Mail className="size-3" aria-hidden />
+        Open newsletter editor
+      </button>
+      <NewsletterItemEditor itemId={item.id} open={open} onOpenChange={setOpen} onDone={onDone} />
+    </>
   );
 }

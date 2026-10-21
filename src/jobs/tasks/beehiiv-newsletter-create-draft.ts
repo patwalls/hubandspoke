@@ -10,6 +10,7 @@ import { db } from "@/lib/db";
 import { formats, newsletterDrafts, productionItems } from "@/lib/db/schema";
 import { createFuturepediaDraft } from "@/lib/beehiiv";
 import { buildBeehiivDraftRequest } from "@/lib/beehiiv-draft";
+import { advanceNewsletterItem } from "@/lib/services/newsletter-drafter/queue-status";
 import { templateFor } from "@/lib/newsletter-template";
 import { voiceForChannel } from "@/lib/services/newsletter-drafter/format-config";
 
@@ -76,6 +77,7 @@ export const beehiivNewsletterCreateDraftTask: Task = async (rawPayload, helpers
       .update(newsletterDrafts)
       .set({ beehiivStatus: "created", beehiivError: null, updatedAt: new Date() })
       .where(eq(newsletterDrafts.id, row.id));
+    await advanceNewsletterItem(row.id, "Ready To Publish");
     helpers.logger.info(`beehiiv-newsletter-create-draft: ${row.id} → beehiiv draft ${post.id}`);
   } catch (err) {
     // Not re-thrown: a retry after a create that went through would leave a second draft.
