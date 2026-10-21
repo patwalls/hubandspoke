@@ -6,7 +6,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { brands, formats, newsletterDrafts } from "@/lib/db/schema";
-import { NEWSLETTER_MODEL, NewsletterCancelledError, runNewsletterAgent, storyKeyOf, type NewsletterSubmission } from "./agent";
+import { newsletterModel, NewsletterCancelledError, runNewsletterAgent, storyKeyOf, type NewsletterSubmission } from "./agent";
 import { blockedKeys, loadUsage, toStoredSources, usageGroupFor, withInferredSources } from "./usage";
 import { buildStoryPlan, withPlanDates } from "./story-plan";
 import { composeIssue, templateFor, type NewsletterSection } from "@/lib/newsletter-template";
@@ -175,7 +175,7 @@ export async function runNewsletterDraft(
     if (opts.signal?.aborted) throw err;
     await db
       .update(newsletterDrafts)
-      .set({ status: "failed", error: (err as Error).message.slice(0, 2000), model: config.model ?? NEWSLETTER_MODEL, updatedAt: new Date() })
+      .set({ status: "failed", error: (err as Error).message.slice(0, 2000), model: newsletterModel(config.model), updatedAt: new Date() })
       .where(ours);
     throw err;
   }

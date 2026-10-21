@@ -29,6 +29,15 @@ import { SPECIAL_MARKER } from "./special-compose";
 import { toolWindow, type DraftWindow } from "./window";
 
 export const NEWSLETTER_MODEL = "claude-opus-5-5";
+
+/**
+ * The model a run uses: `NEWSLETTER_MODEL_OVERRIDE` (Heroku config — a cheaper
+ * model while testing features; unset it to go back) beats the format's own
+ * model (format-config.ts), which beats NEWSLETTER_MODEL.
+ */
+export function newsletterModel(formatModel?: string | null): string {
+  return process.env.NEWSLETTER_MODEL_OVERRIDE?.trim() || formatModel || NEWSLETTER_MODEL;
+}
 const MAX_TURNS = 30;
 const MAX_TOKENS = 32_000;
 /** Per-turn ceiling for one non-streaming call (a long write turn + thinking). */
@@ -235,7 +244,7 @@ export interface NewsletterAgentArgs {
   /** single_video formats: the one video this issue is written from. When set
    *  the agent gets only the submit tool — no search, no web. */
   video?: SourceVideo | null;
-  /** Model override (format-config.ts); defaults to NEWSLETTER_MODEL. */
+  /** The format's model (format-config.ts); see newsletterModel() for the full order. */
   model?: string;
   /** Story usage for this newsletter (key → times run / last date), excluding this draft. */
   usage?: Map<string, StoryUsage>;
@@ -501,7 +510,7 @@ async function runLoop<T>(spec: LoopSpec<T>): Promise<{ value: T; model: string;
     // for large max_tokens" guard.
     const message = await client.beta.messages.create(
       {
-        model: args.model ?? NEWSLETTER_MODEL,
+        model: newsletterModel(args.model),
         max_tokens: MAX_TOKENS,
         thinking: { type: "adaptive" },
         output_config: { effort: "high" },

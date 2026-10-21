@@ -137,3 +137,20 @@ describe("withInferredSources", () => {
     expect(out.map((s) => s.source?.key ?? null)).toEqual([null, "video:v1", "case:/stories/x"]);
   });
 });
+
+describe("newsletterModel", () => {
+  it("lets the Heroku override beat the format's model, and falls back to Opus", async () => {
+    const { newsletterModel } = await import("./agent");
+    const prev = process.env.NEWSLETTER_MODEL_OVERRIDE;
+    try {
+      delete process.env.NEWSLETTER_MODEL_OVERRIDE;
+      expect(newsletterModel(undefined)).toBe("claude-opus-5-5");
+      expect(newsletterModel("claude-sonnet-5-5")).toBe("claude-sonnet-5-5");
+      process.env.NEWSLETTER_MODEL_OVERRIDE = "claude-haiku-5-5";
+      expect(newsletterModel("claude-sonnet-5-5")).toBe("claude-haiku-5-5");
+    } finally {
+      if (prev === undefined) delete process.env.NEWSLETTER_MODEL_OVERRIDE;
+      else process.env.NEWSLETTER_MODEL_OVERRIDE = prev;
+    }
+  });
+});
