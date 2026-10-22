@@ -29,6 +29,17 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-10-22-my-work-news",
+    shippedAt: "2026-10-22T23:30:00Z",
+    kind: "feature",
+    title: "See new comments and send-backs right in My Work",
+    body:
+      "Each post in My Work now shows the latest comment someone left on it, and \"Sent back by (name)\" when a reviewer " +
+      "returned it. A dot marks what's new since you last worked on it, so you can see what needs you without opening every post.",
+    href: "/my-work",
+    screen: "/my-work",
+  },
+  {
     id: "2026-10-22-handoff-button",
     shippedAt: "2026-10-22T19:00:00Z",
     kind: "feature",

@@ -4,6 +4,36 @@ The `/build` loop's notebook: what people actually do, candidates considered (bu
 why), and what other tools ship. Newest first. Never re-propose something listed here without
 new evidence.
 
+## 2026-10-22 — lap 8 (project lap: my-day, milestone 3)
+
+**Learned** (2 days of usage, 30 days of actions)
+- Nothing new broke: no failed renders, Sentry only has worker-lock warnings and an info-level
+  HTTP overhead on /queue (ops loop). This week is on pace (408 items, 39 clips, 13 designs).
+- The status-only people (Noman, Kate, Nuriel) open the app through item pages and the What's
+  new pop-up, never `/my-work`. Only Pat and Sam open My Work (20 views); row actions were used twice.
+- Comments are where handoffs happen today: 8 people have 38 open, assigned posts with a comment
+  from someone else in 30 days, 21 of them newer than that person's last touch on the post
+  (Saj 7 of 9, Kate 5 of 5). The inbox that would tell them is ignored (129–478 unread).
+
+**Did the last features land?** `handoff-button` (19:00): no way to tell yet — it has no mark of
+its own and the status changes look the same as manual ones; add a mark next time it's touched.
+`my-work-row-actions`: Pat + Sam once each. `clip-editor-next-idea`, `publish-way-in`: still
+nothing; the curator's sessions since have been reposts and production.
+
+**Outward**
+- Linear Inbox: one notification per key event on your issues, read/unread with U, "show unread
+  first" sorts what's new to the top, and opening one lets you act in place.
+  https://linear.app/docs/inbox
+- Lesson: our people don't open an inbox, so the unread mark and the last comment go on the
+  My Work row they already scan.
+
+**Candidates**
+- → building: **New comments + send-backs on My Work rows** (my-day M3). source: usage (21 unseen
+  comments on open posts, inbox ignored)
+- A `content:handoff` mark on the one-click handoff button, so we can tell if it landed. source:
+  usage. Tiny; fold into the next lap that touches the content page.
+- My Work's row actions should hand off the editor too (still open from lap 7). source: usage
+
 ## 2026-10-22 — lap 7 (polish lap)
 
 **Learned** (2 days of usage, 30 days of actions)
@@ -237,6 +267,8 @@ week of Oct 12). Cross-posts steady at 60–80/week.
   source: usage
 
 ## Built
+- 2026-10-22 New comments + send-backs on My Work rows (project my-day milestone 3). Card
+  `2026-10-22-my-work-news`.
 - 2026-10-22 One-click handoff on the content page (polish). Card `2026-10-22-handoff-button`.
 - 2026-10-22 Approve / Send back / Send to review from My Work rows + keys (project my-day
   milestone 2). Card `2026-10-22-my-work-row-actions`.

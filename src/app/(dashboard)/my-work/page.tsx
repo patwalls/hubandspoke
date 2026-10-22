@@ -4,7 +4,8 @@ import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { contentComments, productionItems, users } from "@/lib/db/schema";
-import { getMyWork } from "@/lib/my-work/queries";
+import { getMyWork, getRowNews } from "@/lib/my-work/queries";
+import { ago, type RowNews } from "@/lib/my-work/news";
 import { cn } from "@/lib/utils";
 import { statusClassWithPalette } from "@/lib/badge-colors";
 import { getAllStatusPalettes } from "@/lib/db/brand-statuses";
@@ -77,6 +78,11 @@ export default async function MyWorkPage() {
       : [],
   );
 
+  // What changed on each row since you last touched it (my-day M3).
+  const news = await getRowNews(userId, [
+    ...new Set([...mineRows, ...toReview].map((r) => r.id)),
+  ]);
+
   // Per-brand color palettes; resolved server-side and threaded into the
   // Section client so each row's chip uses the brand's configured color.
   const palettes = await getAllStatusPalettes();
@@ -99,6 +105,7 @@ export default async function MyWorkPage() {
         emptyText="Nothing in your queue. Nice."
         userId={userId}
         palettes={palettes}
+        news={news}
       />
 
       {toReview.length > 0 && (
@@ -110,6 +117,7 @@ export default async function MyWorkPage() {
           emptyText="Nothing to review."
           userId={userId}
           palettes={palettes}
+          news={news}
           editorNames={editorNames}
         />
       )}
@@ -122,6 +130,7 @@ export default async function MyWorkPage() {
         emptyText="Nothing here yet."
         userId={userId}
         palettes={palettes}
+        news={news}
       />
 
       <div className="rounded-lg border border-border bg-card">
@@ -192,6 +201,7 @@ function Section({
   emptyText,
   userId,
   palettes,
+  news,
   editorNames,
 }: {
   title: string;
@@ -201,6 +211,7 @@ function Section({
   emptyText: string;
   userId: string;
   palettes: ReadonlyMap<string, ReadonlyMap<string, string>>;
+  news: ReadonlyMap<string, RowNews>;
   /** Set on To review: adds an Editor column. */
   editorNames?: ReadonlyMap<string, string>;
 }) {
@@ -260,6 +271,7 @@ function Section({
                     >
                       {r.title || "(Untitled)"}
                     </Link>
+                    {news.get(r.id) && <RowNewsLine news={news.get(r.id)!} />}
                   </td>
                   <td className="px-3 py-2 text-muted-foreground">
                     {r.brand}
@@ -303,6 +315,33 @@ function Section({
             </tbody>
           </table>
         </div>
+      )}
+    </div>
+  );
+}
+
+/** Under the row's title: sent back by whom, and the latest comment from someone else. */
+function RowNewsLine({ news }: { news: RowNews }) {
+  const { comment, sentBack, isNew } = news;
+  return (
+    <div data-my-work-news className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground min-w-0">
+      {isNew && (
+        <span
+          title="New since your last change"
+          aria-label="New since your last change"
+          className="size-1.5 rounded-full bg-primary shrink-0"
+        />
+      )}
+      {sentBack && (
+        <span className="shrink-0 rounded border border-amber-500/40 bg-amber-500/10 px-1 py-px text-[10px] font-medium text-amber-700 dark:text-amber-400">
+          Sent back by {sentBack.by} · {ago(sentBack.at)}
+        </span>
+      )}
+      {comment && (
+        <span className={cn("truncate max-w-[36rem]", isNew && "text-foreground")}>
+          <span className="font-medium">{comment.author}:</span> {comment.text}
+          <span className="text-muted-foreground"> · {ago(comment.at)}</span>
+        </span>
       )}
     </div>
   );

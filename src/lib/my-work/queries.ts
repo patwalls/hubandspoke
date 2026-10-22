@@ -2,6 +2,8 @@ import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { contentEvents, productionItems } from "@/lib/db/schema";
 import { REVIEW_STATUS, splitMyWork, type MyWorkSplit } from "./split";
+import { htmlToPlainText } from "@/lib/comments/sanitize";
+import { rowNews, type RowNews } from "./news";
 
 const TERMINAL = ["Published", "Killed"];
 const REVIEWER_WINDOW_DAYS = 30;
@@ -87,4 +89,69 @@ export async function getMyWork(userId: string): Promise<MyWorkSplit<MyWorkItem>
     : [];
 
   return splitMyWork(mine, inReview, reviewBrands);
+}
+
+const NEWS_WINDOW_DAYS = 30;
+
+/**
+ * Per item: the latest comment and send-back by someone else, and your own
+ * last action — folded by `rowNews` into what the My Work row shows.
+ */
+export async function getRowNews(userId: string, itemIds: string[]): Promise<Map<string, RowNews>> {
+  if (itemIds.length === 0) return new Map();
+  const ids = sql.join(itemIds.map((id) => sql`${id}::uuid`), sql`, `);
+  const firstName = (name: string | null) => (name ?? "").trim().split(/\s+/)[0] || "Someone";
+
+  const [comments, sendBacks, mine] = await Promise.all([
+    db.execute<{ item_id: string; body: string; at: Date | string; name: string | null }>(sql`
+      SELECT DISTINCT ON (c.content_item_id)
+        c.content_item_id AS item_id, c.body, c.created_at AS at,
+        COALESCE(u.name, c.author_name) AS name
+      FROM content_comments c
+      LEFT JOIN users u ON u.id = c.user_id
+      WHERE c.content_item_id IN (${ids})
+        AND (c.user_id IS NULL OR c.user_id <> ${userId}::uuid)
+        AND c.created_at > now() - make_interval(days => ${NEWS_WINDOW_DAYS})
+      ORDER BY c.content_item_id, c.created_at DESC
+    `),
+    db.execute<{ item_id: string; at: Date | string; name: string | null }>(sql`
+      SELECT DISTINCT ON (e.content_item_id)
+        e.content_item_id AS item_id, e.created_at AS at, u.name
+      FROM content_events e
+      LEFT JOIN users u ON u.id = e.user_id
+      WHERE e.content_item_id IN (${ids})
+        AND e.event_type = 'status_change'
+        AND e.payload->>'to' = 'Assigned'
+        AND e.payload->>'from' IN (${REVIEW_STATUS}, 'Ready To Publish')
+        AND e.user_id IS NOT NULL AND e.user_id <> ${userId}::uuid
+        AND e.created_at > now() - make_interval(days => ${NEWS_WINDOW_DAYS})
+      ORDER BY e.content_item_id, e.created_at DESC
+    `),
+    db.execute<{ item_id: string; at: Date | string }>(sql`
+      SELECT item_id, max(at) AS at FROM (
+        SELECT content_item_id AS item_id, created_at AS at FROM content_events
+          WHERE user_id = ${userId}::uuid AND content_item_id IN (${ids})
+        UNION ALL
+        SELECT content_item_id, created_at FROM content_comments
+          WHERE user_id = ${userId}::uuid AND content_item_id IN (${ids})
+      ) x GROUP BY item_id
+    `),
+  ]);
+
+  const commentBy = new Map([...comments].map((r) => [r.item_id, r]));
+  const sendBackBy = new Map([...sendBacks].map((r) => [r.item_id, r]));
+  const mineBy = new Map([...mine].map((r) => [r.item_id, new Date(r.at)]));
+
+  const out = new Map<string, RowNews>();
+  for (const id of itemIds) {
+    const c = commentBy.get(id);
+    const b = sendBackBy.get(id);
+    const news = rowNews({
+      lastComment: c ? { author: firstName(c.name), text: htmlToPlainText(c.body), at: new Date(c.at) } : null,
+      lastSendBack: b ? { by: firstName(b.name), at: new Date(b.at) } : null,
+      myLastAt: mineBy.get(id) ?? null,
+    });
+    if (news) out.set(id, news);
+  }
+  return out;
 }
