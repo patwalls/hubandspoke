@@ -61,6 +61,11 @@ export function parseScreenshotMarks(sectionKey: string, markdown: string): Scre
   return out;
 }
 
+/** Replace every screenshot placeholder in `markdown` with `fn(sec, label)`. */
+export function replaceScreenshotMarks(markdown: string, fn: (sec: number | null, label: string) => string): string {
+  return markdown.replace(MARK, (_raw, ts: string | undefined, label: string) => fn(ts ? parseTimestamp(ts) : null, label.trim()));
+}
+
 /**
  * The section's Markdown with each placeholder that has a chosen frame
  * replaced by an image line (`![label](url)` on its own line). `urlFor` maps

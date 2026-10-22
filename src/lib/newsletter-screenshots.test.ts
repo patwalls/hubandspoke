@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyScreenshots, formatTimestamp, parseScreenshotMarks, parseTimestamp, screenshotKey } from "./newsletter-screenshots";
+import { applyScreenshots, formatTimestamp, parseScreenshotMarks, parseTimestamp, replaceScreenshotMarks, screenshotKey } from "./newsletter-screenshots";
 
 describe("screenshot placeholders", () => {
   it("finds timestamped and untimed placeholders", () => {
@@ -18,5 +18,10 @@ describe("screenshot placeholders", () => {
     const out = applyScreenshots("steps", md, chosen, (c) => `https://img/${c.key}`);
     expect(out).toContain("\n![the Skills page](https://img/k.jpg)\n");
     expect(out).toContain("*[Screenshot @ 5:00: the result]*");
+  });
+
+  it("hands each placeholder's moment and label to replaceScreenshotMarks (zero-padded times too)", () => {
+    const out = replaceScreenshotMarks("a\n*[Screenshot @ 03:39: the Connectors page]*\n[Screenshot: no time]", (sec, label) => `<${sec}|${label}>`);
+    expect(out).toBe("a\n<219|the Connectors page>\n<null|no time>");
   });
 });
