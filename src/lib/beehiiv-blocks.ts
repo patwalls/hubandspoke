@@ -121,17 +121,33 @@ export function layoutSection(md: string, bullets: "list" | "lines" | "paragraph
   return arrowAfterLink(flattenBullets(splitStepTitles(md), bullets));
 }
 
+/** One paragraph per line, with no spacing between them (the group keeps its outer spacing). */
+function tightLines(lines: TextRun[][]): Block[] {
+  return lines.map((runs, i) => {
+    const vs: Record<string, number> = {};
+    if (i > 0) Object.assign(vs, { inner_spacing_top: 0, outer_spacing_top: 0 });
+    if (i < lines.length - 1) Object.assign(vs, { inner_spacing_bottom: 0, outer_spacing_bottom: 0 });
+    return { type: "paragraph", formattedText: runs, ...(Object.keys(vs).length ? { visual_settings: vs } : {}) };
+  });
+}
+
 /**
  * A section's Markdown → blocks. Each non-empty line is its own paragraph (the
  * drafts use short lines). `buttons`: a line that is only a link (optionally
  * bold) becomes a button — the offer CTA and "Watch The Full Video" — instead
- * of a text link. A line ending in a Markdown hard break ("  ") continues
- * the same paragraph on a new line.
+ * of a text link. Lines joined by Markdown hard breaks ("  ", e.g. the ✅
+ * block) stay one tight group: beehiiv splits a newline inside a paragraph
+ * into separate paragraphs anyway, so each line is its own paragraph with no
+ * spacing between them (`tightLines`), like the template's one-paragraph block.
  */
 export function markdownToBlocks(md: string, opts: { buttons?: boolean; buttonColor?: string } = {}): Block[] {
   const blocks: Block[] = [];
   let list: TextRun[][] = [];
-  let para: TextRun[] | null = null;
+  let para: TextRun[][] | null = null;
+  const flushPara = () => {
+    if (para) blocks.push(...tightLines(para));
+    para = null;
+  };
   const flushList = () => {
     if (list.length) blocks.push({ type: "list", listType: "unordered", items: list.map((runs) => ({ formattedText: runs })) });
     list = [];
@@ -139,11 +155,8 @@ export function markdownToBlocks(md: string, opts: { buttons?: boolean; buttonCo
   for (const raw of md.split("\n")) {
     const line = raw.trim();
     if (para) {
-      if (line) para.push({ text: "\n" }, ...inlineRuns(line));
-      if (!line || !/ {2}$/.test(raw)) {
-        blocks.push({ type: "paragraph", formattedText: para });
-        para = null;
-      }
+      if (line) para.push(inlineRuns(line));
+      if (!line || !/ {2}$/.test(raw)) flushPara();
       continue;
     }
     if (!line) {
@@ -183,12 +196,12 @@ export function markdownToBlocks(md: string, opts: { buttons?: boolean; buttonCo
       continue;
     }
     if (/ {2}$/.test(raw)) {
-      para = inlineRuns(line);
+      para = [inlineRuns(line)];
       continue;
     }
     blocks.push({ type: "paragraph", formattedText: inlineRuns(line) });
   }
-  if (para) blocks.push({ type: "paragraph", formattedText: para });
+  flushPara();
   flushList();
   return blocks;
 }

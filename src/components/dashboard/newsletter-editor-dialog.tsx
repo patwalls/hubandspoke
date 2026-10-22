@@ -25,7 +25,7 @@ import { EmailPreview } from "@/components/dashboard/email-preview";
 import { formatShortcut, useInlineFormat } from "@/components/dashboard/editable-section";
 import { ImagePanel, ScreenshotMarkPanel, ScreenshotPicker, useScreenshots } from "@/components/dashboard/newsletter-screenshot-picker";
 import { isVideoThumbnail } from "@/components/dashboard/preview-screenshots";
-import { parseScreenshotMarks, screenshotKey, type ScreenshotMark } from "@/lib/newsletter-screenshots";
+import { formatTimestamp, insertStepScreenshot, parseScreenshotMarks, removeScreenshotMark, screenshotKey, stepsWithoutScreenshots, type ScreenshotMark } from "@/lib/newsletter-screenshots";
 import type { NewsletterDraftSource, NewsletterSpecialSource } from "@/lib/db/schema";
 import { NEWSLETTER_START_DELAY_MS } from "@/lib/services/newsletter-drafter/format-config";
 
@@ -192,6 +192,14 @@ function Workspace({
   // Visual view (every templated newsletter): what's selected on the canvas, and the section open for typing.
   const [view, setView] = useState<"visual" | "text">(draft.template ? "visual" : "text");
   const [selected, setSelected] = useState<string | null>(null);
+  const [addingShot, setAddingShot] = useState<string | null>(null);
+  /**
+   * The side panel. Before a click removes the button it came from (+ Add
+   * screenshot, a trash icon), focus moves here without scrolling: otherwise
+   * the dialog grabs focus back and scrolls the canvas away from the step.
+   */
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const keepPlace = () => panelRef.current?.focus({ preventScroll: true });
   const [editingSection, setEditingSection] = useState<string | null>(null);
 
   // Re-seed local edits when the server version moves under us (draft landed, a
@@ -410,6 +418,42 @@ function Workspace({
     setSelected(`shot:${markKey}`);
     return markKey;
   };
+  /** Trash: the screenshot out of the text entirely (its pick cleared too). */
+  const deleteShot = async (sectionKey: string, markKey: string) => {
+    keepPlace();
+    setSelected(null);
+    setEditingSection(null);
+    await commitSection(sectionKey, removeScreenshotMark(sectionMd(sectionKey), sectionKey, markKey));
+    if (shots.chosen[markKey]) await shots.choose(markKey, null);
+  };
+  /**
+   * "+ Add screenshot" under step `n`: Haiku finds when the step happens in the
+   * video, the placeholder goes in after the step's text, and the auto-pick
+   * grabs that frame + its strip; the picker opens to adjust. Without a moment
+   * the placeholder still goes in, to pick by hand.
+   */
+  const addShot = async (sectionKey: string, n: number) => {
+    const step = stepsWithoutScreenshots(sectionMd(sectionKey)).find((s) => s.n === n);
+    if (!step) return;
+    keepPlace();
+    setEditingSection(null);
+    setAddingShot(`${sectionKey}:${n}`);
+    try {
+      const moment = await shots.suggest(sectionKey, step.text);
+      const taken = new Set(parseScreenshotMarks(sectionKey, sectionMd(sectionKey)).map((m) => m.label.toLowerCase()));
+      const base = moment?.label ?? `Step ${n}`;
+      let label = base;
+      for (let k = 2; taken.has(label.toLowerCase()); k++) label = `${base} ${k}`;
+      const placeholder = moment ? `*[Screenshot @ ${formatTimestamp(moment.sec)}: ${label}]*` : `*[Screenshot: ${label}]*`;
+      if (!(await commitSection(sectionKey, insertStepScreenshot(sectionMd(sectionKey), n, placeholder)))) return;
+      const markKey = screenshotKey(sectionKey, label);
+      setSelected(`shot:${markKey}`);
+      // Grabs + picks the frame at its moment (and its strip), and reloads the screenshot state either way.
+      await shots.autoPick();
+    } finally {
+      setAddingShot(null);
+    }
+  };
   /** A screenshot placeholder back to the section's video thumbnail. */
   const placeholderToThumbnail = async (mark: ScreenshotMark) => {
     const videoId = shots.sectionVideos[mark.sectionKey];
@@ -523,6 +567,15 @@ function Workspace({
               setEditingSection(null);
               setSelected(`img:${key}:${index}`);
             },
+            onDeleteShot: (key, markKey) => void deleteShot(key, markKey),
+            onRemoveImage: (key, index) => {
+              keepPlace();
+              setSelected(null);
+              setEditingSection(null);
+              void commitSection(key, replaceImage(key, index, "").replace(/\n{3,}/g, "\n\n"));
+            },
+            onAddShot: (key, n) => void addShot(key, n),
+            addingShot,
             onDropImage: (key, index, file) => {
               setEditingSection(null);
               void imageToPlaceholder(key, index).then((markKey) => {
@@ -537,7 +590,7 @@ function Workspace({
         </p>
       </div>
 
-      <div className="flex min-h-0 flex-col gap-4 overflow-y-auto border-l p-4">
+      <div ref={panelRef} tabIndex={-1} className="flex min-h-0 flex-col gap-4 overflow-y-auto border-l p-4 outline-none">
         {selected && (
           <button type="button" onClick={deselect} className="self-start text-xs text-muted-foreground hover:text-foreground">
             ← Subject &amp; preview text
@@ -583,7 +636,13 @@ function Workspace({
           <div className="flex flex-col gap-3">
             <span className="text-sm font-medium">Screenshot</span>
             {shotMark ? (
-              <ScreenshotMarkPanel key={shotMark.key} mark={shotMark} shots={shots} onUseThumbnail={() => void placeholderToThumbnail(shotMark)} />
+              <ScreenshotMarkPanel
+                key={shotMark.key}
+                mark={shotMark}
+                shots={shots}
+                onUseThumbnail={() => void placeholderToThumbnail(shotMark)}
+                onDelete={() => void deleteShot(shotMark.sectionKey, shotMark.key)}
+              />
             ) : (
               <span className="text-xs text-muted-foreground">This placeholder is no longer in the text.</span>
             )}

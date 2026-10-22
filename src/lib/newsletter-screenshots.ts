@@ -90,3 +90,63 @@ export function applyScreenshots(
     return url ? `\n![${label.trim().replace(/[[\]]/g, "")}](${url})\n` : raw;
   });
 }
+
+/** A step title line: "**4. Title**", "**4. Title.** body" or "4. **Title.** body". */
+const STEP_TITLE = /^\s*(?:\*\*(\d+)\.\s|(\d+)\.\s+\*\*)/;
+const HAS_IMAGE = /!\[[^\]]*\]\([^)]*\)|\[Screenshot/i;
+
+export interface StepSpot {
+  /** The step's number as written. */
+  n: number;
+  /** The step's text (title + explanation), for finding its moment in the video. */
+  text: string;
+  /** Line index a screenshot goes after: the step's first line of explanation. */
+  after: number;
+}
+
+/**
+ * Numbered steps with no screenshot or image yet, and where one would go
+ * (after the step's first line of explanation, as in the Kevin/Saj
+ * templates). Structural parsing of our own step layout. Pure.
+ */
+export function stepsWithoutScreenshots(markdown: string): StepSpot[] {
+  const lines = markdown.split("\n");
+  const titles = lines.flatMap((l, i) => {
+    const m = l.match(STEP_TITLE);
+    return m ? [{ i, n: Number(m[1] ?? m[2]), open: m[0].length }] : [];
+  });
+  return titles.flatMap(({ i, n, open }, k) => {
+    const end = k + 1 < titles.length ? titles[k + 1].i : lines.length;
+    const block = lines.slice(i, end);
+    if (block.some((l) => HAS_IMAGE.test(l))) return [];
+    const close = lines[i].indexOf("**", open);
+    const inlineBody = close >= 0 && lines[i].slice(close + 2).trim().length > 0;
+    let after = i;
+    if (!inlineBody) {
+      for (let j = i + 1; j < end; j++) {
+        const t = lines[j].trim();
+        if (!t) continue;
+        if (!/^#{1,4}\s/.test(t)) after = j;
+        break;
+      }
+    }
+    return [{ n, text: block.join("\n").trim(), after }];
+  });
+}
+
+/** `markdown` with `placeholder` on its own line after step `n`'s first line of explanation (unchanged if that step has an image). Pure. */
+export function insertStepScreenshot(markdown: string, n: number, placeholder: string): string {
+  const spot = stepsWithoutScreenshots(markdown).find((s) => s.n === n);
+  if (!spot) return markdown;
+  const lines = markdown.split("\n");
+  lines.splice(spot.after + 1, 0, "", placeholder, "");
+  return lines.join("\n").replace(/\n{3,}/g, "\n\n");
+}
+
+/** `markdown` without the placeholder `markKey` (the whole screenshot, not just its image). Pure. */
+export function removeScreenshotMark(markdown: string, sectionKey: string, markKey: string): string {
+  return markdown
+    .replace(MARK, (raw, _ts: string, label: string) => (screenshotKey(sectionKey, label) === markKey ? "" : raw))
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}

@@ -54,8 +54,24 @@ export interface ScreenshotsState {
   grabAt: (markKey: string, sec: number) => Promise<void>;
   choose: (markKey: string, frameId: string | null) => Promise<void>;
   upload: (markKey: string, file: File) => Promise<void>;
+  /** "+ Add screenshot": when `step` happens in the section's video (Haiku), or null when it can't tell. */
+  suggest: (sectionKey: string, step: string) => Promise<{ sec: number; label: string } | null>;
+  /** Grab + pick the frame (and strip) for placeholders just added with a moment. */
+  autoPick: () => Promise<void>;
   busy: string | null;
   error: string | null;
+}
+
+/** The same image (same S3 object) keeps its old signed link, so a reload doesn't make every image on the canvas reload, collapse and jump. */
+function keepLinks(prev: ScreenshotsPayload, next: ScreenshotsPayload): ScreenshotsPayload {
+  const same = (a: string | null | undefined, b: string | null | undefined) => !!a && !!b && a.split("?")[0] === b.split("?")[0];
+  const oldFrames = new Map(prev.frames.map((f) => [f.id, f.previewUrl]));
+  return {
+    ...next,
+    frames: next.frames.map((f) => (same(oldFrames.get(f.id), f.previewUrl) ? { ...f, previewUrl: oldFrames.get(f.id)! } : f)),
+    previews: Object.fromEntries(Object.entries(next.previews).map(([k, u]) => [k, same(prev.previews[k], u) ? prev.previews[k] : u])),
+    videoUrls: Object.fromEntries(Object.entries(next.videoUrls).map(([k, u]) => [k, same(prev.videoUrls[k], u) ? prev.videoUrls[k] : u])),
+  };
 }
 
 export function useScreenshots(draftId: string, enabled: boolean, initialPreviews: Record<string, string> = {}): ScreenshotsState {
@@ -69,14 +85,14 @@ export function useScreenshots(draftId: string, enabled: boolean, initialPreview
   }, [draftId]);
   const load = useCallback(async () => {
     const j = await fetchState();
-    if (j) setState(j);
+    if (j) setState((prev) => keepLinks(prev, j));
   }, [fetchState]);
 
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
     fetchState().then((j) => {
-      if (!cancelled && j) setState(j);
+      if (!cancelled && j) setState((prev) => keepLinks(prev, j));
     });
     return () => {
       cancelled = true;
@@ -118,6 +134,19 @@ export function useScreenshots(draftId: string, enabled: boolean, initialPreview
     return call(`upload:${markKey}`, () => fetch(`/api/newsletter-drafts/${draftId}/screenshots/upload`, { method: "POST", body: form }), "Couldn't upload that image");
   };
 
+  const suggest = async (sectionKey: string, step: string) => {
+    setError(null);
+    setBusy(`suggest:${sectionKey}`);
+    try {
+      const r = await fetch(`/api/newsletter-drafts/${draftId}/screenshots/suggest`, json("POST", { sectionKey, step }));
+      const j = r.ok ? ((await r.json()) as { sec: number | null; label: string | null }) : null;
+      return j?.sec != null && j.label ? { sec: j.sec, label: j.label } : null;
+    } finally {
+      setBusy(null);
+    }
+  };
+  const autoPick = () => call("auto", () => fetch(`/api/newsletter-drafts/${draftId}/screenshots`, json("POST", { markKey: "auto", auto: true })), "Couldn't grab the frame");
+
   const urlFor = (c: ChosenScreenshot, markKey: string) =>
     c.pending ? null : ((c.frameId ? state.frames.find((f) => f.id === c.frameId)?.previewUrl : null) ?? state.previews[markKey] ?? null);
 
@@ -135,6 +164,8 @@ export function useScreenshots(draftId: string, enabled: boolean, initialPreview
     grabAt,
     choose,
     upload,
+    suggest,
+    autoPick,
     busy,
     error,
   };
@@ -195,11 +226,23 @@ function FrameGrid({ frames, pickedId, disabled, onPick }: { frames: Frame[]; pi
  * a grid of frames across that step's part of the video, and the video with
  * its transcript to find any other moment.
  */
-export function ScreenshotMarkPanel({ mark: m, shots, onUseThumbnail }: { mark: ScreenshotMark; shots: ScreenshotsState; onUseThumbnail?: () => void }) {
+export function ScreenshotMarkPanel({
+  mark: m,
+  shots,
+  onUseThumbnail,
+  onDelete,
+}: {
+  mark: ScreenshotMark;
+  shots: ScreenshotsState;
+  onUseThumbnail?: () => void;
+  /** Take the screenshot out of the text entirely (else Remove only clears its image). */
+  onDelete?: () => void;
+}) {
   const fileRef = useRef<HTMLInputElement>(null);
   const pick = shots.chosen[m.key];
   const pickUrl = pick ? shots.urlFor(pick, m.key) : null;
-  const videoId = shots.marks[m.key] ?? null;
+  // A placeholder added this moment isn't in `marks` until the next reload: its section's video.
+  const videoId = shots.marks[m.key] ?? shots.sectionVideos[m.sectionKey] ?? null;
   const videoUrl = videoId ? shots.videoUrls[videoId] : undefined;
   // The step's strip: frames from just before its moment to ~40s after (screenshotWindowSecs), plus anything grabbed near it.
   const strip =
@@ -234,10 +277,16 @@ export function ScreenshotMarkPanel({ mark: m, shots, onUseThumbnail }: { mark: 
             </div>
           )
         )}
-        {pick && (
-          <Button size="xs" variant="ghost" onClick={() => void shots.choose(m.key, null)} disabled={saving} title="Take the image off (the placeholder stays)">
+        {onDelete ? (
+          <Button size="xs" variant="ghost" onClick={onDelete} disabled={saving} title="Take this screenshot out of the email">
             <Trash2 /> Remove
           </Button>
+        ) : (
+          pick && (
+            <Button size="xs" variant="ghost" onClick={() => void shots.choose(m.key, null)} disabled={saving} title="Take the image off (the placeholder stays)">
+              <Trash2 /> Remove
+            </Button>
+          )
         )}
         <Button size="xs" variant="outline" onClick={() => fileRef.current?.click()} disabled={saving} title="Use your own image (PNG, JPG, WebP or GIF, up to 10 MB)">
           {shots.busy === `upload:${m.key}` ? <Loader2 className="animate-spin" /> : <Upload />}

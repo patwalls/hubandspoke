@@ -22,16 +22,19 @@ describe("splitStepTitles", () => {
 });
 
 describe("layoutSection (the Kevin/Saj template's bullets and arrows)", () => {
-  it("'lines': ✅ bullets become one paragraph, one item per line", () => {
-    const md = "### Why Claude Works\n\nA benefit line.\n\n- ✅ **Builds** frames\n- ✅ **Syncs** voice";
+  it("'lines': ✅ bullets become one tight group, a paragraph per line with no spacing between", () => {
+    const md = "### Why Claude Works\n\nA benefit line.\n\n- ✅ **Builds** frames\n- ✅ **Syncs** voice\n- ✅ **Fixes** colors";
     const blocks = markdownToBlocks(layoutSection(md, "lines"));
-    expect(blocks.map((b) => b.type)).toEqual(["heading", "paragraph", "paragraph"]);
-    expect((blocks[2].formattedText as { text: string }[]).map((r) => r.text).join("")).toBe("✅ Builds frames\n✅ Syncs voice");
+    expect(blocks.map((b) => b.type)).toEqual(["heading", "paragraph", "paragraph", "paragraph", "paragraph"]);
+    expect(blocks[2]).toMatchObject({ formattedText: [{ text: "✅ " }, { text: "Builds", styling: ["bold"] }, { text: " frames" }], visual_settings: { inner_spacing_bottom: 0, outer_spacing_bottom: 0 } });
+    expect(blocks[3].visual_settings).toEqual({ inner_spacing_top: 0, outer_spacing_top: 0, inner_spacing_bottom: 0, outer_spacing_bottom: 0 });
+    expect(blocks[4].visual_settings).toEqual({ inner_spacing_top: 0, outer_spacing_top: 0 });
+    expect(blocks[1].visual_settings).toBeUndefined();
   });
 
   it("'lines' also joins ✅ lines written without a dash", () => {
     const blocks = markdownToBlocks(layoutSection("✅ **A** one\n✅ **B** two", "lines"));
-    expect(blocks).toHaveLength(1);
+    expect(blocks.map((b) => b.visual_settings)).toEqual([{ inner_spacing_bottom: 0, outer_spacing_bottom: 0 }, { inner_spacing_top: 0, outer_spacing_top: 0 }]);
   });
 
   it("'paragraphs': each bullet is its own paragraph, no list", () => {

@@ -14,6 +14,7 @@
 // email pushes swap picks in for their placeholders (beehiiv-draft.ts,
 // hubspot-newsletter-create-draft.ts).
 
+import Anthropic from "@anthropic-ai/sdk";
 import { eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { designFrames, newsletterDrafts, productionItems } from "@/lib/db/schema";
@@ -21,7 +22,7 @@ import { listFrames, requestFrameAt, requestFramesAt, type DesignFrame } from "@
 import { getTranscriptForPrompt } from "@/lib/services/whisper-transcribe";
 import { loadSource } from "@/lib/services/design-editor/session";
 import { bucketName, buildKey, getPresignedGetUrl, putObject } from "@/lib/s3";
-import { parseScreenshotMarks, type ChosenScreenshot } from "@/lib/newsletter-screenshots";
+import { formatTimestamp, parseScreenshotMarks, parseTimestamp, type ChosenScreenshot } from "@/lib/newsletter-screenshots";
 import type { NewsletterSection } from "@/lib/newsletter-template";
 import { youtubeThumbnailUrl } from "./sources";
 
@@ -318,4 +319,58 @@ export async function screenshotPreviewUrls(chosen: Record<string, ChosenScreens
   const out: Record<string, string> = {};
   for (const [k, c] of Object.entries(chosen)) if (c.key && !c.pending) out[k] = await getPresignedGetUrl(c.key, 4 * 3600, { bucket: c.bucket || undefined });
   return out;
+}
+
+// ── "+ Add screenshot" on a step ────────────────────────────────────────
+// The editor's + under a step with no image: Haiku reads the section video's
+// timestamped transcript and the step, and says when the step happens on
+// screen. The editor then places the placeholder and autoPickScreenshots
+// grabs that frame + its strip. Paid but tiny (one Haiku call, ~$0.003).
+
+const MOMENT_MODEL = "claude-haiku-5-5";
+const MOMENT_TRANSCRIPT_CHARS = 40_000;
+
+const MOMENT_TOOL: Anthropic.Tool = {
+  name: "pick_moment",
+  description: "Return the moment in the video where the step's action is on screen, and a short caption of what the screenshot shows.",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      timestamp: { type: "string", description: "M:SS (or H:MM:SS) a few seconds after the step's action starts on screen, from the transcript's timestamps." },
+      label: { type: "string", description: "What the screenshot shows, 3 to 10 words, e.g. 'the voice list in Google AI Studio'." },
+    },
+    required: ["timestamp", "label"],
+  },
+};
+
+export type StepMoment = { ok: true; sec: number; label: string } | { ok: false; failure: "no-video" | "no-transcript" | "llm-error" | "llm-empty" };
+
+/** When `step` (its Markdown) happens in the section's video. Fail-soft: the editor adds a placeholder without a moment instead. */
+export async function suggestStepMoment(draftId: string, sectionKey: string, step: string, client: Anthropic = new Anthropic()): Promise<StepMoment> {
+  const d = await loadDraft(draftId);
+  const videoId = d ? sectionVideoId(d, d.sections.find((x) => x.key === sectionKey)) : null;
+  if (!videoId) return { ok: false, failure: "no-video" };
+  const t = await getTranscriptForPrompt(videoId);
+  if (!t?.segments?.length) return { ok: false, failure: "no-transcript" };
+  const transcript = t.segments.map((x) => `[${formatTimestamp(x.startSec)}] ${x.text}`).join("\n").slice(0, MOMENT_TRANSCRIPT_CHARS);
+  const last = t.segments[t.segments.length - 1].endSec ?? t.segments[t.segments.length - 1].startSec;
+  let res: Anthropic.Message;
+  try {
+    res = await client.messages.create({
+      model: MOMENT_MODEL,
+      max_tokens: 200,
+      system:
+        "You place a screenshot for one step of a how-to newsletter written from a video. Find where in the video the step's action is shown on screen (not just mentioned in passing) and pick a moment a few seconds in, when the screen shows it. Always call pick_moment once.",
+      tools: [MOMENT_TOOL],
+      tool_choice: { type: "tool", name: "pick_moment" },
+      messages: [{ role: "user", content: `The step:\n${step}\n\nThe video's transcript, timestamped:\n${transcript}` }],
+    });
+  } catch {
+    return { ok: false, failure: "llm-error" };
+  }
+  const input = res.content.find((b) => b.type === "tool_use")?.input as { timestamp?: unknown; label?: unknown } | undefined;
+  const ts = typeof input?.timestamp === "string" ? input.timestamp.trim() : "";
+  const label = typeof input?.label === "string" ? input.label.replace(/[[\]*_]/g, "").trim().slice(0, 100) : "";
+  if (!/^\d{1,2}(:\d{2}){1,2}$/.test(ts) || !label) return { ok: false, failure: "llm-empty" };
+  return { ok: true, sec: Math.min(parseTimestamp(ts), Math.max(0, Math.floor(last))), label };
 }

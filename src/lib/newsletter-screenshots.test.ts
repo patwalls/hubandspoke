@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyScreenshots, formatTimestamp, parseScreenshotMarks, parseTimestamp, replaceScreenshotMarks, screenshotKey } from "./newsletter-screenshots";
+import { applyScreenshots, formatTimestamp, insertStepScreenshot, parseScreenshotMarks, parseTimestamp, removeScreenshotMark, replaceScreenshotMarks, screenshotKey, stepsWithoutScreenshots } from "./newsletter-screenshots";
 
 describe("screenshot placeholders", () => {
   it("finds timestamped and untimed placeholders", () => {
@@ -23,5 +23,38 @@ describe("screenshot placeholders", () => {
   it("hands each placeholder's moment and label to replaceScreenshotMarks (zero-padded times too)", () => {
     const out = replaceScreenshotMarks("a\n*[Screenshot @ 03:39: the Connectors page]*\n[Screenshot: no time]", (sec, label) => `<${sec}|${label}>`);
     expect(out).toBe("a\n<219|the Connectors page>\n<null|no time>");
+  });
+});
+
+describe("adding and removing a step's screenshot", () => {
+  const md = [
+    "**1. Pick a style**",
+    "Open the atlas.",
+    "",
+    "*[Screenshot @ 1:05: the atlas]*",
+    "",
+    "**2. Copy the prompt.** Click Copy Prompt.",
+    "",
+    "**3. Load your voiceover**",
+    "Click Load voiceover.",
+    "",
+    "One honest heads-up.",
+  ].join("\n");
+
+  it("finds the steps with no image, inline titles included", () => {
+    expect(stepsWithoutScreenshots(md).map((s) => s.n)).toEqual([2, 3]);
+  });
+
+  it("puts the new screenshot after the step's first line of explanation", () => {
+    const out = insertStepScreenshot(md, 3, "*[Screenshot @ 9:55: the voiceover button]*");
+    expect(out).toContain("Click Load voiceover.\n\n*[Screenshot @ 9:55: the voiceover button]*\n\nOne honest heads-up.");
+    expect(insertStepScreenshot(md, 2, "*[Screenshot: x]*")).toContain("Click Copy Prompt.\n\n*[Screenshot: x]*\n\n**3.");
+    expect(insertStepScreenshot(md, 1, "*[Screenshot: x]*")).toBe(md);
+  });
+
+  it("removes the whole placeholder, not just its image", () => {
+    const out = removeScreenshotMark(md, "steps", screenshotKey("steps", "the atlas"));
+    expect(out).not.toContain("Screenshot");
+    expect(out).toContain("Open the atlas.\n\n**2. Copy the prompt.**");
   });
 });

@@ -13,7 +13,7 @@
 // excluded, headings never bold.
 import { HOWTO_AUTHOR_IDS, HOWTO_BASE_TEMPLATE_ID, HOWTO_POLL_ID, SKILL_LEAP_MEMBERS_SEGMENT_ID } from "@/lib/beehiiv";
 import { layoutSection, markdownToBlocks, type Block } from "@/lib/beehiiv-blocks";
-import { applyScreenshots, type ChosenScreenshot } from "@/lib/newsletter-screenshots";
+import { applyScreenshots, replaceScreenshotMarks, type ChosenScreenshot } from "@/lib/newsletter-screenshots";
 import { sponsorBlock, type ComposeSponsor, type NewsletterSection, type NewsletterTemplate } from "@/lib/newsletter-template";
 
 /** A layout card: a bordered section (the Kevin/Saj templates alternate navy and blue borders). */
@@ -72,8 +72,9 @@ export function buildBeehiivDraftRequest(args: {
     if (sec?.kind === "sponsor" && args.sponsor?.copy) return sponsorBlock(args.sponsor.copy, args.sponsor.landingUrl);
     return args.sections.find((x) => x.key === key)?.markdown ?? "";
   };
-  // Picked screenshots replace their placeholders as image lines (→ image blocks).
-  const md = (key: string) => applyScreenshots(key, rawMd(key), args.screenshots, (c) => args.screenshotUrls?.[c.key] ?? null);
+  // Picked screenshots replace their placeholders as image lines (→ image blocks); a placeholder with no image is left out.
+  const md = (key: string) =>
+    replaceScreenshotMarks(applyScreenshots(key, rawMd(key), args.screenshots, (c) => args.screenshotUrls?.[c.key] ?? null), () => "").replace(/\n{3,}/g, "\n\n");
 
   const layout = args.template.beehiiv.layout;
   const tool = toolFromWhy(md("why")) ?? "AI";
@@ -99,7 +100,8 @@ export function buildBeehiivDraftRequest(args: {
     if (inner.length > (c.label.trim() ? 1 : 0)) content.push(card(c.border, c.background, inner));
   }
   if (layout.outroImageUrl) content.push({ type: "image", imageUrl: layout.outroImageUrl, alt_text: "Futurepedia" });
-  if (layout.poll) content.push(card("#273653", "#FFFFFF", [heading3("How was Futurepedia today?"), { type: "poll", poll_id: HOWTO_POLL_ID }]));
+  // The poll block shows its own question ("How was Futurepedia today?"), as in the template: no heading of ours on top.
+  if (layout.poll) content.push(card("#273653", "#FFFFFF", [{ type: "poll", poll_id: HOWTO_POLL_ID }]));
 
   return {
     title: args.subject,

@@ -7,9 +7,9 @@
 // the editor's canvas a shot is clickable (opens its side panel) and accepts
 // a dropped image file.
 
-import { Camera, ImageIcon, Loader2 } from "lucide-react";
+import { Camera, ImageIcon, Loader2, Plus, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { formatTimestamp, replaceScreenshotMarks, screenshotKey, type ChosenScreenshot } from "@/lib/newsletter-screenshots";
+import { formatTimestamp, replaceScreenshotMarks, screenshotKey, stepsWithoutScreenshots, type ChosenScreenshot } from "@/lib/newsletter-screenshots";
 import type { PreviewEditing } from "@/components/dashboard/editable-section";
 
 export interface PreviewScreenshots {
@@ -42,6 +42,71 @@ export function markShots(sectionKey: string, markdown: string, screenshots: Pre
 /** The shot an img renderer's alt text points at (null: an ordinary image). */
 export function shotFor(alt: string | null | undefined, shots: Shot[]): Shot | null {
   return alt?.startsWith(SHOT) ? (shots[Number(alt.slice(SHOT.length))] ?? null) : null;
+}
+
+export interface AddPoint {
+  sectionKey: string;
+  n: number;
+}
+
+const ADD = "__add__";
+
+/** Draft canvas: an "+ Add screenshot" marker under each numbered step with no image (run after markShots / markImages). */
+export function markAddPoints(sectionKey: string, markdown: string, adds: AddPoint[]): string {
+  const lines = markdown.split("\n");
+  for (const spot of stepsWithoutScreenshots(markdown).reverse()) {
+    adds.push({ sectionKey, n: spot.n });
+    lines.splice(spot.after + 1, 0, "", `![${ADD}${adds.length - 1}](#add)`, "");
+  }
+  return lines.join("\n");
+}
+
+export function addPointFor(alt: string | null | undefined, adds: AddPoint[]): AddPoint | null {
+  return alt?.startsWith(ADD) ? (adds[Number(alt.slice(ADD.length))] ?? null) : null;
+}
+
+/** The "+ Add screenshot" button under a step: finds the step's moment in the video and grabs it. */
+export function AddShotButton({ point, edit }: { point: AddPoint; edit: PreviewEditing }) {
+  const busy = edit.addingShot === `${point.sectionKey}:${point.n}`;
+  return (
+    <span className="my-2 flex justify-center">
+      <button
+        type="button"
+        disabled={!!edit.addingShot}
+        onClick={(e) => {
+          e.stopPropagation();
+          edit.onAddShot?.(point.sectionKey, point.n);
+        }}
+        title="Add a screenshot of this step, picked from the video"
+        className="inline-flex items-center gap-1 rounded-full border border-dashed border-[#c7d2dc] px-3 py-1 text-[12px] font-medium leading-normal text-[#6b7280] hover:border-[#49adff] hover:text-[#49adff] disabled:opacity-50"
+      >
+        {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />} {busy ? "Finding the moment…" : "Add screenshot"}
+      </button>
+    </span>
+  );
+}
+
+/** Hover trash icon on an image or screenshot. */
+function TrashButton({ onClick }: { onClick: () => void }) {
+  return (
+    <span
+      role="button"
+      tabIndex={0}
+      title="Remove from the email"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      onKeyDown={(e) => {
+        if (e.key !== "Enter") return;
+        e.stopPropagation();
+        onClick();
+      }}
+      className="absolute right-2 top-9 rounded bg-white/90 p-1 text-[#b91c1c] opacity-0 shadow hover:bg-white group-hover:opacity-100"
+    >
+      <Trash2 className="size-3.5" />
+    </span>
+  );
 }
 
 export interface DraftImage {
@@ -108,6 +173,7 @@ export function ImageBlock({ image, edit }: { image: DraftImage; edit: PreviewEd
         <span className="absolute left-2 top-2 rounded bg-white/90 px-1.5 py-0.5 text-[11px] font-medium text-[#222] shadow">Video thumbnail</span>
       )}
       <span className="absolute right-2 top-2 rounded bg-white/90 px-1.5 py-0.5 text-[11px] text-[#222] opacity-0 shadow group-hover:opacity-100">Change</span>
+      {edit.onRemoveImage && <TrashButton onClick={() => edit.onRemoveImage!(image.sectionKey, image.index)} />}
     </span>
   );
 }
@@ -183,6 +249,7 @@ export function ShotBlock({ shot, edit }: { shot: Shot; edit?: PreviewEditing })
       {shot.url && (
         <span className="absolute right-2 top-2 rounded bg-white/90 px-1.5 py-0.5 text-[11px] text-[#222] opacity-0 shadow group-hover:opacity-100">Change</span>
       )}
+      {edit.onDeleteShot && <TrashButton onClick={() => edit.onDeleteShot!(shot.sectionKey, shot.markKey)} />}
     </span>
   );
 }

@@ -15,7 +15,7 @@ import ReactMarkdown from "react-markdown";
 import { EditableSection, emptySectionHint, FixedPart, type PreviewEditing } from "@/components/dashboard/editable-section";
 import { cn } from "@/lib/utils";
 import { layoutSection } from "@/lib/beehiiv-blocks";
-import { imageFor, ImageBlock, markImages, markShots, ScreenshotSample, shotFor, ShotBlock, ThumbnailSample, type DraftImage, type PreviewScreenshots, type Shot } from "@/components/dashboard/preview-screenshots";
+import { AddShotButton, addPointFor, imageFor, ImageBlock, markAddPoints, markImages, markShots, ScreenshotSample, shotFor, ShotBlock, ThumbnailSample, type AddPoint, type DraftImage, type PreviewScreenshots, type Shot } from "@/components/dashboard/preview-screenshots";
 import { sponsorBlock, type NewsletterSection, type NewsletterTemplate } from "@/lib/newsletter-template";
 
 // The Kevin/Saj templates' fonts: Open Sans body (16px, 1.5), Poppins headings.
@@ -58,6 +58,7 @@ export function BeehiivPreview({
   const secByKey = new Map(template.sections.map((s) => [s.key, s]));
   const shots: Shot[] = [];
   const images: DraftImage[] = [];
+  const adds: AddPoint[] = [];
   /** Draft canvas: images are clickable blocks. */
   const draftCanvas = !!edit && edit.mode !== "template";
   const md = (key: string) => {
@@ -68,7 +69,9 @@ export function BeehiivPreview({
     // become image markers the img renderer draws (the picked image, or a box).
     // Step titles, bullets and arrows laid out exactly as the push builds them.
     const raw = layoutSection((byKey.get(key) ?? "").trim(), sec?.bullets);
-    return markShots(key, draftCanvas ? markImages(key, raw, images) : raw, screenshots, shots)
+    const marked = markShots(key, draftCanvas ? markImages(key, raw, images) : raw, screenshots, shots);
+    // "+ Add screenshot" under each step with no image, in sections that take screenshots.
+    return (draftCanvas && sec?.screenshots && edit?.onAddShot ? markAddPoints(key, marked, adds) : marked)
       .replace(/^- (Saj|Kevin)$/gm, "\\- $1")
       .replace(/(?<! {2})\n(?!\n)/g, "\n\n");
   };
@@ -129,6 +132,8 @@ export function BeehiivPreview({
           ol: ({ children, start }) => <ol start={start} className="my-3 list-decimal pl-6">{children}</ol>,
           li: ({ children }) => <li className="my-1">{children}</li>,
           img: ({ src, alt }) => {
+            const add = addPointFor(alt, adds);
+            if (add) return edit ? <AddShotButton point={add} edit={edit} /> : null;
             const shot = shotFor(alt, shots);
             if (shot) return <ShotBlock shot={shot} edit={edit} />;
             const image = imageFor(alt, images);

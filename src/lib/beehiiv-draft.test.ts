@@ -79,15 +79,17 @@ describe("beehiiv draft request", () => {
       const h = c.blocks![0] as { formattedText?: { text: string }[]; text?: string };
       return h.formattedText?.[0].text ?? h.text;
     };
-    expect(cards.map((c) => (c.blocks![0].type === "heading" ? label(c) : "(intro)"))).toEqual([
+    expect(cards.map((c) => (c.blocks![0].type === "heading" ? label(c) : c.blocks![0].type === "poll" ? "(poll)" : "(intro)"))).toEqual([
       "(intro)",
       "Claude Guide",
       "Free Resource",
       "Claude Guide Continued",
       "Use Cases",
       "Bonus Tips",
-      "How was Futurepedia today?",
+      "(poll)",
     ]);
+    // The poll shows its own question; no heading of ours above it (it read twice in a beehiiv draft).
+    expect(cards.at(-1)!.blocks).toEqual([{ type: "poll", poll_id: expect.any(String) }]);
     expect(body.blocks[0]).toMatchObject({ type: "image" }); // masthead
     expect(cards[3].blocks!.at(-1)).toMatchObject({ type: "button", href: "https://youtu.be/x" });
     expect(cards[2].blocks!.at(-1)).toMatchObject({ type: "button", href: "https://example.com/guide" });
@@ -135,7 +137,7 @@ describe("beehiiv draft request", () => {
     expect(out.blocks.filter((b) => b.type === "image")).toHaveLength(1); // masthead only
   });
 
-  it("puts a picked screenshot in as an image where its placeholder was; unpicked ones stay text", () => {
+  it("puts a picked screenshot in as an image where its placeholder was; an unpicked one is left out", () => {
     const template = DEFAULT_TEMPLATES["futurepedia newsletter"];
     const out = buildBeehiivDraftRequest({
       template,
@@ -150,7 +152,7 @@ describe("beehiiv draft request", () => {
     }) as { blocks: B[] };
     const guide = out.blocks.filter((b) => b.type === "section")[0].blocks!;
     expect(guide).toContainEqual(expect.objectContaining({ type: "image", imageUrl: "https://s3.us-east-1.amazonaws.com/www.starterstory.com/k.jpg" }));
-    expect(JSON.stringify(guide)).toContain("[Screenshot @ 5:10: the result]");
+    expect(JSON.stringify(guide)).not.toContain("Screenshot @ 5:10");
     expect(JSON.stringify(guide)).not.toContain("[Screenshot @ 4:32");
   });
 });

@@ -34,6 +34,12 @@ export interface PreviewEditing {
   /** Draft: an image in a section's text (the video thumbnail, or any other) was clicked / had a file dropped on it. `index` = its order in the section. */
   onSelectImage?: (sectionKey: string, index: number) => void;
   onDropImage?: (sectionKey: string, index: number, file: File) => void;
+  /** Draft: the trash icon on a screenshot / an image — take it out of the text entirely. */
+  onDeleteShot?: (sectionKey: string, markKey: string) => void;
+  onRemoveImage?: (sectionKey: string, index: number) => void;
+  /** Draft: "+ Add screenshot" under step `n` of a section with screenshots (`busy`: which one is being added, as "<sectionKey>:<n>"). */
+  onAddShot?: (sectionKey: string, n: number) => void;
+  addingShot?: string | null;
   /** Template editor: the template is locked (structure can't change; FixedParts show a lock). */
   structureLocked?: boolean;
   /** Template editor: a beehiiv card, or the email's look (masthead, images, poll), was clicked. */
