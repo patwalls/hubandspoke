@@ -81,6 +81,13 @@ export const sectionSchema = z.object({
    * and in the editor it's an image block that can be swapped or removed.
    */
   thumbnail: z.boolean().default(false),
+  /**
+   * How the section's bullets are laid out (beehiiv push + preview): "list" a
+   * bulleted list; "lines" one paragraph, one item per line (the Kevin/Saj
+   * ✅ block); "paragraphs" one paragraph per item, no bullets (their Use
+   * Cases and Bonus Tips).
+   */
+  bullets: z.enum(["list", "lines", "paragraphs"]).default("list"),
 });
 
 /**
@@ -231,7 +238,7 @@ const s = (
   key: string,
   heading: string | null,
   hint: string,
-  extra: Partial<Pick<NewsletterTemplateSection, "headingLevel" | "kind" | "pillColor" | "boxColor" | "story" | "screenshots" | "look" | "thumbnail">> = {},
+  extra: Partial<Pick<NewsletterTemplateSection, "headingLevel" | "kind" | "pillColor" | "boxColor" | "story" | "screenshots" | "look" | "thumbnail" | "bullets">> = {},
 ): NewsletterTemplateSection => ({
   key,
   heading,
@@ -244,6 +251,7 @@ const s = (
   screenshots: extra.screenshots ?? false,
   look: extra.look ?? "text",
   thumbnail: extra.thumbnail ?? false,
+  bullets: extra.bullets ?? "list",
 });
 
 /** Starter Story's email look, read off past issues (Klaviyo/HubSpot HTML). */
@@ -362,14 +370,14 @@ export const DEFAULT_TEMPLATES: Record<string, NewsletterTemplate> = {
         // The beehiiv build depends on this exact structure: changes go through a template admin.
         locked: true,
         sections: [
-          s("intro", null, "2 to 4 short first-person lines in the channel voice, the signature on its own line, then a one-line teaser text link to the Free Resource offer."),
+          s("intro", null, "2 to 4 short first-person lines in the channel voice, the signature on its own line, then a one-line teaser text link to the Free Resource offer, the arrow after the link: '[See the bundle](URL) →'."),
           s("article", null, "The article headline as an H2 (the how-to, benefit-first), then the video thumbnail, then the one-line concrete example.", { thumbnail: true }),
-          s("why", null, "An H3 'Why [Tool] Works', a benefit-first line, then 3 to 5 ✅ bullets each led by a bolded action verb."),
-          s("steps", "How We Did It", "The first half of the 4 to 6 numbered steps, one action each. Each step: its title in bold on its own line ('**1. Pick a style in the Style Atlas**', no period), then 1 to 3 short sentences on the next line, then a screenshot of the step. Weave a concrete business impact into at least one step.", { headingLevel: 3, screenshots: true }),
+          s("why", null, "An H3 'Why [Tool] Works', a benefit-first line, then 3 to 5 ✅ lines, one per line with no bullet dash, each led by a bolded action verb ('✅ **Builds** every frame from code').", { bullets: "lines" }),
+          s("steps", "How We Did It", "The first half of the 4 to 6 numbered steps, one action each. Each step: its title in bold on its own line ('**1. Pick a style in the Style Atlas**', no period), then 1 to 3 short sentences on the next line. Screenshots go on only 3 or 4 of the 6 steps in the whole issue, after the step's text, where the screen shows something the words can't. Weave a concrete business impact into at least one step.", { headingLevel: 3, screenshots: true }),
           s("free_resource", "Free Resource", "The offer: headline, 2 to 3 sentence body, 3 to 5 Key Takeaways bullets and the CTA link.", { kind: "sponsor", boxColor: "#f1f5f9" }),
-          s("steps_continued", "How We Did It (continued)", "The rest of the numbered steps (continue the numbering), laid out the same way: the bold title on its own line, then 1 to 3 short sentences, then a screenshot of the step. Then the line [Watch The Full Video ->](VIDEO_URL).", { headingLevel: 3, screenshots: true }),
-          s("use_cases", "Use Cases", "3 to 5 bullets: a fitting emoji, a bold role label, then the point.", { headingLevel: 3 }),
-          s("bonus_tips", "Bonus Tips", "2 to 3 bullets: bold directive then explanation, at least one about scaling or saving time.", { headingLevel: 3 }),
+          s("steps_continued", "How We Did It (continued)", "The rest of the numbered steps (continue the numbering), laid out the same way: the bold title on its own line, then 1 to 3 short sentences, with a screenshot only on the steps that need one (3 or 4 across all 6 steps). Then one closing line (an honest catch or the payoff), then the line [Watch The Full Video](VIDEO_URL) →.", { headingLevel: 3, screenshots: true }),
+          s("use_cases", "Use Cases", "One intro sentence on who else this fits, then 3 to 5 lines, each its own line with no bullet dash and no emoji: a bold role label, then the point ('**Sales:** Draft a follow-up to every lead from your call notes').", { headingLevel: 3, bullets: "paragraphs" }),
+          s("bonus_tips", "Bonus Tips", "2 to 3 lines, each its own line with no bullet dash: a bold directive with its colon, then the explanation ('**Keep your notes in one folder:** …'), at least one about scaling or saving time.", { headingLevel: 3, bullets: "paragraphs" }),
         ],
       },
     ]),

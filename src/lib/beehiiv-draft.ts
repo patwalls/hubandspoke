@@ -12,7 +12,7 @@
 // "<subject>-MM-DD-YYYY", display flags off, free tier, Skill Leap members
 // excluded, headings never bold.
 import { HOWTO_AUTHOR_IDS, HOWTO_BASE_TEMPLATE_ID, HOWTO_POLL_ID, SKILL_LEAP_MEMBERS_SEGMENT_ID } from "@/lib/beehiiv";
-import { markdownToBlocks, splitStepTitles, type Block } from "@/lib/beehiiv-blocks";
+import { layoutSection, markdownToBlocks, type Block } from "@/lib/beehiiv-blocks";
 import { applyScreenshots, type ChosenScreenshot } from "@/lib/newsletter-screenshots";
 import { sponsorBlock, type ComposeSponsor, type NewsletterSection, type NewsletterTemplate } from "@/lib/newsletter-template";
 
@@ -92,8 +92,8 @@ export function buildBeehiivDraftRequest(args: {
     for (const s of c.sections) {
       const heading = sectionByKey.get(s.key)?.heading;
       if (s.showHeading && heading) inner.push(heading3(heading));
-      // Step titles on their own bold line, as in the Kevin/Saj templates.
-      inner.push(...markdownToBlocks(splitStepTitles(md(s.key)), { buttons: s.linkButtons, buttonColor: layout.buttonColor }));
+      // Laid out as the Kevin/Saj templates: step titles on their own bold line, bullets per the section's setting.
+      inner.push(...markdownToBlocks(layoutSection(md(s.key), sectionByKey.get(s.key)?.bullets), { buttons: s.linkButtons, buttonColor: layout.buttonColor }));
     }
     // A card with only its label (its sections are empty) is left out.
     if (inner.length > (c.label.trim() ? 1 : 0)) content.push(card(c.border, c.background, inner));

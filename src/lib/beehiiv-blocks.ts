@@ -82,20 +82,70 @@ export function splitStepTitles(md: string): string {
 }
 
 /**
+ * A section's bullets laid out as its template's `bullets` setting says (see
+ * sectionSchema): "lines" joins a run of bullets (or ✅-led lines) into one
+ * paragraph with a line break between items (Markdown hard breaks, "  \n");
+ * "paragraphs" makes each bullet its own paragraph. "- Kevin" / "- Saj" stay
+ * the sign-off. Pure; exported for tests.
+ */
+export function flattenBullets(md: string, mode: "list" | "lines" | "paragraphs"): string {
+  if (mode === "list") return md;
+  const out: string[] = [];
+  let group: string[] = [];
+  const flush = () => {
+    if (!group.length) return;
+    out.push("", group.join(mode === "lines" ? "  \n" : "\n\n"), "");
+    group = [];
+  };
+  for (const line of md.split("\n")) {
+    const bullet = /^\s*-\s+(Saj|Kevin)\s*$/.test(line) ? null : line.match(/^\s*[-*•]\s+(.*)$/);
+    const item = bullet ? bullet[1].trim() : mode === "lines" && /^\s*✅/.test(line) ? line.trim() : null;
+    if (item) {
+      group.push(item);
+      continue;
+    }
+    flush();
+    out.push(line);
+  }
+  flush();
+  return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+/** "[label →](url)" or "[label](url) ->" → "[label](url) →": the Kevin/Saj arrow sits after the link. Pure. */
+export function arrowAfterLink(md: string): string {
+  return md.replace(/\[([^\]]*?)\s*(?:->|→)\s*\]\(([^)\s]+)\)(?:\s*(?:->|→))?/g, "[$1]($2) →").replace(/\]\(([^)\s]+)\)\s*->/g, "]($1) →");
+}
+
+/** A section's Markdown laid out as the template does it (push and preview share this). Pure. */
+export function layoutSection(md: string, bullets: "list" | "lines" | "paragraphs" = "list"): string {
+  return arrowAfterLink(flattenBullets(splitStepTitles(md), bullets));
+}
+
+/**
  * A section's Markdown → blocks. Each non-empty line is its own paragraph (the
  * drafts use short lines). `buttons`: a line that is only a link (optionally
  * bold) becomes a button — the offer CTA and "Watch The Full Video" — instead
- * of a text link.
+ * of a text link. A line ending in a Markdown hard break ("  ") continues
+ * the same paragraph on a new line.
  */
 export function markdownToBlocks(md: string, opts: { buttons?: boolean; buttonColor?: string } = {}): Block[] {
   const blocks: Block[] = [];
   let list: TextRun[][] = [];
+  let para: TextRun[] | null = null;
   const flushList = () => {
     if (list.length) blocks.push({ type: "list", listType: "unordered", items: list.map((runs) => ({ formattedText: runs })) });
     list = [];
   };
   for (const raw of md.split("\n")) {
     const line = raw.trim();
+    if (para) {
+      if (line) para.push({ text: "\n" }, ...inlineRuns(line));
+      if (!line || !/ {2}$/.test(raw)) {
+        blocks.push({ type: "paragraph", formattedText: para });
+        para = null;
+      }
+      continue;
+    }
     if (!line) {
       flushList();
       continue;
@@ -118,22 +168,27 @@ export function markdownToBlocks(md: string, opts: { buttons?: boolean; buttonCo
       blocks.push({ type: "image", imageUrl: image[2], ...(image[1] ? { alt_text: image[1] } : {}) });
       continue;
     }
-    const linkOnly = line.match(/^(?:\*\*)?\[([^\]]+)\]\(([^)\s]+)\)(?:\*\*)?$/);
+    const linkOnly = line.match(/^(?:\*\*)?\[([^\]]+)\]\(([^)\s]+)\)(?:\*\*)?(?:\s*(?:->|→))?$/);
     if (linkOnly && opts.buttons) {
       const text = linkOnly[1].replace(/\s*(->|→)\s*$/, "").replace(/\*\*/g, "").trim();
-      // The Kevin/Saj templates' buttons: navy #273653, white text (unset, beehiiv shows its own pink/black).
+      // The Kevin/Saj templates' buttons: centered, navy #273653, white text (unset, beehiiv shows its own pink/black).
       blocks.push({
         type: "button",
         text: `${text} →`,
         href: linkOnly[2],
-        alignment: "left",
+        alignment: "center",
         target: "_blank",
         visual_settings: { background_color: opts.buttonColor ?? "#273653", text_color: "#FFFFFF" },
       });
       continue;
     }
+    if (/ {2}$/.test(raw)) {
+      para = inlineRuns(line);
+      continue;
+    }
     blocks.push({ type: "paragraph", formattedText: inlineRuns(line) });
   }
+  if (para) blocks.push({ type: "paragraph", formattedText: para });
   flushList();
   return blocks;
 }

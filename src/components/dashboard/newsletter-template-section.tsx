@@ -368,7 +368,7 @@ function TemplateEditorDialog({
                 frozen={frozen}
                 onAddSection={() => {
                   const key = `section_${t.sections.length + 1}`;
-                  setT({ ...t, sections: [...t.sections, { key, heading: "New section", headingLevel: 2, kind: "text", hint: "", pillColor: null, boxColor: null, screenshots: false, look: "text", thumbnail: false }] });
+                  setT({ ...t, sections: [...t.sections, { key, heading: "New section", headingLevel: 2, kind: "text", hint: "", pillColor: null, boxColor: null, screenshots: false, look: "text", thumbnail: false, bullets: "list" }] });
                   setSelected(key);
                 }}
                 onAddCard={() => {

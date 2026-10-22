@@ -14,7 +14,7 @@ import { Open_Sans, Poppins } from "next/font/google";
 import ReactMarkdown from "react-markdown";
 import { EditableSection, emptySectionHint, FixedPart, type PreviewEditing } from "@/components/dashboard/editable-section";
 import { cn } from "@/lib/utils";
-import { splitStepTitles } from "@/lib/beehiiv-blocks";
+import { layoutSection } from "@/lib/beehiiv-blocks";
 import { imageFor, ImageBlock, markImages, markShots, ScreenshotSample, shotFor, ShotBlock, ThumbnailSample, type DraftImage, type PreviewScreenshots, type Shot } from "@/components/dashboard/preview-screenshots";
 import { sponsorBlock, type NewsletterSection, type NewsletterTemplate } from "@/lib/newsletter-template";
 
@@ -66,11 +66,11 @@ export function BeehiivPreview({
     // Same rules as the push (beehiiv-blocks.ts): every line is its own paragraph, and
     // "- Saj" / "- Kevin" is the intro's sign-off, not a list. Screenshot placeholders
     // become image markers the img renderer draws (the picked image, or a box).
-    // Step titles on their own bold line, exactly as the push builds them.
-    const raw = splitStepTitles((byKey.get(key) ?? "").trim());
+    // Step titles, bullets and arrows laid out exactly as the push builds them.
+    const raw = layoutSection((byKey.get(key) ?? "").trim(), sec?.bullets);
     return markShots(key, draftCanvas ? markImages(key, raw, images) : raw, screenshots, shots)
       .replace(/^- (Saj|Kevin)$/gm, "\\- $1")
-      .replace(/\n(?!\n)/g, "\n\n");
+      .replace(/(?<! {2})\n(?!\n)/g, "\n\n");
   };
   const tool = toolFromWhy(md("why")) ?? (showHints ? "[Tool]" : "AI");
   const placed = new Set(layout.cards.flatMap((c) => c.sections.map((x) => x.key)));
@@ -95,15 +95,19 @@ export function BeehiivPreview({
       <ReactMarkdown
         components={{
           p: ({ children, node }) => {
-            const only = node?.children?.length === 1 && node.children[0].type === "element" && node.children[0].tagName === "a";
+            // A line that is only a link (plus its trailing "→") is a button, as in the push.
+            const kids = (node?.children ?? []).filter((c) => !(c.type === "text" && /^\s*(→|->)?\s*$/.test(c.value)));
+            const only = kids.length === 1 && kids[0].type === "element" && kids[0].tagName === "a";
+            // beehiiv's spacing: text blocks 24px apart, an image 32px from the text around it.
+            const image = node?.children?.some((c) => c.type === "element" && c.tagName === "img");
             return linkButtons && only ? (
-              <p className="my-3">
+              <p className="my-6 text-center">
                 <span className="inline-block rounded-lg px-5 py-3 text-[16px] font-semibold text-white" style={{ background: layout.buttonColor }}>
                   {children}
                 </span>
               </p>
             ) : (
-              <p className="my-3">{children}</p>
+              <p className={image ? "my-8" : "my-6"}>{children}</p>
             );
           },
           a: ({ children, href }) => (

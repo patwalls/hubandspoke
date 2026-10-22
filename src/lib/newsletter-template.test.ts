@@ -12,6 +12,7 @@ const sec = (key: string, heading: string | null, extra: Partial<NewsletterTempl
   screenshots: false,
   look: "text" as const,
   thumbnail: false,
+  bullets: "list" as const,
   ...extra,
 });
 const T: NewsletterTemplate = {
