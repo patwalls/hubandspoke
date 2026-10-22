@@ -1,54 +1,28 @@
 import Link from "next/link";
-import { and, desc, eq, gt, inArray, isNull, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, ne, or, sql } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { contentComments, productionItems, users } from "@/lib/db/schema";
+import { getMyWork } from "@/lib/my-work/queries";
 import { cn } from "@/lib/utils";
 import { statusClassWithPalette } from "@/lib/badge-colors";
 import { getAllStatusPalettes } from "@/lib/db/brand-statuses";
 
 export const dynamic = "force-dynamic";
 
-// Active editorial statuses — anything that needs an editor's attention.
-const MY_TURN = ["Assigned", "Ready To Publish", "Review"];
-const TERMINAL = ["Published", "Killed"];
-
 export default async function MyWorkPage() {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
   const userId = session.user.id;
 
-  // All items assigned to the user (editor) and not in a terminal state.
-  const mineRows = await db
-    .select({
-      id: productionItems.id,
-      title: productionItems.title,
-      brand: productionItems.brand,
-      status: productionItems.status,
-      format: productionItems.format,
-      platform: productionItems.platform,
-      publishedDate: productionItems.publishedDate,
-      thumbnail: productionItems.thumbnail,
-      editorUserId: productionItems.editorUserId,
-      updatedAt: productionItems.updatedAt,
-    })
-    .from(productionItems)
-    .where(
-      and(
-        eq(productionItems.editorUserId, userId),
-        sql`${productionItems.status} IS NULL OR ${productionItems.status} NOT IN (${sql.raw(TERMINAL.map((s) => `'${s}'`).join(","))})`,
-        isNull(productionItems.deletedAt),
-      ),
-    )
-    .orderBy(desc(productionItems.updatedAt))
-    .limit(200);
-
-  const yourTurn = mineRows.filter(
-    (r) => r.status !== null && MY_TURN.includes(r.status),
-  );
-  const yourTurnIds = new Set(yourTurn.map((r) => r.id));
-  const waitingOnOthers = mineRows.filter((r) => !yourTurnIds.has(r.id));
+  // Your turn / to review / waiting on others — rules in src/lib/my-work/split.ts.
+  const { yourTurn, toReview, waitingOnOthers } = await getMyWork(userId);
+  const mineRows = [
+    ...yourTurn,
+    ...waitingOnOthers,
+    ...toReview.filter((r) => r.editorUserId === userId),
+  ];
 
   // Recent comments on my items, from someone other than me.
   const itemIds = mineRows.map((r) => r.id);
@@ -87,6 +61,19 @@ export default async function MyWorkPage() {
         .limit(10)
     : [];
 
+  // Whose post each review row is (first names only).
+  const editorIds = [...new Set(toReview.map((r) => r.editorUserId).filter((x): x is string => !!x))];
+  const editorNames = new Map(
+    editorIds.length
+      ? (
+          await db
+            .select({ id: users.id, name: users.name })
+            .from(users)
+            .where(inArray(users.id, editorIds))
+        ).map((u) => [u.id, (u.name ?? "").split(" ")[0] || "—"])
+      : [],
+  );
+
   // Per-brand color palettes; resolved server-side and threaded into the
   // Section client so each row's chip uses the brand's configured color.
   const palettes = await getAllStatusPalettes();
@@ -102,16 +89,28 @@ export default async function MyWorkPage() {
 
       <Section
         title="Your turn"
-        subtitle="Content waiting on you right now."
+        subtitle="Assigned to you to edit, or ready for you to post."
         rows={yourTurn}
         emptyText="Nothing in your queue. Nice."
         userId={userId}
         palettes={palettes}
       />
 
+      {toReview.length > 0 && (
+        <Section
+          title="To review"
+          subtitle="In Review on brands you've approved posts for this month. Oldest first."
+          rows={toReview}
+          emptyText="Nothing to review."
+          userId={userId}
+          palettes={palettes}
+          editorNames={editorNames}
+        />
+      )}
+
       <Section
         title="Waiting on others"
-        subtitle="Assigned to you, but the current stage is owned elsewhere (triage, ideation)."
+        subtitle="Assigned to you, but the next step is someone else's (review, on hold, scheduled)."
         rows={waitingOnOthers}
         emptyText="Nothing here yet."
         userId={userId}
@@ -185,6 +184,7 @@ function Section({
   emptyText,
   userId,
   palettes,
+  editorNames,
 }: {
   title: string;
   subtitle: string;
@@ -192,6 +192,8 @@ function Section({
   emptyText: string;
   userId: string;
   palettes: ReadonlyMap<string, ReadonlyMap<string, string>>;
+  /** Set on To review: adds an Editor column. */
+  editorNames?: ReadonlyMap<string, string>;
 }) {
   return (
     <div className="rounded-lg border border-border bg-card">
@@ -224,6 +226,11 @@ function Section({
                 <th className="px-3 py-2 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
                   Format
                 </th>
+                {editorNames && (
+                  <th className="px-3 py-2 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
+                    Editor
+                  </th>
+                )}
                 <th className="px-3 py-2 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
                   Status
                 </th>
@@ -249,6 +256,13 @@ function Section({
                   <td className="px-3 py-2 text-muted-foreground">
                     {r.format || "—"}
                   </td>
+                  {editorNames && (
+                    <td className="px-3 py-2 text-muted-foreground">
+                      {r.editorUserId === userId
+                        ? "You"
+                        : (r.editorUserId && editorNames.get(r.editorUserId)) || "—"}
+                    </td>
+                  )}
                   <td className="px-3 py-2">
                     {r.status ? (
                       <span

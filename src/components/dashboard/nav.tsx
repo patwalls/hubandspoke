@@ -9,6 +9,7 @@ import { READY_CHANGED_EVENT } from "@/lib/publish/events";
 import { LayoutGrid, SearchIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NotificationBell } from "@/components/notifications/notification-bell";
+import { MyWorkButton } from "@/components/my-work/my-work-button";
 import { GlobalSearch } from "@/components/dashboard/global-search";
 import {
   DropdownMenu,
@@ -266,6 +267,7 @@ export function DashboardNav({
                 <span className="text-[11px] leading-none">⌘</span>K
               </kbd>
             </button>
+            <MyWorkButton />
             <NotificationBell />
             <DropdownMenu>
               <DropdownMenuTrigger

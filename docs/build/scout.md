@@ -4,6 +4,39 @@ The `/build` loop's notebook: what people actually do, candidates considered (bu
 why), and what other tools ship. Newest first. Never re-propose something listed here without
 new evidence.
 
+## 2026-10-22 — lap 5 (project lap: my-day, milestone 1; publish-day closed to measuring)
+
+**Learned** (2 days of usage)
+- Half of the ~12 people who act in a month only move statuses, every few days: two editors move
+  Assigned → Review (24 on 19 days, 19 on 14 days), two reviewers move other people's posts
+  Review → Ready To Publish (40 on 9 days, ~12 h after they reached Review; 11 on 7 days). No one
+  is assigned as reviewer; the history says who it is per brand.
+- `/my-work` and `/notifications` were opened by nobody. My Work is only in ⌘K search; the
+  inbox has 129–478 unread for the five most-notified people.
+- The curator hasn't worked since lap 4 (last action 02:23 UTC). Pipeline on pace (232 items,
+  30 clips Mon–Wed), no failed renders, Sentry nothing user-facing, slow pages are ops-loop cold
+  starts.
+
+**Did the last features land?** `clip-editor-next-idea` (05:30) and `publish-way-in` (00:58):
+no marks yet. The curator hasn't opened the editor or published since either shipped, so the
+moment hasn't come. `publish-screen`: 9 opens by 3 people, still no links pasted. publish-day's
+4 milestones are all out, so it moves to measuring.
+
+**Outward**
+- Linear Triage: a named owner (person, rotation or on-call) is notified when work arrives;
+  single keys accept/decline/snooze. https://linear.app/docs/triage
+- Workfront + Frame.io: a "My Approvals" widget on Home is where reviewers find work; approvers
+  are a role of their own.
+  https://experienceleague.adobe.com/en/docs/workfront/using/review-and-approve-work/document-reviews-and-approvals/review-and-approve-documents/review-with-frame
+- Lesson: the per-person list has to sit on every page with a count, and reviewing needs its own
+  list.
+
+**Candidates**
+- → building: **My Work in the header with a count + To review** (project my-day M1).
+  source: usage (status-only people, unopened /my-work)
+- Act from the My Work row (approve / send back / send to review) — my-day M2. source: usage
+- The paste box on the Cross-post tab rows (still open). source: usage
+
 ## 2026-10-22 — lap 4 (polish lap)
 
 **Learned** (2 days of usage)
@@ -137,6 +170,8 @@ week of Oct 12). Cross-posts steady at 60–80/week.
   source: usage
 
 ## Built
+- 2026-10-22 My Work in the header with a count + To review (project my-day milestone 1).
+  Card `2026-10-22-my-work-waiting`.
 - 2026-10-22 Previous / Next idea in the clip editor (polish). Card
   `2026-10-22-clip-editor-next-idea`.
 - 2026-10-22 Way in to Publish from the content page (project publish-day milestone 4). Card

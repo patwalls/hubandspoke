@@ -29,6 +29,17 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-10-22-my-work-waiting",
+    shippedAt: "2026-10-22T09:39:00Z",
+    kind: "feature",
+    title: "My Work: everything waiting on you, one click away",
+    body:
+      "The new My Work button at the top of every page shows how many posts are waiting on you: ones assigned to you " +
+      "to edit or post, plus a new To review list with the posts in Review on the brands you approve, oldest first.",
+    href: "/my-work",
+    screen: "/my-work",
+  },
+  {
     id: "2026-10-22-clip-editor-next-idea",
     shippedAt: "2026-10-22T05:30:00Z",
     kind: "feature",
