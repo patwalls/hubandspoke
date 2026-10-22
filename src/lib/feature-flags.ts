@@ -65,7 +65,7 @@ const FLAGS = {
    * production_items. See docs/features.md → "Newsletter drafter".
    */
   newsletterDrafter: {
-    emails: ["sam@starterstory.com", "patrickswalls@gmail.com"],
+    emails: ["sam@starterstory.com", "patrickswalls@gmail.com", "gus@starterstory.com"],
     envVar: "FEATURE_NEWSLETTER_DRAFTER_EMAILS",
   },
   /**
