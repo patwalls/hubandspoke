@@ -649,7 +649,6 @@ export function QueueView({
         {sourceTabs.map((tab) => {
           const active = selectedSource === tab.value;
           const count = sourceCounts[tab.value] ?? 0;
-          if (tab.value === "newsletters" && count === 0 && !active) return null;
           const href = tab.slug
             ? `/${brand}/queue/${tab.slug}`
             : `/${brand}/queue`;
