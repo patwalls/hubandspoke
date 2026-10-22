@@ -28,6 +28,8 @@ import { toast } from "sonner";
 import {
   AlertTriangleIcon,
   CheckIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
   ExternalLinkIcon,
   LayoutTemplateIcon,
   LinkIcon,
@@ -65,6 +67,7 @@ import { TranscriptEditor, type SpeakerLabels } from "./transcript-editor";
 import { speakerColor, speakerLabel } from "@/components/dashboard/transcript-speakers";
 import { Transport } from "./transport";
 import { trackUsage } from "@/lib/usage/track";
+import type { IdeaNav } from "@/components/dashboard/idea-nav";
 
 const AUTOSAVE_DELAY_MS = 900;
 
@@ -77,6 +80,8 @@ export interface ClipEditorDialogProps {
   /** The editor can't open this idea (no video, no transcript, decided
    *  elsewhere, or the request failed) — caller shows the classic dialog. */
   onUnsupported: () => void;
+  /** Previous / Next between the queue's clip ideas (the queue table only). */
+  nav?: IdeaNav;
 }
 
 export function ClipEditorDialog({
@@ -86,6 +91,7 @@ export function ClipEditorDialog({
   brand,
   onDone,
   onUnsupported,
+  nav,
 }: ClipEditorDialogProps) {
   const [session, setSession] = useState<ClipEditorSession | null>(null);
 
@@ -127,6 +133,7 @@ export function ClipEditorDialog({
             brand={brand}
             onDone={onDone}
             onClose={() => onOpenChange(false)}
+            nav={nav}
           />
         ) : (
           <div className="flex flex-1 flex-col items-center justify-center gap-3 text-muted-foreground">
@@ -145,6 +152,7 @@ function EditorRoot(props: {
   brand: string;
   onDone: () => void;
   onClose: () => void;
+  nav?: IdeaNav;
 }) {
   const [{ store, recovered }] = useState(() => {
     const { clipIdea, edit } = props.session;
@@ -178,11 +186,13 @@ function EditorWorkspace({
   brand,
   onDone,
   onClose,
+  nav,
 }: {
   session: ClipEditorSession;
   brand: string;
   onDone: () => void;
   onClose: () => void;
+  nav?: IdeaNav;
 }) {
   const router = useRouter();
   const storeApi = useEditorStoreApi();
@@ -587,6 +597,7 @@ function EditorWorkspace({
           </div>
         )}
         <div className="ml-auto flex items-center gap-1">
+          {nav && <IdeaNavButtons nav={nav} />}
           <details className="relative">
             <summary className="flex size-7 cursor-pointer list-none items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground" title="Options" aria-label="Options">
               <MoreHorizontalIcon className="size-4" />
@@ -874,5 +885,44 @@ function ToolButton({
     >
       {children}
     </button>
+  );
+}
+
+/** "‹ 3 of 12 ›" — move to the queue's previous / next clip idea. Leaving
+ *  saves like closing does (EditorRoot flushes the draft on unmount). */
+function IdeaNavButtons({ nav }: { nav: IdeaNav }) {
+  const go = (id: string | null) => {
+    if (!id) return;
+    trackUsage("clip-editor:next-idea");
+    nav.onGo(id);
+  };
+  // `[` / `]` like Frame.io's previous / next asset — never while typing.
+  const goRef = useRef(go);
+  goRef.current = go;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey || (e.key !== "[" && e.key !== "]")) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      e.preventDefault();
+      goRef.current(e.key === "[" ? nav.prev : nav.next);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [nav.prev, nav.next]);
+  const btn =
+    "flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-30";
+  return (
+    <div className="mr-1 flex items-center gap-0.5" aria-label="Clip ideas in the queue">
+      <button type="button" className={btn} disabled={!nav.prev} onClick={() => go(nav.prev)} title="Previous idea in the queue ( [ )" aria-label="Previous idea">
+        <ChevronLeftIcon className="size-4" />
+      </button>
+      <span className="min-w-12 text-center font-mono text-xs tabular-nums text-muted-foreground">
+        {nav.position} of {nav.total}
+      </span>
+      <button type="button" className={btn} disabled={!nav.next} onClick={() => go(nav.next)} title="Next idea in the queue ( ] )" aria-label="Next idea">
+        <ChevronRightIcon className="size-4" />
+      </button>
+    </div>
   );
 }

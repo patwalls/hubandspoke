@@ -33,7 +33,17 @@ export function replaceUrlParam(param: string, value: string | null): void {
   if (url.href !== window.location.href) window.history.replaceState(window.history.state, "", url);
 }
 
-export function useDialogUrl(args: { param: string; id: string | null | undefined; open: boolean; onOpenChange: (open: boolean) => void; enabled?: boolean }): void {
+// A dialog handing the URL straight to its neighbour (Previous / Next in the
+// clip editor): the param is swapped in place, and the history entry the
+// first dialog pushed now belongs to the next one, so its close goes Back.
+let handedOff: { param: string; id: string; pushed: boolean } | null = null;
+
+/**
+ * Returns `handOff(nextId)`: swap `?<param>=` from this open dialog to
+ * `nextId` without a history step. Call it, close this dialog, then open the
+ * one for `nextId`.
+ */
+export function useDialogUrl(args: { param: string; id: string | null | undefined; open: boolean; onOpenChange: (open: boolean) => void; enabled?: boolean }): (nextId: string) => void {
   const { param, id, open, onOpenChange } = args;
   const enabled = args.enabled ?? true;
   const pushed = useRef(false);
@@ -54,6 +64,10 @@ export function useDialogUrl(args: { param: string; id: string | null | undefine
   useEffect(() => {
     if (!enabled || !id) return;
     if (open) {
+      if (handedOff?.param === param && handedOff.id === id) {
+        pushed.current = handedOff.pushed;
+        handedOff = null;
+      }
       if (readUrlParam(param) !== id) {
         window.history.pushState({ ...(window.history.state ?? {}), dialogParam: param }, "", withParam(param, id));
         pushed.current = true;
@@ -81,4 +95,13 @@ export function useDialogUrl(args: { param: string; id: string | null | undefine
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, [enabled, onPop]);
+
+  return useCallback(
+    (nextId: string) => {
+      handedOff = { param, id: nextId, pushed: pushed.current };
+      pushed.current = false;
+      replaceUrlParam(param, nextId);
+    },
+    [param],
+  );
 }

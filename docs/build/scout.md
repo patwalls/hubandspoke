@@ -4,6 +4,44 @@ The `/build` loop's notebook: what people actually do, candidates considered (bu
 why), and what other tools ship. Newest first. Never re-propose something listed here without
 new evidence.
 
+## 2026-10-22 — lap 4 (polish lap)
+
+**Learned** (2 days of usage)
+- At 02:14–02:16 UTC the curator opened the clip editor on 11 different ideas in the
+  repackage-section queue in two minutes, then kept one (assigned 02:22). The editor is how they
+  compare ideas, but each look was close → click the next row → wait for the editor to open.
+- The curator still does the whole pipeline: 278 items created, 344 editor changes and 422
+  status changes in 30 days. After cross-posting they often hand a post to another editor
+  (editor change + back to Assigned). The clip editor (15 opens, curator only) is their third
+  most-opened screen after the content page and production.
+- Sam lives on formats (17), queue (16) and newsletters (12). Five people have now seen a
+  What's new pop-up.
+- Pipeline: 231 items and 30 clips rendered this week so far (Mon–Wed), on pace. No failed
+  renders. Sentry has nothing user-facing (an info-level overhead event and the boot lock
+  warning). Slow pages: `/api/warm` cold starts (ops loop) and one 10 s draft POST.
+
+**Did the last features land?** `publish-way-in` (shipped 00:58 UTC): no `publish:way-in:*`
+marks yet. The curator hasn't published anything since then (their last batch was 23:37), so
+the moment hasn't come. Check next lap. `publish-screen`: opened by 3 people, no links pasted.
+
+**Outward**
+- Frame.io (V4 viewer): `[` and `]` go to the previous and next asset, and the arrows step frames.
+  Reviewers move through a folder without going back to the grid.
+  https://help.frame.io/en/articles/10535490-move-smoothly-in-the-viewer-with-asset-navigation
+- Opus Clip's editor shortcuts are about the timeline (frames, split, zoom), with no clip-to-clip
+  jump. You go back to the project's clip list each time.
+  https://help.opus.pro/docs/article/keyboard-precise-editing
+- Lesson: review tools let you move between items from inside the viewer. Our editor is where the
+  curator compares ideas, so the way to the next idea belongs in its header.
+
+**Candidates**
+- → building: **Previous / Next idea in the clip editor** ("‹ 2 of 12 ›" plus `[` / `]`),
+  walking the queue table's clip rows in their sort order. source: usage (the curator's 11
+  editor opens in 2 minutes on 2026-10-22)
+- Next after this: on Kill idea or Export, open the next idea automatically. That only makes
+  sense if `clip-editor:next-idea` gets used. source: usage
+- The paste box on the Cross-post tab rows (still open, from lap 3). source: usage
+
 ## 2026-10-22 — lap 3 (project lap: publish-day, milestone 4 second half)
 
 **Learned** (1 day of usage)
@@ -99,6 +137,8 @@ week of Oct 12). Cross-posts steady at 60–80/week.
   source: usage
 
 ## Built
+- 2026-10-22 Previous / Next idea in the clip editor (polish). Card
+  `2026-10-22-clip-editor-next-idea`.
 - 2026-10-22 Way in to Publish from the content page (project publish-day milestone 4). Card
   `2026-10-22-publish-way-in`.
 - 2026-10-21 Publish screen (`/[brand]/publish`, project publish-day milestone 1). Card
