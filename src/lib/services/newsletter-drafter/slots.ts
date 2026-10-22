@@ -21,6 +21,7 @@ import { db } from "@/lib/db";
 import { accounts, formatChannels, formats, newsletterDrafts, newsletterIssueHistory, productionItems, transcripts } from "@/lib/db/schema";
 import { formatConfigFor, groupFormatNames, scheduledPrimaries, upcomingSendDates, type NewsletterSchedule } from "./format-config";
 import { findSpecial } from "./promo";
+import { syncNewsletterItemTitle } from "./queue-status";
 import { resolveEditor } from "@/lib/services/assignees";
 
 export const SLOT_HORIZON_DAYS = 14;
@@ -443,8 +444,10 @@ async function ensureSlotQueueItems(group: string, format: GroupFormat, now: Dat
       .set({ productionItemId: item.id, updatedAt: new Date() })
       .where(and(eq(newsletterDrafts.id, r.id), isNull(newsletterDrafts.productionItemId)))
       .returning({ id: newsletterDrafts.id });
-    if (linked.length) n++;
-    else await db.delete(productionItems).where(eq(productionItems.id, item.id));
+    if (linked.length) {
+      n++;
+      await syncNewsletterItemTitle(r.id).catch(() => undefined); // "Starter Story | Newsletter | October 25", like the HubSpot email
+    } else await db.delete(productionItems).where(eq(productionItems.id, item.id));
   }
   return n;
 }

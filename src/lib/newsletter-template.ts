@@ -389,6 +389,22 @@ export function templateFor(formatName: string, saved: unknown): NewsletterTempl
   return parseNewsletterTemplate(saved) ?? DEFAULT_TEMPLATES[formatName.trim().toLowerCase()] ?? null;
 }
 
+/**
+ * The edition's name in the queue: whatever the email tool calls it. A HubSpot
+ * format → the email name from its mapping ("Starter Story | Newsletter |
+ * October 25"; needs the send date); a beehiiv format → the subject line, the
+ * campaign title the team uses. Null when there's nothing better than the
+ * name the item already has. Pure.
+ */
+export function newsletterQueueTitle(
+  template: NewsletterTemplate | null,
+  args: { brandLabel: string; sendDate: string | null; subject: string | null },
+): string | null {
+  if (template?.hubspot) return args.sendDate ? hubspotEmailName(template.hubspot.emailName, args.brandLabel, args.sendDate) : null;
+  if (template?.beehiiv) return args.subject?.trim() || null;
+  return null;
+}
+
 export interface ComposeSponsor {
   /** Copy pulled from the promo calendar (verbatim or rewritten). */
   copy: string | null;

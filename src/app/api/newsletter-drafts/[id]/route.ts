@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { newsletterDrafts } from "@/lib/db/schema";
 import { getNewsletterDraft } from "@/lib/services/newsletter-drafter/queries";
 import { composeIssue } from "@/lib/newsletter-template";
+import { syncNewsletterItemTitle } from "@/lib/services/newsletter-drafter/queue-status";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -77,5 +78,6 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       updatedAt: new Date(),
     })
     .where(eq(newsletterDrafts.id, id));
+  if (fields.subject !== undefined) await syncNewsletterItemTitle(id).catch(() => undefined); // the queue name follows the subject
   return NextResponse.json({ draft: await getNewsletterDraft(id) });
 }

@@ -14,6 +14,7 @@ import { formatConfigFor, voiceForChannel } from "./format-config";
 import { findSpecial } from "./promo";
 import { SINGLE_VIDEO_TRANSCRIPT_BUDGET, getPastIssues, getSingleVideo, getTimestampedTranscript, youtubeThumbnailUrl } from "./sources";
 import type { SourceVideo } from "./agent";
+import { syncNewsletterItemTitle } from "./queue-status";
 import { autoPickScreenshotsSafely } from "./screenshots";
 
 export type NewsletterDraftRunResult =
@@ -207,6 +208,7 @@ export async function runNewsletterDraft(
       .returning({ id: newsletterDrafts.id });
     if (!saved.length) return { ok: false, skipped: "cancelled" };
     await autoPickScreenshotsSafely(row.id, opts.log);
+    await syncNewsletterItemTitle(row.id).catch(() => undefined); // cosmetic: never fail a written draft over the queue name
     return { ok: true, turns: result.turns, sources: sources.length };
   } catch (err) {
     if (err instanceof NewsletterCancelledError) return { ok: false, skipped: "cancelled" };

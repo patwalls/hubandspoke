@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_TEMPLATES, composeIssue, templateChangeProblem, parseNewsletterTemplate, styleSchema, templateFor, type NewsletterTemplate } from "./newsletter-template";
+import { DEFAULT_TEMPLATES, composeIssue, newsletterQueueTitle, templateChangeProblem, parseNewsletterTemplate, styleSchema, templateFor, type NewsletterTemplate } from "./newsletter-template";
 
 const sec = (key: string, heading: string | null, extra: Partial<NewsletterTemplate["sections"][number]> = {}) => ({
   key,
@@ -101,5 +101,21 @@ describe("blockMarkdown", () => {
     expect(templateChangeProblem(sb, edit({ pillColor: "#000000" }))).toMatch(/HubSpot template email/);
     expect(templateChangeProblem(sb, { ...sb, sections: sb.sections.filter((x) => x.key !== oj.key) })).toMatch(/can't be removed/);
     expect(templateChangeProblem(sb, { ...sb, sections: [...sb.sections].reverse() })).toMatch(/order/);
+  });
+});
+
+describe("newsletterQueueTitle (the queue names an edition like its email tool does)", () => {
+  const hubspot = DEFAULT_TEMPLATES["sunday breakfast"];
+  const beehiiv = DEFAULT_TEMPLATES["futurepedia newsletter"];
+
+  it("HubSpot formats: the email name from the mapping, needs the send date", () => {
+    expect(newsletterQueueTitle(hubspot, { brandLabel: "Starter Story", sendDate: "2026-10-25", subject: "x" })).toBe("Starter Story | Newsletter | October 25");
+    expect(newsletterQueueTitle(hubspot, { brandLabel: "Starter Story", sendDate: null, subject: "x" })).toBeNull();
+  });
+
+  it("beehiiv formats: the subject line; nothing until there is one", () => {
+    expect(newsletterQueueTitle(beehiiv, { brandLabel: "Futurepedia", sendDate: "2026-11-03", subject: "  Give Your Claude Videos a Voice " })).toBe("Give Your Claude Videos a Voice");
+    expect(newsletterQueueTitle(beehiiv, { brandLabel: "Futurepedia", sendDate: "2026-11-03", subject: "" })).toBeNull();
+    expect(newsletterQueueTitle(null, { brandLabel: "X", sendDate: "2026-11-03", subject: "s" })).toBeNull();
   });
 });
