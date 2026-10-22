@@ -417,6 +417,9 @@ export function wantsScreenshots(template: NewsletterTemplate | null | undefined
  */
 export const SCREENSHOT_RULE = `SCREENSHOT RULE (sections marked "SCREENSHOTS" below): wherever a screenshot helps the reader, put a placeholder on its own line as *[Screenshot @ M:SS: what the screen shows]*. M:SS is the moment in the section's video (this issue's video, or the section's story video in a roundup — read its timestamped transcript with get_video_transcript) when that screen is on camera: the thing being shown, not when it's first mentioned. Hub & Spoke grabs that frame, so pick a moment it is visible. No video for the section (a case study)? Leave screenshots out of that section.`;
 
+/** Sections marked THUMBNAIL show their video's thumbnail (any newsletter, set per section). Exported for tests. */
+export const THUMBNAIL_RULE = `THUMBNAIL RULE (sections marked "THUMBNAIL" below): put the section's video thumbnail on its own line as a Markdown image ![<the video's title>](<thumbnail URL>), where the section's instructions place it. The URL is this issue's video's THUMBNAIL URL, or in a roundup the section's story video's thumbnail_url from the video tools. Never invent a URL: no video (a case study) means no thumbnail.`;
+
 /** The template block of the first user turn. Exported for tests. */
 export function describeTemplate(template: NewsletterTemplate, sponsorSupplied: boolean): string {
   const lines = template.sections.map((sec, i) => {
@@ -424,9 +427,11 @@ export function describeTemplate(template: NewsletterTemplate, sponsorSupplied: 
     const sponsor =
       sec.kind === "sponsor" && sponsorSupplied ? " — SUPPLIED BY THE PROMO CALENDAR: submit an empty string for this key" : "";
     const shots = sec.kind !== "sponsor" && sec.screenshots ? "\n   SCREENSHOTS: add screenshot placeholders here (SCREENSHOT RULE)." : "";
-    return `${i + 1}. key "${sec.key}" — ${heading}${sponsor}\n   ${sec.hint}${shots}`;
+    const thumb = sec.kind !== "sponsor" && sec.thumbnail ? "\n   THUMBNAIL: include the video thumbnail here (THUMBNAIL RULE)." : "";
+    return `${i + 1}. key "${sec.key}" — ${heading}${sponsor}\n   ${sec.hint}${shots}${thumb}`;
   });
-  return `${wantsScreenshots(template) ? `${SCREENSHOT_RULE}\n\n` : ""}ISSUE TEMPLATE — submit exactly these sections, every key, in this order (sections[].key / sections[].markdown):\n${lines.join("\n")}`;
+  const rules = [wantsScreenshots(template) ? SCREENSHOT_RULE : null, template.sections.some((s) => s.kind !== "sponsor" && s.thumbnail) ? THUMBNAIL_RULE : null].filter(Boolean);
+  return `${rules.map((r) => `${r}\n\n`).join("")}ISSUE TEMPLATE — submit exactly these sections, every key, in this order (sections[].key / sections[].markdown):\n${lines.join("\n")}`;
 }
 
 /** The first user turn. Exported for tests. */
@@ -449,7 +454,7 @@ export function buildUserTurn(args: NewsletterAgentArgs): string {
       [
         `VIDEO: "${v.title ?? "Untitled"}"`,
         `URL (use for the 'Watch The Full Video' link, the only YouTube link): ${v.url ?? "(none)"}`,
-        v.thumbnailUrl ? `Thumbnail image (place it as a Markdown image under the first article headline): ${v.thumbnailUrl}` : null,
+        v.thumbnailUrl ? `THUMBNAIL URL (for sections marked THUMBNAIL): ${v.thumbnailUrl}` : null,
         v.publishedAt ? `Published: ${v.publishedAt.slice(0, 10)}` : null,
       ]
         .filter(Boolean)
@@ -675,6 +680,7 @@ export async function regenerateSection(
     args.sourcesNote ? `SOURCES THIS ISSUE USES:\n${args.sourcesNote}` : null,
     `Rewrite ONLY the section "${sec.key}"${sec.heading ? ` (heading "${sec.heading}", added for you)` : ""}. What it should contain: ${sec.hint}`,
     sec.kind !== "sponsor" && sec.screenshots ? `${SCREENSHOT_RULE}\nThis section is marked SCREENSHOTS.` : null,
+    sec.kind !== "sponsor" && sec.thumbnail ? `${THUMBNAIL_RULE}\nThis section is marked THUMBNAIL: keep its thumbnail image.` : null,
     `Its current content:\n${current || "(empty)"}`,
     args.newStoryExclude
       ? `FIND A NEW STORY: replace this section's video/case study with a DIFFERENT one and rewrite the section around it. ${where ?? "Use the tools to find it: this window's stories first, then list_older_videos / search_case_studies."} Never use a story marked blocked, and never any of these: ${[...args.newStoryExclude].join(", ") || "(none)"}. Set source to the story you chose.${args.instruction?.trim() ? ` The editor's steer: ${args.instruction.trim()}` : ""}`

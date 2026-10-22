@@ -67,9 +67,12 @@ describe("resolveFeatureFlags", () => {
       clipEditor: true,
       designEditor: true,
       newsletterDrafter: false,
+      newsletterTemplateAdmin: false,
     });
     expect(resolveFeatureFlags({ email: "Sam@StarterStory.com" }, {}).newsletterDrafter).toBe(true);
+    expect(resolveFeatureFlags({ email: "Sam@StarterStory.com" }, {}).newsletterTemplateAdmin).toBe(true);
+    expect(resolveFeatureFlags({ email: "patrickswalls@gmail.com" }, {}).newsletterTemplateAdmin).toBe(false);
     expect(resolveFeatureFlags({ email: "patrickswalls@gmail.com" }, {}).newsletterDrafter).toBe(true);
-    expect(resolveFeatureFlags(null, {})).toEqual({ clipEditor: false, designEditor: false, newsletterDrafter: false });
+    expect(resolveFeatureFlags(null, {})).toEqual({ clipEditor: false, designEditor: false, newsletterDrafter: false, newsletterTemplateAdmin: false });
   });
 });

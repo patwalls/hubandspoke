@@ -62,14 +62,25 @@ export const sectionSchema = z.object({
   story: z.enum(STORY_KINDS).optional(),
   /** Heading shown as a rounded colored pill (Sunday Breakfast's courses). Null = plain heading. */
   pillColor: color.nullable().default(null),
-  /** Tinted box behind the section's content (e.g. the sponsor). */
+  /** Tinted box behind the section's content (e.g. the sponsor); for a "label" section, the label's color. */
   boxColor: color.nullable().default(null),
+  /**
+   * "label": the content is drawn as a small rounded label sized to its text
+   * (Daily Seinfeld's "Read Time" block in the HubSpot email). "text": normal.
+   */
+  look: z.enum(["text", "label"]).default("text"),
   /**
    * The drafter adds `*[Screenshot @ M:SS: …]*` placeholders here, and Hub &
    * Spoke fills each with a frame from the section's video (the issue's video,
    * or the section's story video in a roundup). Any newsletter, any section.
    */
   screenshots: z.boolean().default(false),
+  /**
+   * The section shows its video's thumbnail (the issue's video, or the
+   * section's story video in a roundup): the drafter places it as an image,
+   * and in the editor it's an image block that can be swapped or removed.
+   */
+  thumbnail: z.boolean().default(false),
 });
 
 /**
@@ -176,6 +187,13 @@ export const newsletterTemplateSchema = z
     hubspot: hubspotMappingSchema.nullable().default(null),
     beehiiv: beehiivMappingSchema.nullable().default(null),
     sections: z.array(sectionSchema).min(1).max(20),
+    /**
+     * Locked: only each section's instructions can be edited (by anyone with
+     * the drafter); everything else — sections, keys, types, settings, the
+     * layout — only by a template admin (flag `newsletterTemplateAdmin`). For
+     * templates whose push depends on the exact structure (beehiiv's cards).
+     */
+    locked: z.boolean().default(false),
   })
   .refine((t) => new Set(t.sections.map((s) => s.key)).size === t.sections.length, "section keys must be unique")
   .refine((t) => t.sections.filter((s) => s.kind === "sponsor").length <= 1, "at most one sponsor section");
@@ -213,7 +231,7 @@ const s = (
   key: string,
   heading: string | null,
   hint: string,
-  extra: Partial<Pick<NewsletterTemplateSection, "headingLevel" | "kind" | "pillColor" | "boxColor" | "story" | "screenshots">> = {},
+  extra: Partial<Pick<NewsletterTemplateSection, "headingLevel" | "kind" | "pillColor" | "boxColor" | "story" | "screenshots" | "look" | "thumbnail">> = {},
 ): NewsletterTemplateSection => ({
   key,
   heading,
@@ -224,6 +242,8 @@ const s = (
   pillColor: extra.pillColor ?? null,
   boxColor: extra.boxColor ?? null,
   screenshots: extra.screenshots ?? false,
+  look: extra.look ?? "text",
+  thumbnail: extra.thumbnail ?? false,
 });
 
 /** Starter Story's email look, read off past issues (Klaviyo/HubSpot HTML). */
@@ -238,6 +258,7 @@ const NEUTRAL_STYLE: NewsletterStyle = styleSchema.parse({});
 export const DEFAULT_TEMPLATES: Record<string, NewsletterTemplate> = {
   "sunday breakfast": {
     version: 1,
+    locked: false,
     style: STARTER_STORY_STYLE,
     // HubSpot account 20627419: "[TEMPLATE] Sunday Breakfast – Hub & Spoke (do
     // not send)", a copy of the Oct 11 2026 issue. Block ids read off that email.
@@ -287,6 +308,7 @@ export const DEFAULT_TEMPLATES: Record<string, NewsletterTemplate> = {
   },
   "daily seinfeld": {
     version: 1,
+    locked: false,
     style: { ...STARTER_STORY_STYLE, dividers: false },
     // HubSpot account 20627419: "[TEMPLATE] Daily Seinfeld – Hub & Spoke (do
     // not send)", a copy of the Oct 15 2026 issue. Block ids read off that email.
@@ -302,7 +324,8 @@ export const DEFAULT_TEMPLATES: Record<string, NewsletterTemplate> = {
     },
     beehiiv: null,
     sections: [
-      s("read_time", null, "Exactly 'Read Time: N sec.' (or 'Read Time: 1 min. N sec.') for the whole email at ~200 words per minute. Nothing else.", { story: "none" }),
+      // HubSpot's Read Time block: a small grey label (read off the sent issues' HTML).
+      s("read_time", null, "Exactly 'Read Time: N sec.' (or 'Read Time: 1 min. N sec.') for the whole email at ~200 words per minute. Nothing else.", { story: "none", look: "label", boxColor: "#e2e8f0" }),
       s(
         "hook",
         null,
@@ -336,9 +359,11 @@ export const DEFAULT_TEMPLATES: Record<string, NewsletterTemplate> = {
         style: NEUTRAL_STYLE,
         hubspot: null,
         beehiiv: { author, layout: DEFAULT_BEEHIIV_LAYOUT },
+        // The beehiiv build depends on this exact structure: changes go through a template admin.
+        locked: true,
         sections: [
           s("intro", null, "2 to 4 short first-person lines in the channel voice, the signature on its own line, then a one-line teaser text link to the Free Resource offer."),
-          s("article", null, "The article headline as an H2 (the how-to, benefit-first), the video thumbnail as a Markdown image, then the one-line concrete example."),
+          s("article", null, "The article headline as an H2 (the how-to, benefit-first), then the video thumbnail, then the one-line concrete example.", { thumbnail: true }),
           s("why", null, "An H3 'Why [Tool] Works', a benefit-first line, then 3 to 5 ✅ bullets each led by a bolded action verb."),
           s("steps", "How We Did It", "The first half of the 4 to 6 numbered steps: one action each, action bolded, a concrete business impact, and a screenshot of the step.", { headingLevel: 3, screenshots: true }),
           s("free_resource", "Free Resource", "The offer: headline, 2 to 3 sentence body, 3 to 5 Key Takeaways bullets and the CTA link.", { kind: "sponsor", boxColor: "#f1f5f9" }),
@@ -464,6 +489,47 @@ export function blockMarkdown(
     out[block] = out[block] ? `${out[block]}\n\n${md}` : md;
   }
   return out;
+}
+
+/**
+ * The section's look is owned by the HubSpot template email: its heading
+ * (a course name like "The Orange Juice 🍊"), pill and box are part of that
+ * email, and Hub & Spoke only fills the block under it. Pure.
+ */
+export function hubspotOwnedSection(template: NewsletterTemplate, key: string): boolean {
+  return !!template.hubspot?.blocks[key];
+}
+
+/**
+ * Why a template change isn't allowed for a non-admin, or null when it's
+ * fine. A locked template: only section instructions (hints) may change.
+ * Any template: a section linked to a HubSpot block keeps its key, heading,
+ * pill and box (they live in the HubSpot email), and the HubSpot mapping
+ * itself doesn't change. Pure; exported for tests.
+ */
+export function templateChangeProblem(current: NewsletterTemplate, next: NewsletterTemplate): string | null {
+  if (current.hubspot) {
+    if (JSON.stringify(current.hubspot) !== JSON.stringify(next.hubspot)) return "The HubSpot template link can't be changed here. Contact Sam.";
+    for (const sec of current.sections) {
+      if (!hubspotOwnedSection(current, sec.key)) continue;
+      const n = next.sections.find((x) => x.key === sec.key);
+      const label = sec.heading ?? sec.key;
+      if (!n) return `"${label}" fills a block in the HubSpot template email, so it can't be removed here. Contact Sam.`;
+      if (n.heading !== sec.heading || n.headingLevel !== sec.headingLevel || n.pillColor !== sec.pillColor || n.boxColor !== sec.boxColor || n.look !== sec.look) {
+        return `"${label}" (its name and colors) comes from the HubSpot template email: change it there so every issue matches. Contact Sam.`;
+      }
+    }
+    const order = (x: NewsletterTemplate) => x.sections.filter((s) => hubspotOwnedSection(current, s.key)).map((s) => s.key).join(",");
+    if (order(current) !== order(next)) return "The sections linked to the HubSpot template email stay in that email's order. Contact Sam.";
+  }
+  if (!current.locked) return null;
+  // Compare both as the schema shapes them (field order and defaults), so only real differences count.
+  const norm = (x: NewsletterTemplate) => JSON.stringify(newsletterTemplateSchema.parse(x));
+  const hints = new Map(next.sections.map((s) => [s.key, s.hint]));
+  const sameButHints = { ...current, sections: current.sections.map((s) => ({ ...s, hint: hints.get(s.key) ?? s.hint })) };
+  return norm(sameButHints) === norm(next)
+    ? null
+    : "This template is locked: only section instructions can change. Contact Sam for other adjustments.";
 }
 
 /** The HubSpot email name from the mapping's pattern + the send date (today when unset). Pure. */

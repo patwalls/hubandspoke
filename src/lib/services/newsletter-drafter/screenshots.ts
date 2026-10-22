@@ -16,12 +16,13 @@
 
 import { eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { designFrames, newsletterDrafts } from "@/lib/db/schema";
+import { designFrames, newsletterDrafts, productionItems } from "@/lib/db/schema";
 import { listFrames, requestFrameAt, type DesignFrame } from "@/lib/services/design-editor/frames";
 import { loadSource } from "@/lib/services/design-editor/session";
 import { bucketName, buildKey, getPresignedGetUrl, putObject } from "@/lib/s3";
 import { parseScreenshotMarks, type ChosenScreenshot } from "@/lib/newsletter-screenshots";
 import type { NewsletterSection } from "@/lib/newsletter-template";
+import { youtubeThumbnailUrl } from "./sources";
 
 /** Candidate moments around a placeholder's timestamp: just before, on it, just after. Pure; exported for tests. */
 export function frameCandidateSecs(sec: number): number[] {
@@ -183,6 +184,10 @@ export interface ScreenshotState {
   marks: Record<string, string | null>;
   /** Video id → a short-lived link to the archived video, for the scrubber. */
   videoUrls: Record<string, string>;
+  /** Section key → its video id (images in any section get the scrubber and "Use the video thumbnail"). */
+  sectionVideos: Record<string, string | null>;
+  /** Video id → its YouTube thumbnail link. */
+  thumbnails: Record<string, string>;
 }
 
 /** Everything the editor's screenshot panel needs. */
@@ -191,7 +196,16 @@ export async function listScreenshotFrames(draftId: string): Promise<ScreenshotS
   if (!d) return null;
   const chosen = await resolvePendingScreenshots(draftId, d.screenshots);
   const marks = Object.fromEntries([...placeholderVideos(d)].map(([k, v]) => [k, v.videoId]));
-  const videoIds = [...new Set(Object.values(marks).filter((v): v is string => !!v))];
+  const sectionVideos = Object.fromEntries(d.sections.map((s) => [s.key, sectionVideoId(d, s)]));
+  const videoIds = [...new Set([...Object.values(marks), ...Object.values(sectionVideos)].filter((v): v is string => !!v))];
+  const thumbnails: Record<string, string> = {};
+  if (videoIds.length) {
+    const rows = await db.select({ id: productionItems.id, youtubeId: productionItems.youtubeId }).from(productionItems).where(inArray(productionItems.id, videoIds));
+    for (const r of rows) {
+      const url = youtubeThumbnailUrl(r.youtubeId);
+      if (url) thumbnails[r.id] = url;
+    }
+  }
   const frames: ScreenshotState["frames"] = [];
   const videoUrls: Record<string, string> = {};
   for (const videoId of videoIds) {
@@ -200,7 +214,7 @@ export async function listScreenshotFrames(draftId: string): Promise<ScreenshotS
     if (src) videoUrls[videoId] = await getPresignedGetUrl(src.key, 4 * 3600, { bucket: src.bucket ?? undefined });
   }
   frames.sort((a, b) => a.sec - b.sec);
-  return { frames, chosen, previews: await screenshotPreviewUrls(chosen), marks, videoUrls };
+  return { frames, chosen, previews: await screenshotPreviewUrls(chosen), marks, videoUrls, sectionVideos, thumbnails };
 }
 
 export const SCREENSHOT_UPLOAD_TYPES: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" };

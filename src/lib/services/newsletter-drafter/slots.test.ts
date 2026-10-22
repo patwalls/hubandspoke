@@ -58,6 +58,14 @@ describe("templated submissions", () => {
     expect(text).toContain(`key "${t.sections[0].key}"`);
   });
 
+  it("asks for the video thumbnail only in sections whose template setting is on", () => {
+    expect(describeTemplate(t, true)).not.toContain("THUMBNAIL RULE");
+    const withThumb = { ...t, sections: t.sections.map((sec, i) => (i === 0 ? { ...sec, thumbnail: true } : sec)) };
+    const text = describeTemplate(withThumb, true);
+    expect(text).toContain("THUMBNAIL RULE");
+    expect(text.match(/THUMBNAIL: include the video thumbnail here/g)).toHaveLength(1);
+  });
+
   it("tells the model which sections are fixed-heading and which one the promo calendar fills", () => {
     const text = describeTemplate(t, true);
     expect(text).toContain('key "orange_juice" — fixed heading "The Orange Juice 🍊"');

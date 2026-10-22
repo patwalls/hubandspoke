@@ -68,6 +68,15 @@ const FLAGS = {
     emails: ["sam@starterstory.com", "patrickswalls@gmail.com"],
     envVar: "FEATURE_NEWSLETTER_DRAFTER_EMAILS",
   },
+  /**
+   * Newsletter template admins: can unlock a locked newsletter template
+   * (`locked` on the template — Futurepedia's beehiiv one) and change its
+   * structure. Everyone else edits only section instructions there.
+   */
+  newsletterTemplateAdmin: {
+    emails: ["sam@starterstory.com", "swalls@hubspot.com"],
+    envVar: "FEATURE_NEWSLETTER_TEMPLATE_ADMIN_EMAILS",
+  },
 } as const satisfies Record<string, FlagDefinition>;
 
 export type FeatureFlag = keyof typeof FLAGS;

@@ -22,8 +22,10 @@ import { cn } from "@/lib/utils";
 import { startVisibleInterval } from "@/lib/visible-interval";
 import { composeIssue, type NewsletterSection, type NewsletterTemplate } from "@/lib/newsletter-template";
 import { EmailPreview } from "@/components/dashboard/email-preview";
-import { ScreenshotMarkPanel, ScreenshotPicker, useScreenshots } from "@/components/dashboard/newsletter-screenshot-picker";
-import { parseScreenshotMarks } from "@/lib/newsletter-screenshots";
+import { formatShortcut, useInlineFormat } from "@/components/dashboard/editable-section";
+import { ImagePanel, ScreenshotMarkPanel, ScreenshotPicker, useScreenshots } from "@/components/dashboard/newsletter-screenshot-picker";
+import { isVideoThumbnail } from "@/components/dashboard/preview-screenshots";
+import { parseScreenshotMarks, screenshotKey, type ScreenshotMark } from "@/lib/newsletter-screenshots";
 import type { NewsletterDraftSource, NewsletterSpecialSource } from "@/lib/db/schema";
 import { NEWSLETTER_START_DELAY_MS } from "@/lib/services/newsletter-drafter/format-config";
 
@@ -77,6 +79,13 @@ interface VideoOption {
 }
 
 const POLL_MS = 4_000;
+
+/** Same sections, field by field (the server's copy comes back with its fields in another order). */
+function sameSections(a: NewsletterSection[], b: NewsletterSection[]): boolean {
+  const src = (v: NewsletterSection["source"]) => (v ? [v.kind, v.key, v.title, v.url, v.publishedAt ?? null] : null);
+  const norm = (x: NewsletterSection) => JSON.stringify([x.key, x.markdown, src(x.source), x.tried ?? []]);
+  return a.length === b.length && a.every((x, i) => norm(x) === norm(b[i]));
+}
 
 function fmtDate(iso: string | null): string {
   if (!iso) return "";
@@ -172,8 +181,9 @@ function Workspace({
   const [busyAction, setBusyAction] = useState<string | null>(null);
   // Screenshots: any template section can ask for them (its "Screenshots from the video" setting).
   const hasShots = !!draft.template?.sections.some((s) => s.kind !== "sponsor" && s.screenshots);
-  const shots = useScreenshots(draft.id, hasShots && draft.status === "ready", draft.screenshotPreviews ?? {});
-  const previewShots = hasShots ? { chosen: shots.chosen, urlFor: shots.urlFor } : undefined;
+  // Loaded for every templated draft: any image in the text can be swapped for an upload or a video frame.
+  const shots = useScreenshots(draft.id, !!draft.template && draft.status === "ready", draft.screenshotPreviews ?? {});
+  const previewShots = { chosen: shots.chosen, urlFor: shots.urlFor };
   const seenRevision = useRef(draft.revision);
   const seenStatus = useRef(draft.status);
   // The revision the next save is based on, and the save in flight (saves run one at a time).
@@ -201,22 +211,24 @@ function Workspace({
   const dirty =
     subject !== (draft.subject ?? "") ||
     previewText !== (draft.previewText ?? "") ||
-    body !== (draft.bodyMarkdown ?? "") ||
+    // Templated drafts never edit the composed body (the server rebuilds it from the sections on each save).
+    (!draft.template && body !== (draft.bodyMarkdown ?? "")) ||
     specialCopy !== (draft.specialCopy ?? "") ||
-    JSON.stringify(sections) !== JSON.stringify(draft.sections);
+    !sameSections(sections, draft.sections);
 
   const preview = useMemo(() => {
     if (!draft.template) return body;
     return composeIssue(draft.template, sections, specialCopy.trim() ? { copy: specialCopy, landingUrl: draft.specialSource?.landingUrl ?? null } : null);
   }, [draft.template, draft.specialSource, sections, specialCopy, body]);
 
-  function save(): Promise<boolean> {
-    const next = saveChain.current.then(() => saveNow());
+  /** Save (one at a time). `withSections`: save these instead of the current state (a change made in the same click). */
+  function save(withSections?: NewsletterSection[]): Promise<boolean> {
+    const next = saveChain.current.then(() => saveNow(withSections));
     saveChain.current = next;
     return next;
   }
 
-  async function saveNow(): Promise<boolean> {
+  async function saveNow(withSections?: NewsletterSection[]): Promise<boolean> {
     setSaving(true);
     setMessage(null);
     try {
@@ -228,7 +240,7 @@ function Workspace({
           previewText,
           specialCopy,
           revision: revisionRef.current,
-          ...(draft.template ? { sections } : { bodyMarkdown: body }),
+          ...(draft.template ? { sections: withSections ?? sections } : { bodyMarkdown: body }),
         }),
       });
       const json = (await res.json().catch(() => ({}))) as { draft?: EditorDraft; error?: string };
@@ -318,7 +330,7 @@ function Workspace({
               {busyAction === "redraft" && <Loader2 className="animate-spin" />}
               Redraft
             </Button>
-            <Button variant="outline" size="sm" onClick={save} disabled={!dirty || saving}>
+            <Button variant="outline" size="sm" onClick={() => void save()} disabled={!dirty || saving}>
               {saving && <Loader2 className="animate-spin" />}
               Save
             </Button>
@@ -361,9 +373,65 @@ function Workspace({
     setSelected(null);
     setEditingSection(null);
   };
-  const selSection = selected && !selected.startsWith("shot:") ? (draft.template?.sections.find((s) => s.key === selected) ?? null) : null;
+  const selSection = selected && !selected.startsWith("shot:") && !selected.startsWith("img:") ? (draft.template?.sections.find((s) => s.key === selected) ?? null) : null;
   const selShot = selected?.startsWith("shot:") ? selected.slice(5) : null;
   const shotMark = selShot ? (draft.template?.sections.flatMap((s) => parseScreenshotMarks(s.key, sectionMd(s.key))).find((m) => m.key === selShot) ?? null) : null;
+
+  // Images in the text (the video thumbnail, or any other): the nth Markdown image of a section.
+  const IMAGE_RE = /!\[([^\]]*)\]\(([^)\s]+)\)/g;
+  const imageAt = (key: string, index: number) => {
+    const m = [...sectionMd(key).matchAll(IMAGE_RE)][index];
+    return m ? { alt: m[1], url: m[2] } : null;
+  };
+  const replaceImage = (key: string, index: number, replacement: string) => {
+    let i = 0;
+    return sectionMd(key).replace(IMAGE_RE, (whole) => (i++ === index ? replacement : whole));
+  };
+  const withSection = (key: string, md: string) => sections.map((x) => (x.key === key ? { ...x, markdown: md } : x));
+  /** Change a section's text and save it right away (an image swap is one click, not a typing session). */
+  const commitSection = async (key: string, md: string) => {
+    setSectionMd(key, md);
+    return save(withSection(key, md));
+  };
+  /**
+   * Swapping an image for an upload or a frame turns it into a screenshot
+   * placeholder (same label), so the pick works like any screenshot: frames,
+   * scrubber, uploads, and both pushes.
+   */
+  const imageToPlaceholder = async (key: string, index: number): Promise<string | null> => {
+    const img = imageAt(key, index);
+    if (!img) return null;
+    const taken = new Set(parseScreenshotMarks(key, sectionMd(key)).map((m) => m.label.toLowerCase()));
+    const base = (img.alt.trim() || "Image").replace(/[[\]*_]/g, "").slice(0, 80);
+    let label = base;
+    for (let n = 2; taken.has(label.toLowerCase()); n++) label = `${base} ${n}`;
+    if (!(await commitSection(key, replaceImage(key, index, `*[Screenshot: ${label}]*`)))) return null;
+    const markKey = screenshotKey(key, label);
+    setSelected(`shot:${markKey}`);
+    return markKey;
+  };
+  /** A screenshot placeholder back to the section's video thumbnail. */
+  const placeholderToThumbnail = async (mark: ScreenshotMark) => {
+    const videoId = shots.sectionVideos[mark.sectionKey];
+    const thumb = videoId ? shots.thumbnails[videoId] : null;
+    if (!thumb) return;
+    if (shots.chosen[mark.key]) await shots.choose(mark.key, null);
+    await commitSection(mark.sectionKey, sectionMd(mark.sectionKey).replace(mark.raw, `![${mark.label}](${thumb})`));
+    setSelected(null);
+  };
+  const selImage = selected?.startsWith("img:") ? (() => {
+    const [, key, n] = selected.split(":");
+    const img = imageAt(key, Number(n));
+    return img ? { key, index: Number(n), ...img } : null;
+  })() : null;
+  const sectionVideoUrl = (key: string) => {
+    const v = shots.sectionVideos[key];
+    return v ? (shots.videoUrls[v] ?? null) : null;
+  };
+  const sectionThumb = (key: string) => {
+    const v = shots.sectionVideos[key];
+    return v ? (shots.thumbnails[v] ?? null) : null;
+  };
 
   const sourcesList = draft.sources.length > 0 && draft.kind === "roundup" && (
   <div className="flex flex-col gap-1 text-sm">
@@ -451,11 +519,21 @@ function Workspace({
               setSelected(`shot:${markKey}`);
               void shots.upload(markKey, file);
             },
+            onSelectImage: (key, index) => {
+              setEditingSection(null);
+              setSelected(`img:${key}:${index}`);
+            },
+            onDropImage: (key, index, file) => {
+              setEditingSection(null);
+              void imageToPlaceholder(key, index).then((markKey) => {
+                if (markKey) void shots.upload(markKey, file);
+              });
+            },
           }}
         />
         <p className="flex items-center justify-center gap-1.5 pb-6 text-center text-xs text-muted-foreground">
-          <MousePointerClick className="size-3.5" /> Click any text to edit it
-          {hasShots && " · click a screenshot to pick a frame or upload one · or drop an image on it"}
+          <MousePointerClick className="size-3.5" /> Click any text to edit it (select words for Bold / Italic) · click an image or screenshot to swap it, or
+          drop an image file on it
         </p>
       </div>
 
@@ -496,7 +574,7 @@ function Workspace({
               />
               <p className="text-xs text-muted-foreground">
                 {editingSection === selSection.key
-                  ? "Typing in the email edits this section. **bold**, [text](link) and “- ” bullets work. Click outside it to finish; it saves on its own."
+                  ? "Typing in the email edits this section. Select words for Bold / Italic (or ⌘B / ⌘I); [text](link) and “- ” bullets work. Images show as [🖼 …]. Click outside to finish; it saves on its own."
                   : "Click the section in the email to edit its text."}
               </p>
             </>
@@ -505,17 +583,41 @@ function Workspace({
           <div className="flex flex-col gap-3">
             <span className="text-sm font-medium">Screenshot</span>
             {shotMark ? (
-              <ScreenshotMarkPanel key={shotMark.key} mark={shotMark} shots={shots} />
+              <ScreenshotMarkPanel key={shotMark.key} mark={shotMark} shots={shots} onUseThumbnail={() => void placeholderToThumbnail(shotMark)} />
             ) : (
               <span className="text-xs text-muted-foreground">This placeholder is no longer in the text.</span>
             )}
             {shots.error && <span className="text-xs text-destructive">{shots.error}</span>}
           </div>
+        ) : selImage ? (
+          <ImagePanel
+            key={selected!}
+            url={selImage.url}
+            alt={selImage.alt}
+            isThumbnail={isVideoThumbnail(selImage.url)}
+            videoUrl={sectionVideoUrl(selImage.key)}
+            thumbnailUrl={sectionThumb(selImage.key)}
+            busy={saving || shots.busy !== null}
+            onUpload={(file) => void imageToPlaceholder(selImage.key, selImage.index).then((markKey) => {
+                if (markKey) void shots.upload(markKey, file);
+              })}
+            onGrab={(sec) => void imageToPlaceholder(selImage.key, selImage.index).then((markKey) => {
+                if (markKey) void shots.grabAt(markKey, sec);
+              })}
+            onUseThumbnail={() => {
+              const thumb = sectionThumb(selImage.key);
+              if (thumb) void commitSection(selImage.key, replaceImage(selImage.key, selImage.index, `![${selImage.alt}](${thumb})`));
+            }}
+            onRemove={() => {
+              void commitSection(selImage.key, replaceImage(selImage.key, selImage.index, "").replace(/\n{3,}/g, "\n\n"));
+              setSelected(null);
+            }}
+          />
         ) : (
           <>
             {subjectFields}
             <p className="rounded-md bg-muted/60 p-3 text-xs text-muted-foreground">
-              Click any part of the email to edit it. Text opens right where it is; its Regenerate{draft.kind === "roundup" ? " and Find new story" : ""} show here{hasShots ? "; a screenshot opens its video scrubber, frames, Upload and Remove" : ""}.
+              Click any part of the email to edit it. Text opens right where it is, with Regenerate{draft.kind === "roundup" ? " and Find new story" : ""} here{hasShots ? "; a screenshot opens its video scrubber, frames, Upload and Remove" : ""}. Locked parts (headings, labels, masthead, footer) come from the template.
             </p>
             {sourcesList}
           </>
@@ -758,6 +860,7 @@ function SectionEditor({
   children?: React.ReactNode;
 }) {
   const [instruction, setInstruction] = useState("");
+  const { ref: formatRef, apply: applyFormat } = useInlineFormat();
   return (
     <div className="flex flex-col gap-2 rounded-lg border p-3">
       <div className="flex items-center justify-between gap-2">
@@ -798,7 +901,23 @@ function SectionEditor({
           </span>
         </div>
       )}
-      {!hideText && <Textarea className="min-h-28 font-mono text-xs" value={value} onChange={(e) => onChange(e.target.value)} disabled={regenerating} />}
+      {!hideText && (
+        <Textarea
+          ref={formatRef}
+          className="min-h-28 font-mono text-xs"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          // Cmd+B / Cmd+I, same as the visual view.
+          onKeyDown={(e) => {
+            const mark = formatShortcut(e);
+            const next = mark ? applyFormat(value, mark) : null;
+            if (next == null) return;
+            e.preventDefault();
+            onChange(next);
+          }}
+          disabled={regenerating}
+        />
+      )}
       {children}
       <div className={cn("flex items-center gap-2", hideText && "flex-wrap")}>
         <Input

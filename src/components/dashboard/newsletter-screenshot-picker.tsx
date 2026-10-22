@@ -7,7 +7,7 @@
 // their own image, or remove it. All free (ffmpeg on our worker, no AI).
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Camera, Check, Loader2, Trash2, Upload } from "lucide-react";
+import { Camera, Check, ImageIcon, Loader2, Trash2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FrameScrubber } from "@/components/design-editor/inspector";
 import { cn } from "@/lib/utils";
@@ -28,6 +28,8 @@ interface ScreenshotsPayload {
   previews: Record<string, string>;
   marks: Record<string, string | null>;
   videoUrls: Record<string, string>;
+  sectionVideos: Record<string, string | null>;
+  thumbnails: Record<string, string>;
 }
 
 export interface ScreenshotsState {
@@ -36,6 +38,9 @@ export interface ScreenshotsState {
   /** Placeholder → its video id (null: no video, upload only). */
   marks: Record<string, string | null>;
   videoUrls: Record<string, string>;
+  /** Section key → its video id; video id → its YouTube thumbnail. */
+  sectionVideos: Record<string, string | null>;
+  thumbnails: Record<string, string>;
   /** Preview link for a placeholder's image (null while its frame is still being grabbed). */
   urlFor: (c: ChosenScreenshot, markKey: string) => string | null;
   request: (markKey: string, sec: number) => Promise<void>;
@@ -47,7 +52,7 @@ export interface ScreenshotsState {
 }
 
 export function useScreenshots(draftId: string, enabled: boolean, initialPreviews: Record<string, string> = {}): ScreenshotsState {
-  const [state, setState] = useState<ScreenshotsPayload>({ frames: [], chosen: {}, previews: initialPreviews, marks: {}, videoUrls: {} });
+  const [state, setState] = useState<ScreenshotsPayload>({ frames: [], chosen: {}, previews: initialPreviews, marks: {}, videoUrls: {}, sectionVideos: {}, thumbnails: {} });
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -107,7 +112,21 @@ export function useScreenshots(draftId: string, enabled: boolean, initialPreview
   const urlFor = (c: ChosenScreenshot, markKey: string) =>
     c.pending ? null : ((c.frameId ? state.frames.find((f) => f.id === c.frameId)?.previewUrl : null) ?? state.previews[markKey] ?? null);
 
-  return { frames: state.frames, chosen: state.chosen, marks: state.marks, videoUrls: state.videoUrls, urlFor, request, grabAt, choose, upload, busy, error };
+  return {
+    frames: state.frames,
+    chosen: state.chosen,
+    marks: state.marks,
+    videoUrls: state.videoUrls,
+    sectionVideos: state.sectionVideos,
+    thumbnails: state.thumbnails,
+    urlFor,
+    request,
+    grabAt,
+    choose,
+    upload,
+    busy,
+    error,
+  };
 }
 
 /** Text view: the screenshot placeholders in one section, each with its panel. */
@@ -127,8 +146,8 @@ export function ScreenshotPicker({ sectionKey, markdown, shots }: { sectionKey: 
   );
 }
 
-/** One placeholder: its image, a scrubber over its video, frames near its moment, Upload, Remove. */
-export function ScreenshotMarkPanel({ mark: m, shots }: { mark: ScreenshotMark; shots: ScreenshotsState }) {
+/** One placeholder: its image, a scrubber over its video, frames near its moment, Upload, Remove (and back to the video thumbnail). */
+export function ScreenshotMarkPanel({ mark: m, shots, onUseThumbnail }: { mark: ScreenshotMark; shots: ScreenshotsState; onUseThumbnail?: () => void }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const pick = shots.chosen[m.key];
   const pickUrl = pick ? shots.urlFor(pick, m.key) : null;
@@ -183,6 +202,11 @@ export function ScreenshotMarkPanel({ mark: m, shots }: { mark: ScreenshotMark; 
             e.target.value = "";
           }}
         />
+        {onUseThumbnail && videoId && shots.thumbnails[videoId] && (
+          <Button size="xs" variant="ghost" onClick={onUseThumbnail} disabled={saving} title="Put the video's thumbnail here instead">
+            <ImageIcon /> Use the video thumbnail
+          </Button>
+        )}
       </div>
 
       {videoUrl ? (
@@ -240,6 +264,75 @@ export function ScreenshotMarkPanel({ mark: m, shots }: { mark: ScreenshotMark; 
             </div>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * An image in a draft's text (the video thumbnail, or any other): swap it for
+ * an upload or a frame from the section's video, put the video thumbnail
+ * back, or remove it. Swapping turns it into a screenshot placeholder (the
+ * editor does that), so its picks work exactly like screenshots.
+ */
+export function ImagePanel({
+  url,
+  alt,
+  isThumbnail,
+  videoUrl,
+  thumbnailUrl,
+  busy,
+  onUpload,
+  onGrab,
+  onUseThumbnail,
+  onRemove,
+}: {
+  url: string;
+  alt: string;
+  isThumbnail: boolean;
+  videoUrl: string | null;
+  thumbnailUrl: string | null;
+  busy: boolean;
+  onUpload: (file: File) => void;
+  onGrab: (sec: number) => void;
+  onUseThumbnail: () => void;
+  onRemove: () => void;
+}) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  return (
+    <div className="flex flex-col gap-3">
+      <span className="text-sm font-medium">{isThumbnail ? "Video thumbnail" : "Image"}</span>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={url} alt={alt} className="w-full rounded border" />
+      {alt && <span className="text-xs text-muted-foreground">{alt}</span>}
+      <div className="flex flex-wrap items-center gap-2">
+        <Button size="xs" variant="outline" onClick={() => fileRef.current?.click()} disabled={busy} title="Use your own image (PNG, JPG, WebP or GIF, up to 10 MB)">
+          {busy ? <Loader2 className="animate-spin" /> : <Upload />} Upload your own
+        </Button>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/gif"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) onUpload(f);
+            e.target.value = "";
+          }}
+        />
+        {thumbnailUrl && thumbnailUrl !== url && (
+          <Button size="xs" variant="ghost" onClick={onUseThumbnail} disabled={busy}>
+            <ImageIcon /> Use the video thumbnail
+          </Button>
+        )}
+        <Button size="xs" variant="ghost" onClick={onRemove} disabled={busy} title="Take the image out of the section">
+          <Trash2 /> Remove
+        </Button>
+      </div>
+      {videoUrl ? (
+        <FrameScrubber videoUrl={videoUrl} busy={busy} onGrab={onGrab} />
+      ) : (
+        <span className="text-[11px] text-muted-foreground">No archived video for this section, so frames can&apos;t be grabbed. Upload an image instead.</span>
       )}
     </div>
   );

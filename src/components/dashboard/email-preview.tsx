@@ -10,8 +10,8 @@
 import type { CSSProperties } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import { BeehiivPreview } from "@/components/dashboard/beehiiv-preview";
-import { markShots, shotFor, ShotBlock, type PreviewScreenshots, type Shot } from "@/components/dashboard/preview-screenshots";
-import { EditableSection, emptySectionHint, type PreviewEditing } from "@/components/dashboard/editable-section";
+import { imageFor, ImageBlock, markImages, markShots, ScreenshotSample, shotFor, ShotBlock, ThumbnailSample, type DraftImage, type PreviewScreenshots, type Shot } from "@/components/dashboard/preview-screenshots";
+import { EditableSection, emptySectionHint, FixedPart, type PreviewEditing } from "@/components/dashboard/editable-section";
 import { emailCss, sponsorBlock, type CssProps, type NewsletterSection, type NewsletterTemplate } from "@/lib/newsletter-template";
 
 const asStyle = (c: CssProps) => c as CSSProperties;
@@ -48,6 +48,9 @@ export function EmailPreview({
   const css = emailCss(st);
   const t = css.tags;
   const shots: Shot[] = [];
+  const images: DraftImage[] = [];
+  /** Draft canvas: images are clickable blocks. */
+  const draftCanvas = !!edit && edit.mode !== "template";
   const components: Components = {
     p: (props) => <p style={asStyle(t.p)}>{props.children}</p>,
     h1: (props) => <h1 style={asStyle(t.h1)}>{props.children}</h1>,
@@ -64,6 +67,8 @@ export function EmailPreview({
     img: (props) => {
       const shot = shotFor(props.alt, shots);
       if (shot) return <ShotBlock shot={shot} edit={edit} />;
+      const image = imageFor(props.alt, images);
+      if (image && edit) return <ImageBlock image={image} edit={edit} />;
       // eslint-disable-next-line @next/next/no-img-element
       return <img src={typeof props.src === "string" ? props.src : undefined} alt={props.alt ?? ""} style={asStyle(t.img)} />;
     },
@@ -75,26 +80,53 @@ export function EmailPreview({
 
   const blocks = template.sections
     .map((sec) => {
-      let md = markShots(sec.key, (byKey.get(sec.key) ?? "").trim(), screenshots, shots);
+      const raw = (byKey.get(sec.key) ?? "").trim();
+      let md = markShots(sec.key, draftCanvas ? markImages(sec.key, raw, images) : raw, screenshots, shots);
       if (sec.kind === "sponsor" && sponsor?.copy?.trim()) md = sponsorBlock(sponsor.copy, sponsor.landingUrl);
       let content = md ? <ReactMarkdown components={components}>{md}</ReactMarkdown> : null;
-      if (!content && showHints) content = <p style={asStyle(css.hint)}>{sec.hint || "(content)"}</p>;
+      if (!content && showHints) {
+        content = (
+          <>
+            {sec.thumbnail && sec.kind !== "sponsor" && <ThumbnailSample />}
+            <p style={asStyle(css.hint)}>{sec.hint || "(content)"}</p>
+            {sec.screenshots && sec.kind !== "sponsor" && <ScreenshotSample />}
+          </>
+        );
+      }
+      // A "label" section (Daily Seinfeld's Read Time): a small rounded label sized to its text, as in the HubSpot email.
+      if (content && sec.look === "label") {
+        content = (
+          <div
+            className="[&_p]:m-0!"
+            style={{ display: "inline-block", background: sec.boxColor ?? "#e2e8f0", color: "rgb(3, 2, 18)", fontWeight: 700, lineHeight: "120%", padding: 8, borderRadius: 4 }}
+          >
+            {content}
+          </div>
+        );
+      }
       if (edit) {
         content = (
-          <EditableSection sectionKey={sec.key} markdown={byKey.get(sec.key) ?? ""} isSponsor={sec.kind === "sponsor"} edit={edit}>
+          <EditableSection sectionKey={sec.key} markdown={edit.mode === "template" ? sec.hint : (byKey.get(sec.key) ?? "")} isSponsor={sec.kind === "sponsor"} edit={edit}>
             {content ?? emptySectionHint(sec.hint)}
           </EditableSection>
         );
       }
-      if (content && sec.boxColor) content = <div style={asStyle(css.box(sec.boxColor))}>{content}</div>;
+      if (content && sec.boxColor && sec.look !== "label") content = <div style={asStyle(css.box(sec.boxColor))}>{content}</div>;
       const heading = sec.heading ? (
-        sec.pillColor ? (
-          <div style={asStyle(css.pillWrap)}>
-            <span style={asStyle(css.pill(sec.pillColor))}>{sec.heading}</span>
-          </div>
-        ) : (
-          <div style={asStyle(css.plainHeading(sec.headingLevel))}>{sec.heading}</div>
-        )
+        <FixedPart
+          edit={edit}
+          reason={template.hubspot?.blocks[sec.key] ? "Heading: from the HubSpot template email" : "Heading: set in the template"}
+          onSelect={edit ? () => edit.onSelectSection(sec.key) : undefined}
+          lockedInTemplate={template.hubspot?.blocks[sec.key] ? "Set in the HubSpot template email: change it there" : null}
+        >
+          {sec.pillColor ? (
+            <div style={asStyle(css.pillWrap)}>
+              <span style={asStyle(css.pill(sec.pillColor))}>{sec.heading}</span>
+            </div>
+          ) : (
+            <div style={asStyle(css.plainHeading(sec.headingLevel))}>{sec.heading}</div>
+          )}
+        </FixedPart>
       ) : null;
       if (!heading && !content) return null;
       return (
@@ -115,7 +147,11 @@ export function EmailPreview({
     <div style={asStyle(css.outer)}>
       <div style={asStyle(css.card)}>
         <div style={asStyle(css.inner)}>
-          {img && <div style={asStyle(css.mastheadWrap)}>{st.mastheadLinkUrl ? <a href={st.mastheadLinkUrl} target="_blank" rel="noreferrer">{img}</a> : img}</div>}
+          {img && (
+            <FixedPart edit={edit} reason={template.hubspot ? "Masthead: from the HubSpot template email" : "Masthead: set in the template"}>
+              <div style={asStyle(css.mastheadWrap)}>{st.mastheadLinkUrl ? <a href={st.mastheadLinkUrl} target="_blank" rel="noreferrer">{img}</a> : img}</div>
+            </FixedPart>
+          )}
           {blocks.map((b, i) => (
             <div key={i}>
               {i > 0 && (st.dividers ? <hr style={asStyle(css.divider)} /> : <div style={asStyle(css.gap)} />)}

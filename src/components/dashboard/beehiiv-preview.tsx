@@ -12,8 +12,9 @@
 
 import { Open_Sans, Poppins } from "next/font/google";
 import ReactMarkdown from "react-markdown";
-import { EditableSection, emptySectionHint, type PreviewEditing } from "@/components/dashboard/editable-section";
-import { markShots, shotFor, ShotBlock, type PreviewScreenshots, type Shot } from "@/components/dashboard/preview-screenshots";
+import { EditableSection, emptySectionHint, FixedPart, type PreviewEditing } from "@/components/dashboard/editable-section";
+import { cn } from "@/lib/utils";
+import { imageFor, ImageBlock, markImages, markShots, ScreenshotSample, shotFor, ShotBlock, ThumbnailSample, type DraftImage, type PreviewScreenshots, type Shot } from "@/components/dashboard/preview-screenshots";
 import { sponsorBlock, type NewsletterSection, type NewsletterTemplate } from "@/lib/newsletter-template";
 
 // The Kevin/Saj templates' fonts: Open Sans body (16px, 1.5), Poppins headings.
@@ -55,13 +56,17 @@ export function BeehiivPreview({
   const byKey = new Map(sections.map((x) => [x.key, x.markdown]));
   const secByKey = new Map(template.sections.map((s) => [s.key, s]));
   const shots: Shot[] = [];
+  const images: DraftImage[] = [];
+  /** Draft canvas: images are clickable blocks. */
+  const draftCanvas = !!edit && edit.mode !== "template";
   const md = (key: string) => {
     const sec = secByKey.get(key);
     if (sec?.kind === "sponsor" && sponsor?.copy?.trim()) return sponsorBlock(sponsor.copy, sponsor.landingUrl);
     // Same rules as the push (beehiiv-blocks.ts): every line is its own paragraph, and
     // "- Saj" / "- Kevin" is the intro's sign-off, not a list. Screenshot placeholders
     // become image markers the img renderer draws (the picked image, or a box).
-    return markShots(key, (byKey.get(key) ?? "").trim(), screenshots, shots)
+    const raw = (byKey.get(key) ?? "").trim();
+    return markShots(key, draftCanvas ? markImages(key, raw, images) : raw, screenshots, shots)
       .replace(/^- (Saj|Kevin)$/gm, "\\- $1")
       .replace(/\n(?!\n)/g, "\n\n");
   };
@@ -72,8 +77,17 @@ export function BeehiivPreview({
   const rendered = (key: string, linkButtons: boolean) => {
     const text = md(key);
     if (!text) {
-      if (edit) return emptySectionHint(secByKey.get(key)?.hint);
-      return showHints ? <p className="text-[13px] italic text-[#9ca3af]">{secByKey.get(key)?.hint || `(${key})`}</p> : null;
+      if (showHints) {
+        const sec = secByKey.get(key);
+        return (
+          <>
+            <p className="text-[13px] italic text-[#9ca3af]">{sec?.hint || `(${key})`}</p>
+            {sec?.thumbnail && sec.kind !== "sponsor" && <ThumbnailSample />}
+            {sec?.screenshots && sec.kind !== "sponsor" && <ScreenshotSample />}
+          </>
+        );
+      }
+      return edit ? emptySectionHint(secByKey.get(key)?.hint) : null;
     }
     return (
       <ReactMarkdown
@@ -110,6 +124,8 @@ export function BeehiivPreview({
           img: ({ src, alt }) => {
             const shot = shotFor(alt, shots);
             if (shot) return <ShotBlock shot={shot} edit={edit} />;
+            const image = imageFor(alt, images);
+            if (image && edit) return <ImageBlock image={image} edit={edit} />;
             // eslint-disable-next-line @next/next/no-img-element
             return <img src={typeof src === "string" ? src : undefined} alt={alt ?? ""} className="my-3 block w-full rounded-[10px]" />;
           },
@@ -123,7 +139,7 @@ export function BeehiivPreview({
   const body = (key: string, linkButtons: boolean) => {
     if (!edit) return rendered(key, linkButtons);
     return (
-      <EditableSection sectionKey={key} markdown={byKey.get(key) ?? ""} isSponsor={secByKey.get(key)?.kind === "sponsor"} edit={edit}>
+      <EditableSection sectionKey={key} markdown={edit.mode === "template" ? (secByKey.get(key)?.hint ?? "") : (byKey.get(key) ?? "")} isSponsor={secByKey.get(key)?.kind === "sponsor"} edit={edit}>
         {rendered(key, linkButtons)}
       </EditableSection>
     );
@@ -137,36 +153,70 @@ export function BeehiivPreview({
   const email = (
     <div className={`${openSans.className} bg-[#f4f9fc] px-4 py-6 text-[16px] leading-[1.5] text-[#222222]`}>
       <div className="mx-auto flex max-w-[600px] flex-col gap-4">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        {layout.mastheadImageUrl && <img src={layout.mastheadImageUrl} alt="" className="w-full rounded-xl" />}
-        {cards.map((c, i) => (
-          <div key={i} className="rounded-[5px] px-5 py-3" style={{ border: `2px solid ${c.border}`, background: c.background }}>
-            {c.label.trim() && (
-              <div className={`${poppins.className} mt-1 text-[18px] font-semibold`} style={{ color: layout.labelColor }}>
-                {c.label.replace(/\{tool\}/g, tool)}
-              </div>
-            )}
-            {c.sections.map((s) => (
-              <div key={s.key}>
-                {s.showHeading && secByKey.get(s.key)?.heading && <h3 className={`${poppins.className} my-3 text-[20px] font-bold`}>{secByKey.get(s.key)!.heading}</h3>}
-                {body(s.key, s.linkButtons)}
-              </div>
-            ))}
-          </div>
-        ))}
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        {layout.outroImageUrl && <img src={layout.outroImageUrl} alt="" className="w-full rounded-xl" />}
-        {layout.poll && (
-          <div className="rounded-[5px] px-5 py-4" style={{ border: "2px solid #273653", background: "#FFFFFF" }}>
-            <div className={`${poppins.className} text-[18px] font-semibold`}>How was Futurepedia today?</div>
-            {["It was epic! 💥", "Just okay. 👌", "Not good! ❌"].map((o) => (
-              <div key={o} className="mt-2 w-2/3 rounded border border-[#d1d5db] px-3 py-1.5 text-[14px] text-[#49ADFF]">
-                {o}
-              </div>
-            ))}
-          </div>
+        {layout.mastheadImageUrl && (
+          <FixedPart edit={edit} reason="Masthead: set in the template" onSelect={edit?.onSelectLook}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={layout.mastheadImageUrl} alt="" className="w-full rounded-xl" />
+          </FixedPart>
         )}
-        <p className="text-center text-[11px] text-[#9ca3af]">Footer (social icons, other newsletters, unsubscribe) comes from the “Hub &amp; Spoke” template in beehiiv.</p>
+        {cards.map((c, i) => {
+          // The plain catch-all card (sections not in any card) isn't a template card.
+          const selectCard = edit?.mode === "template" && i < layout.cards.length && edit.onSelectCard ? () => edit.onSelectCard!(i) : undefined;
+          return (
+            <div
+              key={i}
+              onClick={
+                selectCard
+                  ? (e) => {
+                      e.stopPropagation();
+                      selectCard();
+                    }
+                  : undefined
+              }
+              className={cn("rounded-[5px] px-5 py-3", selectCard && "cursor-pointer", selectCard && edit?.selected === `card:${i}` && "outline-2 outline-offset-2 outline-[#49adff] outline-solid")}
+              style={{ border: `2px solid ${c.border}`, background: c.background }}
+            >
+              {c.label.trim() && (
+                <FixedPart edit={edit} reason="Card label: set in the template ({tool} comes from the Why section)" onSelect={selectCard}>
+                  <div className={`${poppins.className} mt-1 text-[18px] font-semibold`} style={{ color: layout.labelColor }}>
+                    {c.label.replace(/\{tool\}/g, tool)}
+                  </div>
+                </FixedPart>
+              )}
+              {c.sections.map((s) => (
+                <div key={s.key}>
+                  {s.showHeading && secByKey.get(s.key)?.heading && (
+                    <FixedPart edit={edit} reason="Heading: set in the template" onSelect={edit ? () => edit.onSelectSection(s.key) : undefined}>
+                      <h3 className={`${poppins.className} my-3 text-[20px] font-bold`}>{secByKey.get(s.key)!.heading}</h3>
+                    </FixedPart>
+                  )}
+                  {body(s.key, s.linkButtons)}
+                </div>
+              ))}
+            </div>
+          );
+        })}
+        {layout.outroImageUrl && (
+          <FixedPart edit={edit} reason="Outro image: set in the template" onSelect={edit?.onSelectLook}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={layout.outroImageUrl} alt="" className="w-full rounded-xl" />
+          </FixedPart>
+        )}
+        {layout.poll && (
+          <FixedPart edit={edit} reason="Feedback poll: added by the template" onSelect={edit?.onSelectLook}>
+            <div className="rounded-[5px] px-5 py-4" style={{ border: "2px solid #273653", background: "#FFFFFF" }}>
+              <div className={`${poppins.className} text-[18px] font-semibold`}>How was Futurepedia today?</div>
+              {["It was epic! 💥", "Just okay. 👌", "Not good! ❌"].map((o) => (
+                <div key={o} className="mt-2 w-2/3 rounded border border-[#d1d5db] px-3 py-1.5 text-[14px] text-[#49ADFF]">
+                  {o}
+                </div>
+              ))}
+            </div>
+          </FixedPart>
+        )}
+        <FixedPart edit={edit} reason="Footer: from beehiiv's “Hub & Spoke” template">
+          <p className="text-center text-[11px] text-[#9ca3af]">Footer (social icons, other newsletters, unsubscribe) comes from the “Hub &amp; Spoke” template in beehiiv.</p>
+        </FixedPart>
       </div>
     </div>
   );

@@ -23,6 +23,8 @@ export interface RecentVideo {
   productionItemId: string;
   title: string | null;
   url: string | null;
+  /** For sections whose template asks for the video thumbnail. */
+  thumbnailUrl: string | null;
   publishedAt: string | null;
   views: number | null;
   hasTranscript: boolean;
@@ -36,6 +38,7 @@ export async function listRecentVideos(brand: string, w: DraftWindow): Promise<R
       title: productionItems.title,
       publishedLink: productionItems.publishedLink,
       youtubeUrl: productionItems.youtubeUrl,
+      youtubeId: productionItems.youtubeId,
       publishedAt: sql<string | null>`${effectivePublishedAt}`,
       views: productionItems.views,
       transcriptId: transcripts.id,
@@ -58,6 +61,7 @@ export async function listRecentVideos(brand: string, w: DraftWindow): Promise<R
     productionItemId: r.id,
     title: r.title,
     url: r.publishedLink ?? r.youtubeUrl,
+    thumbnailUrl: youtubeThumbnailUrl(r.youtubeId),
     publishedAt: r.publishedAt ? new Date(r.publishedAt).toISOString() : null,
     views: r.views,
     hasTranscript: r.transcriptId != null,
@@ -228,6 +232,7 @@ export async function listOlderVideos(brand: string, before: Date, limit = 120):
       title: productionItems.title,
       publishedLink: productionItems.publishedLink,
       youtubeUrl: productionItems.youtubeUrl,
+      youtubeId: productionItems.youtubeId,
       publishedAt: sql<string | null>`${effectivePublishedAt}`,
       views: productionItems.views,
     })
@@ -248,6 +253,7 @@ export async function listOlderVideos(brand: string, before: Date, limit = 120):
     productionItemId: r.id,
     title: r.title,
     url: r.publishedLink ?? r.youtubeUrl,
+    thumbnailUrl: youtubeThumbnailUrl(r.youtubeId),
     publishedAt: r.publishedAt ? new Date(r.publishedAt).toISOString() : null,
     views: r.views,
     hasTranscript: true,
