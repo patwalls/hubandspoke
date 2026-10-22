@@ -596,6 +596,10 @@ function Workspace({
             alt={selImage.alt}
             isThumbnail={isVideoThumbnail(selImage.url)}
             videoUrl={sectionVideoUrl(selImage.key)}
+            transcript={(() => {
+              const v = shots.sectionVideos[selImage.key];
+              return v ? (shots.transcripts[v] ?? []) : [];
+            })()}
             thumbnailUrl={sectionThumb(selImage.key)}
             busy={saving || shots.busy !== null}
             onUpload={(file) => void imageToPlaceholder(selImage.key, selImage.index).then((markKey) => {

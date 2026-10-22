@@ -81,6 +81,30 @@ export async function requestFrameAt(sourceItemId: string, sec: number): Promise
   return toFrame(row);
 }
 
+/**
+ * Grab several frames from one download (the newsletter screenshot picker's
+ * strip of a step's moments). Frames already grabbed are reused; the rest are
+ * queued as one job. Returns every requested frame (pending ones included).
+ */
+export async function requestFramesAt(sourceItemId: string, secs: number[]): Promise<DesignFrame[]> {
+  const rounded = [...new Set(secs.map((s) => Math.max(0, Math.round(s * 100) / 100)))].sort((a, b) => a - b);
+  if (!rounded.length) return [];
+  const rows = await db
+    .insert(designFrames)
+    .values(rounded.map((s) => ({ productionItemId: sourceItemId, sec: s.toFixed(2), origin: "user", status: "pending" })))
+    .onConflictDoUpdate({ target: [designFrames.productionItemId, designFrames.sec], set: { updatedAt: new Date() } })
+    .returning();
+  const todo = rows.filter((r) => r.status !== "done").map((r) => Number(r.sec));
+  if (todo.length) {
+    await enqueue(
+      "design-frames",
+      { sourceItemId, atSecs: todo },
+      { jobKey: `design-frames:batch:${sourceItemId}:${todo[0].toFixed(2)}-${todo.at(-1)!.toFixed(2)}:${todo.length}`, jobKeyMode: "preserve_run_at", queueName: "media-heavy", maxAttempts: 2 },
+    );
+  }
+  return Promise.all(rows.map(toFrame));
+}
+
 export async function listFrames(sourceItemId: string): Promise<DesignFramesState> {
   const rows = await db.select().from(designFrames).where(eq(designFrames.productionItemId, sourceItemId)).orderBy(asc(designFrames.sec));
   const frames = (await Promise.all(rows.map(toFrame))).sort((a, b) => (a.rank ?? 99) - (b.rank ?? 99) || a.sec - b.sec);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { frameCandidateSecs, placeholderVideos, sectionVideoId } from "./screenshots";
+import { frameCandidateSecs, placeholderVideos, screenshotWindowSecs, sectionVideoId } from "./screenshots";
 
 describe("frameCandidateSecs", () => {
   it("grabs just before, on, and just after the moment, never before 0:00", () => {
@@ -32,5 +32,15 @@ describe("which video a screenshot comes from", () => {
     });
     expect(m.get("story:the dashboard")).toEqual({ videoId: "vid-1", sec: 65 });
     expect(m.get("case:the founder's site")).toEqual({ videoId: null, sec: null });
+  });
+});
+
+describe("screenshotWindowSecs", () => {
+  it("offers 12 frames every 4s from just before the moment to 40s after", () => {
+    expect(screenshotWindowSecs(219)).toEqual([215, 219, 223, 227, 231, 235, 239, 243, 247, 251, 255, 259]);
+  });
+
+  it("never goes before 0:00 (and doesn't repeat 0:00)", () => {
+    expect(screenshotWindowSecs(2)).toEqual([0, 2, 6, 10, 14, 18, 22, 26, 30, 34, 38, 42]);
   });
 });

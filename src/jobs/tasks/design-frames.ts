@@ -29,6 +29,8 @@ export interface DesignFramesPayload {
   sourceItemId: string;
   /** Present → grab this one frame; absent → the auto filmstrip + ranking. */
   atSec?: number;
+  /** Present → grab each of these frames from ONE download (the newsletter screenshot picker's strip). */
+  atSecs?: number[];
   /** Legacy payloads (before 2026-09-20) carried the derivative here. */
   productionItemId?: string;
 }
@@ -40,6 +42,7 @@ export const designFramesTask: Task = async (rawPayload, helpers) => {
   const payload = rawPayload as DesignFramesPayload;
   const sourceItemId = payload.sourceItemId;
   const atSec = payload.atSec;
+  const atSecs = payload.atSecs?.length ? payload.atSecs : null;
   const [source] = await db
     .select({ mediaS3Key: productionItems.mediaS3Key, mediaS3Bucket: productionItems.mediaS3Bucket })
     .from(productionItems)
@@ -48,6 +51,7 @@ export const designFramesTask: Task = async (rawPayload, helpers) => {
   if (!source?.mediaS3Key) {
     helpers.logger.warn(`design-frames: source ${sourceItemId} has no media; nothing to grab`);
     if (atSec !== undefined) await markFailed(sourceItemId, atSec, "The source video isn't archived yet");
+    for (const s of atSecs ?? []) await markFailed(sourceItemId, s, "The source video isn't archived yet");
     return;
   }
   const sourceUrl = await getPresignedGetUrl(source.mediaS3Key, 3600, { bucket: source.mediaS3Bucket ?? undefined });
@@ -60,6 +64,14 @@ export const designFramesTask: Task = async (rawPayload, helpers) => {
 
     if (atSec !== undefined) {
       await grabOne(sourceItemId, local, atSec, workDir, "user", helpers.abortSignal);
+      return;
+    }
+    if (atSecs) {
+      for (const s of atSecs) {
+        if (helpers.abortSignal?.aborted) throw new Error("aborted");
+        await grabOne(sourceItemId, local, s, workDir, "user", helpers.abortSignal);
+      }
+      helpers.logger.info(`design-frames batch source=${sourceItemId} frames=${atSecs.length}`);
       return;
     }
 

@@ -2,14 +2,16 @@
 
 // Screenshots for a newsletter's placeholders (`*[Screenshot @ 4:32: …]*`),
 // any newsletter whose template asks for them. A frame is picked for each
-// automatically when the draft lands; here the editor can scrub the section's
-// video and use any moment, try frames around the placeholder's moment, upload
-// their own image, or remove it. All free (ffmpeg on our worker, no AI).
+// automatically when the draft lands, along with a strip of 12 frames across
+// that step's part of the video; here the editor can pick any of them, play
+// the video with its transcript (search it for where the step is mentioned,
+// click a line to jump there) and use the exact frame on screen, upload their
+// own image, or remove it. All free (ffmpeg on our worker, no AI).
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Camera, Check, ImageIcon, Loader2, Trash2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { FrameScrubber } from "@/components/design-editor/inspector";
+import { TranscriptScrubber, type TranscriptLine } from "@/components/dashboard/transcript-scrubber";
 import { cn } from "@/lib/utils";
 import { startVisibleInterval } from "@/lib/visible-interval";
 import { formatTimestamp, parseScreenshotMarks, type ChosenScreenshot, type ScreenshotMark } from "@/lib/newsletter-screenshots";
@@ -30,6 +32,7 @@ interface ScreenshotsPayload {
   videoUrls: Record<string, string>;
   sectionVideos: Record<string, string | null>;
   thumbnails: Record<string, string>;
+  transcripts: Record<string, TranscriptLine[]>;
 }
 
 export interface ScreenshotsState {
@@ -41,9 +44,13 @@ export interface ScreenshotsState {
   /** Section key → its video id; video id → its YouTube thumbnail. */
   sectionVideos: Record<string, string | null>;
   thumbnails: Record<string, string>;
+  /** Video id → its transcript lines (for the picker's read-along). */
+  transcripts: Record<string, TranscriptLine[]>;
   /** Preview link for a placeholder's image (null while its frame is still being grabbed). */
   urlFor: (c: ChosenScreenshot, markKey: string) => string | null;
   request: (markKey: string, sec: number) => Promise<void>;
+  /** Grab the strip of 12 frames across a placeholder's moment. */
+  requestWindow: (markKey: string) => Promise<void>;
   grabAt: (markKey: string, sec: number) => Promise<void>;
   choose: (markKey: string, frameId: string | null) => Promise<void>;
   upload: (markKey: string, file: File) => Promise<void>;
@@ -52,7 +59,7 @@ export interface ScreenshotsState {
 }
 
 export function useScreenshots(draftId: string, enabled: boolean, initialPreviews: Record<string, string> = {}): ScreenshotsState {
-  const [state, setState] = useState<ScreenshotsPayload>({ frames: [], chosen: {}, previews: initialPreviews, marks: {}, videoUrls: {}, sectionVideos: {}, thumbnails: {} });
+  const [state, setState] = useState<ScreenshotsPayload>({ frames: [], chosen: {}, previews: initialPreviews, marks: {}, videoUrls: {}, sectionVideos: {}, thumbnails: {}, transcripts: {} });
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -98,6 +105,8 @@ export function useScreenshots(draftId: string, enabled: boolean, initialPreview
 
   const request = (markKey: string, sec: number) =>
     call(`grab:${markKey}`, () => fetch(`/api/newsletter-drafts/${draftId}/screenshots`, json("POST", { markKey, sec })), "Couldn't grab frames");
+  const requestWindow = (markKey: string) =>
+    call(`window:${markKey}`, () => fetch(`/api/newsletter-drafts/${draftId}/screenshots`, json("POST", { markKey, window: true })), "Couldn't grab frames");
   const grabAt = (markKey: string, sec: number) =>
     call(`exact:${markKey}`, () => fetch(`/api/newsletter-drafts/${draftId}/screenshots`, json("POST", { markKey, sec, exact: true })), "Couldn't grab that frame");
   const choose = (markKey: string, frameId: string | null) =>
@@ -119,8 +128,10 @@ export function useScreenshots(draftId: string, enabled: boolean, initialPreview
     videoUrls: state.videoUrls,
     sectionVideos: state.sectionVideos,
     thumbnails: state.thumbnails,
+    transcripts: state.transcripts,
     urlFor,
     request,
+    requestWindow,
     grabAt,
     choose,
     upload,
@@ -146,19 +157,60 @@ export function ScreenshotPicker({ sectionKey, markdown, shots }: { sectionKey: 
   );
 }
 
-/** One placeholder: its image, a scrubber over its video, frames near its moment, Upload, Remove (and back to the video thumbnail). */
+/** Pickable frames, 3 across, each with its time; the current pick is marked. */
+function FrameGrid({ frames, pickedId, disabled, onPick }: { frames: Frame[]; pickedId: string | null; disabled: boolean; onPick: (id: string) => void }) {
+  return (
+    <div className="grid grid-cols-3 gap-1.5">
+      {frames.map((f) => (
+        <button
+          key={f.id}
+          type="button"
+          disabled={f.status !== "done" || disabled}
+          onClick={() => onPick(f.id)}
+          className={cn("relative aspect-video overflow-hidden rounded border bg-muted", pickedId === f.id ? "ring-2 ring-primary" : "hover:ring-2 hover:ring-primary/40")}
+          title={`${formatTimestamp(f.sec)}${f.status === "failed" ? " — couldn't grab this frame" : " — click to use"}`}
+        >
+          {f.status === "done" && f.previewUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={f.previewUrl} alt="" className="size-full object-cover" />
+          ) : (
+            <span className="flex size-full items-center justify-center text-[10px] text-muted-foreground">
+              {f.status === "failed" ? "failed" : <Loader2 className="size-4 animate-spin" />}
+            </span>
+          )}
+          <span className="absolute bottom-0.5 left-0.5 rounded bg-background/90 px-1 font-mono text-[10px]">{formatTimestamp(f.sec)}</span>
+          {pickedId === f.id && (
+            <span className="absolute right-0.5 top-0.5 rounded-full bg-primary p-0.5 text-primary-foreground">
+              <Check className="size-3" />
+            </span>
+          )}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * One placeholder: its image (Remove / Upload / back to the video thumbnail),
+ * a grid of frames across that step's part of the video, and the video with
+ * its transcript to find any other moment.
+ */
 export function ScreenshotMarkPanel({ mark: m, shots, onUseThumbnail }: { mark: ScreenshotMark; shots: ScreenshotsState; onUseThumbnail?: () => void }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const pick = shots.chosen[m.key];
   const pickUrl = pick ? shots.urlFor(pick, m.key) : null;
   const videoId = shots.marks[m.key] ?? null;
   const videoUrl = videoId ? shots.videoUrls[videoId] : undefined;
-  const near = m.sec == null || !videoId ? [] : shots.frames.filter((f) => f.videoId === videoId && Math.abs(f.sec - m.sec!) <= 4);
-  const grabbing = near.some((f) => f.status === "pending") || shots.busy === `grab:${m.key}`;
+  // The step's strip: frames from just before its moment to ~40s after (screenshotWindowSecs), plus anything grabbed near it.
+  const strip =
+    m.sec == null || !videoId
+      ? []
+      : shots.frames.filter((f) => f.videoId === videoId && f.sec >= m.sec! - 5 && f.sec <= m.sec! + 41 && f.status !== "failed").sort((a, b) => a.sec - b.sec);
+  const loadingStrip = shots.busy === `window:${m.key}`;
   const saving = shots.busy === `choose:${m.key}` || shots.busy === `upload:${m.key}` || shots.busy === `exact:${m.key}`;
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-3">
       <div className="text-xs" title={m.label}>
         {m.sec != null && <span className="font-mono text-muted-foreground">{formatTimestamp(m.sec)} · </span>}
         {m.label}
@@ -209,61 +261,35 @@ export function ScreenshotMarkPanel({ mark: m, shots, onUseThumbnail }: { mark: 
         )}
       </div>
 
+      {videoId && m.sec != null && (
+        <div className="flex flex-col gap-1.5">
+          <span className="text-[11px] font-medium text-muted-foreground">Frames from this step · {formatTimestamp(Math.max(0, m.sec - 4))} to {formatTimestamp(m.sec + 40)}</span>
+          {strip.length >= 6 ? (
+            <FrameGrid frames={strip} pickedId={pick?.frameId ?? null} disabled={saving} onPick={(id) => void shots.choose(m.key, id)} />
+          ) : (
+            <>
+              {strip.length > 0 && <FrameGrid frames={strip} pickedId={pick?.frameId ?? null} disabled={saving} onPick={(id) => void shots.choose(m.key, id)} />}
+              <Button size="xs" variant="outline" className="self-start" onClick={() => void shots.requestWindow(m.key)} disabled={loadingStrip || !videoUrl}>
+                {loadingStrip ? <Loader2 className="animate-spin" /> : <Camera />} Show 12 frames from this step
+              </Button>
+            </>
+          )}
+        </div>
+      )}
+
       {videoUrl ? (
-        <FrameScrubber key={m.key} videoUrl={videoUrl} initialSec={m.sec ?? 0} busy={saving} onGrab={(sec) => void shots.grabAt(m.key, sec)} />
+        <TranscriptScrubber
+          key={m.key}
+          videoUrl={videoUrl}
+          transcript={shots.transcripts[videoId!] ?? []}
+          initialSec={m.sec ?? 0}
+          busy={saving}
+          onGrab={(sec) => void shots.grabAt(m.key, sec)}
+        />
       ) : videoId ? (
         <span className="text-[11px] text-muted-foreground">This video isn&apos;t archived yet, so frames can&apos;t be grabbed. Upload an image instead.</span>
       ) : (
         <span className="text-[11px] text-muted-foreground">This section&apos;s story has no video (a case study). Upload an image instead.</span>
-      )}
-
-      {videoId && m.sec != null && (
-        <div className="flex flex-col gap-1.5">
-          <Button
-            size="xs"
-            variant="ghost"
-            className="self-start"
-            onClick={() => void shots.request(m.key, m.sec!)}
-            disabled={grabbing}
-            title="Grab 3 frames around the placeholder's moment (free)"
-          >
-            {grabbing ? <Loader2 className="animate-spin" /> : <Camera />}
-            {near.length ? "Frames around " : "Show frames around "}
-            {formatTimestamp(m.sec)}
-          </Button>
-          {near.length > 0 && (
-            <div className="flex gap-2">
-              {near.map((f) => (
-                <button
-                  key={f.id}
-                  type="button"
-                  disabled={f.status !== "done" || saving}
-                  onClick={() => void shots.choose(m.key, f.id)}
-                  className={cn(
-                    "relative aspect-video w-28 overflow-hidden rounded border bg-muted",
-                    pick?.frameId === f.id ? "ring-2 ring-primary" : "hover:ring-2 hover:ring-primary/40",
-                  )}
-                  title={`${formatTimestamp(f.sec)}${f.status === "failed" ? " — couldn't grab this frame" : " — click to use"}`}
-                >
-                  {f.status === "done" && f.previewUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={f.previewUrl} alt="" className="size-full object-cover" />
-                  ) : (
-                    <span className="flex size-full items-center justify-center text-[10px] text-muted-foreground">
-                      {f.status === "failed" ? "failed" : <Loader2 className="size-4 animate-spin" />}
-                    </span>
-                  )}
-                  <span className="absolute bottom-1 left-1 rounded bg-background/90 px-1 font-mono text-[10px]">{formatTimestamp(f.sec)}</span>
-                  {pick?.frameId === f.id && (
-                    <span className="absolute right-1 top-1 rounded-full bg-primary p-0.5 text-primary-foreground">
-                      <Check className="size-3" />
-                    </span>
-                  )}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
       )}
     </div>
   );
@@ -280,6 +306,7 @@ export function ImagePanel({
   alt,
   isThumbnail,
   videoUrl,
+  transcript,
   thumbnailUrl,
   busy,
   onUpload,
@@ -291,6 +318,8 @@ export function ImagePanel({
   alt: string;
   isThumbnail: boolean;
   videoUrl: string | null;
+  /** The section video's transcript lines, for the read-along. */
+  transcript: TranscriptLine[];
   thumbnailUrl: string | null;
   busy: boolean;
   onUpload: (file: File) => void;
@@ -330,7 +359,7 @@ export function ImagePanel({
         </Button>
       </div>
       {videoUrl ? (
-        <FrameScrubber videoUrl={videoUrl} busy={busy} onGrab={onGrab} />
+        <TranscriptScrubber videoUrl={videoUrl} transcript={transcript} busy={busy} onGrab={onGrab} />
       ) : (
         <span className="text-[11px] text-muted-foreground">No archived video for this section, so frames can&apos;t be grabbed. Upload an image instead.</span>
       )}

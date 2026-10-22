@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireFeature } from "@/lib/auth-guards";
-import { chooseScreenshot, grabScreenshotAt, listScreenshotFrames, requestScreenshotFrames } from "@/lib/services/newsletter-drafter/screenshots";
+import { chooseScreenshot, grabScreenshotAt, listScreenshotFrames, requestScreenshotFrames, requestScreenshotWindow } from "@/lib/services/newsletter-drafter/screenshots";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -19,7 +19,8 @@ export async function GET(_request: NextRequest, context: RouteContext) {
 
 /**
  * Frames for a placeholder ({ markKey, sec }): three candidates around `sec`,
- * or with `exact` (the scrubber's "Use this frame") that one moment, picked.
+ * with `exact` (the scrubber's "Use this frame") that one moment, picked, or
+ * with `window` the strip of 12 frames across the placeholder's moment.
  * Free: runs on our worker (ffmpeg), no AI.
  */
 export async function POST(request: NextRequest, context: RouteContext) {
@@ -27,11 +28,12 @@ export async function POST(request: NextRequest, context: RouteContext) {
   if (guard.response) return guard.response;
   const { id } = await context.params;
   const parsed = z
-    .object({ markKey: z.string().min(1).max(200), sec: z.number().min(0).max(6 * 3600), exact: z.boolean().optional() })
+    .object({ markKey: z.string().min(1).max(200), sec: z.number().min(0).max(6 * 3600).optional(), exact: z.boolean().optional(), window: z.boolean().optional() })
     .safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "Invalid body" }, { status: 400 });
-  const { markKey, sec, exact } = parsed.data;
-  const r = exact ? await grabScreenshotAt(id, markKey, sec) : await requestScreenshotFrames(id, markKey, sec);
+  const { markKey, sec, exact, window } = parsed.data;
+  if (!window && sec == null) return NextResponse.json({ error: "sec is required" }, { status: 400 });
+  const r = window ? await requestScreenshotWindow(id, markKey) : exact ? await grabScreenshotAt(id, markKey, sec!) : await requestScreenshotFrames(id, markKey, sec!);
   if ("error" in r) return NextResponse.json(r, { status: 400 });
   return NextResponse.json(Array.isArray(r) ? { frames: r } : r, { status: 202 });
 }

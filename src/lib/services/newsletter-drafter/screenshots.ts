@@ -17,7 +17,8 @@
 import { eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { designFrames, newsletterDrafts, productionItems } from "@/lib/db/schema";
-import { listFrames, requestFrameAt, type DesignFrame } from "@/lib/services/design-editor/frames";
+import { listFrames, requestFrameAt, requestFramesAt, type DesignFrame } from "@/lib/services/design-editor/frames";
+import { getTranscriptForPrompt } from "@/lib/services/whisper-transcribe";
 import { loadSource } from "@/lib/services/design-editor/session";
 import { bucketName, buildKey, getPresignedGetUrl, putObject } from "@/lib/s3";
 import { parseScreenshotMarks, type ChosenScreenshot } from "@/lib/newsletter-screenshots";
@@ -27,6 +28,15 @@ import { youtubeThumbnailUrl } from "./sources";
 /** Candidate moments around a placeholder's timestamp: just before, on it, just after. Pure; exported for tests. */
 export function frameCandidateSecs(sec: number): number[] {
   return [...new Set([Math.max(0, sec - 2), Math.max(0, sec), sec + 3])];
+}
+
+/**
+ * The moments the picker offers for a placeholder: 12 frames, every 4 seconds
+ * from just before its timestamp to 40s after (where that step is usually
+ * still on screen), never before 0:00. Pure; exported for tests.
+ */
+export function screenshotWindowSecs(sec: number): number[] {
+  return [...new Set(Array.from({ length: 12 }, (_, i) => Math.max(0, Math.round(sec - 4 + i * 4))))];
 }
 
 /**
@@ -86,18 +96,36 @@ export async function autoPickScreenshots(draftId: string): Promise<number> {
   const d = await loadDraft(draftId);
   if (!d) return 0;
   const next = { ...d.screenshots };
-  let added = 0;
+  // Per video: every new placeholder's moment plus its strip of nearby frames, from one download.
+  const byVideo = new Map<string, { markKey: string; sec: number }[]>();
   for (const [markKey, { videoId, sec }] of placeholderVideos(d)) {
     if (next[markKey] || !videoId || sec == null) continue;
+    byVideo.set(videoId, [...(byVideo.get(videoId) ?? []), { markKey, sec }]);
+  }
+  let added = 0;
+  for (const [videoId, marks] of byVideo) {
     if (!(await loadSource(videoId))) continue; // no archived video file to grab from
-    const f = await requestFrameAt(videoId, sec);
-    const [row] = await db.select().from(designFrames).where(eq(designFrames.id, f.id)).limit(1);
-    if (!row) continue;
-    next[markKey] = fromFrame(row, "auto");
-    added++;
+    const frames = await requestFramesAt(videoId, marks.flatMap((m) => [m.sec, ...screenshotWindowSecs(m.sec)]));
+    const rows = await db.select().from(designFrames).where(inArray(designFrames.id, frames.map((f) => f.id)));
+    for (const m of marks) {
+      const row = rows.find((r) => Math.abs(Number(r.sec) - Math.round(m.sec * 100) / 100) < 0.01);
+      if (!row) continue;
+      next[m.markKey] = fromFrame(row, "auto");
+      added++;
+    }
   }
   if (added) await saveChosen(draftId, next);
   return added;
+}
+
+/** The picker's strip for one placeholder: frames across its moment (one download). */
+export async function requestScreenshotWindow(draftId: string, markKey: string): Promise<DesignFrame[] | { error: string }> {
+  const d = await loadDraft(draftId);
+  if (!d) return { error: "Draft not found" };
+  const mark = placeholderVideos(d).get(markKey);
+  if (!mark?.videoId) return { error: "This section has no video to grab from. Upload an image instead." };
+  if (mark.sec == null) return { error: "This placeholder has no moment in the video. Use the transcript to find one." };
+  return requestFramesAt(mark.videoId, screenshotWindowSecs(mark.sec));
 }
 
 /** Forget a section's picks (its story — so its video — changed). */
@@ -188,6 +216,8 @@ export interface ScreenshotState {
   sectionVideos: Record<string, string | null>;
   /** Video id → its YouTube thumbnail link. */
   thumbnails: Record<string, string>;
+  /** Video id → its transcript, line by line with the second each line starts (for the picker). */
+  transcripts: Record<string, { sec: number; text: string }[]>;
 }
 
 /** Everything the editor's screenshot panel needs. */
@@ -214,7 +244,12 @@ export async function listScreenshotFrames(draftId: string): Promise<ScreenshotS
     if (src) videoUrls[videoId] = await getPresignedGetUrl(src.key, 4 * 3600, { bucket: src.bucket ?? undefined });
   }
   frames.sort((a, b) => a.sec - b.sec);
-  return { frames, chosen, previews: await screenshotPreviewUrls(chosen), marks, videoUrls, sectionVideos, thumbnails };
+  const transcripts: Record<string, { sec: number; text: string }[]> = {};
+  for (const videoId of videoIds) {
+    const t = await getTranscriptForPrompt(videoId);
+    if (t?.segments?.length) transcripts[videoId] = t.segments.map((s) => ({ sec: s.startSec, text: s.text }));
+  }
+  return { frames, chosen, previews: await screenshotPreviewUrls(chosen), marks, videoUrls, sectionVideos, thumbnails, transcripts };
 }
 
 export const SCREENSHOT_UPLOAD_TYPES: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" };
