@@ -57,7 +57,8 @@ export function EmailPreview({
     h2: (props) => <h2 style={asStyle(t.h2)}>{props.children}</h2>,
     h3: (props) => <h3 style={asStyle(t.h3)}>{props.children}</h3>,
     ul: (props) => <ul style={asStyle(t.ul)}>{props.children}</ul>,
-    ol: (props) => <ol style={asStyle(t.ol)}>{props.children}</ol>,
+    // Keep a list's own start number (numbered steps split by images are separate lists).
+    ol: (props) => <ol start={props.start} style={asStyle(t.ol)}>{props.children}</ol>,
     li: (props) => <li style={asStyle(t.li)}>{props.children}</li>,
     a: (props) => (
       <a href={props.href} target="_blank" rel="noreferrer" style={asStyle(t.a)}>

@@ -19,7 +19,8 @@ export function markdownToEmailHtml(markdown: string): string {
   const raw = renderToStaticMarkup(createElement(Markdown, null, markdown));
   return sanitizeHtml(raw, {
     allowedTags: EMAIL_TAGS,
-    allowedAttributes: { a: ["href", "target"], img: ["src", "alt", "width", "height", "style"] },
+    // `start` on ol: numbered steps split by images are separate lists and must keep their numbers.
+    allowedAttributes: { a: ["href", "target"], img: ["src", "alt", "width", "height", "style"], ol: ["start"] },
     allowedSchemes: ["http", "https", "mailto"],
     transformTags: {
       a: (tagName, attribs) => ({ tagName, attribs: { ...attribs, target: "_blank" } }),

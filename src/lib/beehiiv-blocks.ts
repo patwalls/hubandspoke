@@ -61,6 +61,27 @@ export function inlineRuns(s: string, styling: ("bold" | "italic")[] = [], link?
 const plain = (runs: TextRun[]) => runs.map((r) => r.text).join("");
 
 /**
+ * Numbered steps as the Kevin/Saj templates lay them out: the step's title on
+ * its own bold line, its explanation in the paragraph(s) below. A step written
+ * with an inline lead-in — "**4. Copy the prompt.** Click…" or
+ * "4. **Copy the prompt.** Click…" — is split into "**4. Copy the prompt**"
+ * and "Click…" (the title's trailing period/colon dropped, as in the
+ * template). Structural handling of our own Markdown. Pure; exported for tests.
+ */
+export function splitStepTitles(md: string): string {
+  return md
+    .split("\n")
+    .flatMap((line) => {
+      const m = line.match(/^\s*(?:\*\*(\d+)\.\s+([^*]+?)\*\*|(\d+)\.\s+\*\*([^*]+?)\*\*)\s+(\S.*)$/);
+      if (!m) return [line];
+      const n = m[1] ?? m[3];
+      const title = (m[2] ?? m[4]).trim().replace(/[.:]$/, "");
+      return [`**${n}. ${title}**`, m[5]];
+    })
+    .join("\n");
+}
+
+/**
  * A section's Markdown → blocks. Each non-empty line is its own paragraph (the
  * drafts use short lines). `buttons`: a line that is only a link (optionally
  * bold) becomes a button — the offer CTA and "Watch The Full Video" — instead

@@ -14,6 +14,7 @@ import { Open_Sans, Poppins } from "next/font/google";
 import ReactMarkdown from "react-markdown";
 import { EditableSection, emptySectionHint, FixedPart, type PreviewEditing } from "@/components/dashboard/editable-section";
 import { cn } from "@/lib/utils";
+import { splitStepTitles } from "@/lib/beehiiv-blocks";
 import { imageFor, ImageBlock, markImages, markShots, ScreenshotSample, shotFor, ShotBlock, ThumbnailSample, type DraftImage, type PreviewScreenshots, type Shot } from "@/components/dashboard/preview-screenshots";
 import { sponsorBlock, type NewsletterSection, type NewsletterTemplate } from "@/lib/newsletter-template";
 
@@ -65,7 +66,8 @@ export function BeehiivPreview({
     // Same rules as the push (beehiiv-blocks.ts): every line is its own paragraph, and
     // "- Saj" / "- Kevin" is the intro's sign-off, not a list. Screenshot placeholders
     // become image markers the img renderer draws (the picked image, or a box).
-    const raw = (byKey.get(key) ?? "").trim();
+    // Step titles on their own bold line, exactly as the push builds them.
+    const raw = splitStepTitles((byKey.get(key) ?? "").trim());
     return markShots(key, draftCanvas ? markImages(key, raw, images) : raw, screenshots, shots)
       .replace(/^- (Saj|Kevin)$/gm, "\\- $1")
       .replace(/\n(?!\n)/g, "\n\n");
@@ -119,7 +121,8 @@ export function BeehiivPreview({
           h3: ({ children }) => <h3 className={`${poppins.className} my-3 text-[20px] font-bold`}>{children}</h3>,
           h4: ({ children }) => <h4 className={`${poppins.className} my-3 text-[16px] font-bold text-[#00AEEF]`}>{children}</h4>,
           ul: ({ children }) => <ul className="my-3 list-disc pl-6">{children}</ul>,
-          ol: ({ children }) => <ol className="my-3 list-decimal pl-6">{children}</ol>,
+          // Keep a list's own start number (steps split by screenshots are separate lists).
+          ol: ({ children, start }) => <ol start={start} className="my-3 list-decimal pl-6">{children}</ol>,
           li: ({ children }) => <li className="my-1">{children}</li>,
           img: ({ src, alt }) => {
             const shot = shotFor(alt, shots);
