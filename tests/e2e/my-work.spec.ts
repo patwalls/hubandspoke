@@ -12,7 +12,7 @@ test("My Work button shows what's waiting and the To review section", async ({ p
     const session = await (await page.request.get("/api/auth/session")).json();
     const me = session?.user?.id;
     expect(me).toBeTruthy();
-    const create = async (title: string, editorUserId: string | null) => {
+    const create = async (title: string) => {
       const res = await page.request.post("/api/production-items", {
         data: {
           title,
@@ -20,16 +20,17 @@ test("My Work button shows what's waiting and the To review section", async ({ p
           postType: "tiktok",
           publishedDate: new Date().toISOString().slice(0, 10),
           brand: "starter-story",
-          editorUserId,
+          editorUserId: me,
         },
       });
       expect(res.ok(), await res.text()).toBeTruthy();
       return (await res.json()).id as string;
     };
 
-    const assignedId = await create(`E2E my-work assigned ${stamp}`, me);
-    const approvedId = await create(`E2E my-work approved ${stamp}`, null);
-    const reviewId = await create(`E2E my-work review ${stamp}`, null);
+    const assignedId = await create(`E2E my-work assigned ${stamp}`);
+    const approvedId = await create(`E2E my-work approved ${stamp}`);
+    const reviewId = await create(`E2E my-work review ${stamp}`);
+    // The test DB has one user, so the post to review is my own (some reviewers approve their own).
     await sql`UPDATE production_items SET status = 'Assigned' WHERE id = ${assignedId}`;
     await sql`UPDATE production_items SET status = 'Published' WHERE id = ${approvedId}`;
     await sql`UPDATE production_items SET status = 'Review' WHERE id = ${reviewId}`;
