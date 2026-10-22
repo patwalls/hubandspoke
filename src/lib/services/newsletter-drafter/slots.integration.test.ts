@@ -66,4 +66,20 @@ describe("ensureSlots", () => {
     const second = await createTestProductionItem({ postType: "youtube_long", brand: "futurepedia", publishedAt: new Date("2031-03-03T17:00:00Z") });
     expect(await planVideoEdition("Futurepedia Newsletter", { id: second.id, publishedAt: second.publishedAt }, NOW)).toEqual({ sendDate: "2031-03-05", group: "futurepedia-howto" });
   });
+
+  it("plans a manual edition (Repurpose tab) even when the video already has one or is older than the lookback", async () => {
+    const fmt = await createTestFormat({ brand: "vitest-fpm", name: "Futurepedia Newsletter" });
+    const video = await createTestProductionItem({ postType: "youtube_long", brand: "futurepedia", publishedAt: new Date("2031-01-05T17:00:00Z") });
+    const auto = await planVideoEdition("Futurepedia Newsletter", { id: video.id, publishedAt: video.publishedAt }, NOW);
+    expect(auto).toEqual({ skip: "published too long ago" });
+    const manual = await planVideoEdition("Futurepedia Newsletter", { id: video.id, publishedAt: video.publishedAt }, NOW, { manual: true });
+    expect(manual).toMatchObject({ group: "futurepedia-howto", sendDate: expect.stringMatching(/^2031-03-/) });
+    if (!("sendDate" in manual)) return;
+    const item = await createTestProductionItem({ postType: "newsletter", brand: "futurepedia", status: "Idea" });
+    expect(await insertVideoEdition({ ...manual, brand: "futurepedia", formatId: fmt.id, pillarId: video.id, productionItemId: item.id })).toBe(true);
+    // Asked for again on purpose: still planned, on another open day.
+    const again = await planVideoEdition("Futurepedia Newsletter", { id: video.id, publishedAt: video.publishedAt }, NOW, { manual: true });
+    expect(again).toMatchObject({ group: "futurepedia-howto" });
+    expect("sendDate" in again && again.sendDate).not.toBe(manual.sendDate);
+  });
 });

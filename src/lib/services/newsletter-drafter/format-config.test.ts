@@ -27,7 +27,9 @@ const video = {
 describe("formatConfigFor", () => {
   it("Futurepedia Newsletter is one single-video format fed by both channels, voice by channel, queued per video", () => {
     const fp = formatConfigFor(" Futurepedia Newsletter ");
-    expect(fp).toMatchObject({ kind: "single_video", model: "claude-sonnet-5-5", schedule: { group: "futurepedia-howto", trigger: { kind: "queue", maxPerWeek: 3 } } });
+    // No model pin: it drafts on the default (Opus 5.5).
+    expect(fp.model).toBeUndefined();
+    expect(fp).toMatchObject({ kind: "single_video", schedule: { group: "futurepedia-howto", trigger: { kind: "queue", maxPerWeek: 3 } } });
     expect(fp.promo).toMatchObject({ label: "Free Resource", onMiss: "placeholder", section: "Native Ad" });
     expect(voiceForChannel("Futurepedia Newsletter", "futurepedia_io")).toEqual({ voice: "kevin", voiceName: "Kevin" });
     expect(voiceForChannel("Futurepedia Newsletter", "skillleapai")).toEqual({ voice: "saj", voiceName: "Saj" });

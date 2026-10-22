@@ -18,6 +18,8 @@ import {
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 import { normalizeFormatForWrite } from "@/lib/services/format-validation";
 import { enqueue } from "@/jobs/enqueue";
+import { formatConfigFor } from "@/lib/services/newsletter-drafter/format-config";
+import { insertVideoEdition, planVideoEdition } from "@/lib/services/newsletter-drafter/slots";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -40,6 +42,12 @@ interface RouteContext {
  * etc.), so we always create. `threshold-monitor-sweep` does its own
  * dedup against `repurpose_triggers` for cron-driven fan-out, so this
  * change doesn't cause runaway auto-creation.
+ *
+ * A video-triggered newsletter format (the Futurepedia Newsletter) gets its
+ * linked edition here too, exactly like the sweep's, so the item opens in the
+ * newsletter editor; the manual path skips the sweep's "already has an
+ * edition / too old" checks (someone asked for this one) and doesn't run the
+ * Draft Algorithm (the newsletter editor drafts on demand).
  */
 export async function POST(request: NextRequest, context: RouteContext) {
   const guard = await requireSession();
@@ -157,6 +165,14 @@ export async function POST(request: NextRequest, context: RouteContext) {
   const formatCheck = await normalizeFormatForWrite(source.brand, target.name);
   const canonicalFormat = formatCheck.ok ? formatCheck.value : target.name;
 
+  // A video-triggered newsletter: plan its edition before creating anything.
+  const newsletterPlan = formatConfigFor(target.name).schedule?.trigger
+    ? await planVideoEdition(target.name, { id: source.id, publishedAt: source.publishedAt ?? source.publishedDate ?? null }, new Date(), { manual: true })
+    : null;
+  if (newsletterPlan && "skip" in newsletterPlan) {
+    return NextResponse.json({ error: `Couldn't plan the newsletter edition: ${newsletterPlan.skip}` }, { status: 409 });
+  }
+
   const [created] = await db
     .insert(productionItems)
     .values({
@@ -165,7 +181,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
       thumbnail: source.thumbnail,
       status: "Assigned",
       accountId: resolvedAccountId,
-      postType: firstChannel?.postType ?? null,
+      // A newsletter edition's item is always a newsletter (the queue's Newsletters tab, the editor button).
+      postType: newsletterPlan ? "newsletter" : (firstChannel?.postType ?? null),
       format: canonicalFormat,
       sourceType: "repurposed",
       pillarContentNotionId: source.notionId,
@@ -209,11 +226,33 @@ export async function POST(request: NextRequest, context: RouteContext) {
   // Mirror the existing manual-task trigger shape so threshold-monitor-
   // sweep's dedup on (productionItemId, targetFormatId) catches manually-
   // created derivatives too.
-  await db.insert(repurposeTriggers).values({
-    productionItemId: source.id,
-    targetFormatId: target.id,
-    compositionName: target.name,
-  });
+  const [trigger] = await db
+    .insert(repurposeTriggers)
+    .values({
+      productionItemId: source.id,
+      targetFormatId: target.id,
+      compositionName: target.name,
+    })
+    .returning({ id: repurposeTriggers.id });
+
+  if (newsletterPlan) {
+    const ok = await insertVideoEdition({
+      group: newsletterPlan.group,
+      sendDate: newsletterPlan.sendDate,
+      brand: source.brand,
+      formatId: target.id,
+      pillarId: source.id,
+      productionItemId: created.id,
+    });
+    if (!ok) {
+      // Lost a race for that send date: undo the item so nothing is left half-made.
+      await db.delete(repurposeTriggers).where(eq(repurposeTriggers.id, trigger.id));
+      await db.delete(productionItems).where(eq(productionItems.id, created.id));
+      return NextResponse.json({ error: `There's already a newsletter edition for ${newsletterPlan.sendDate}. Try again.` }, { status: 409 });
+    }
+    invalidateReportCaches();
+    return NextResponse.json({ id: created.id, newsletterSendDate: newsletterPlan.sendDate }, { status: 201 });
+  }
 
   // Fire the Draft Algorithm so the editor lands on a populated form
   // instead of a blank one. Skips internally if the pillar has no

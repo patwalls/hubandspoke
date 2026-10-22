@@ -103,7 +103,6 @@ const FORMAT_CONFIG: Record<string, NewsletterFormatConfig> = {
     sources: FUTUREPEDIA_SOURCES,
     // Usually Tue/Fri, ≤3 a week (Bryce + Sam, 2026-10-21). Group name kept so the history carries over.
     schedule: { group: "futurepedia-howto", days: [2, 5], primary: true, trigger: { kind: "queue", maxPerWeek: 3 } },
-    model: "claude-sonnet-5-5",
     promo: { projectGid: FUTUREPEDIA_PROMO_PROJECT, section: "Native Ad", label: "Free Resource", onMiss: "placeholder" },
   },
 };

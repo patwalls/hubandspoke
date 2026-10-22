@@ -234,17 +234,20 @@ async function ensureVideoEditions(
  * threshold sweep creates the production item for a newly published video;
  * this says whether that video should get an edition and on which send date.
  * Skips videos the team already sent or is drafting in beehiiv, and videos
- * that already have an edition here. Read-only.
+ * that already have an edition here. `manual` (someone picked the format on a
+ * video's Repurpose tab): no lookback and no "already has an edition" skip —
+ * they asked for this one, e.g. to compare with the team's own. Read-only.
  */
 export async function planVideoEdition(
   formatName: string,
   pillar: { id: string; publishedAt: Date | string | null },
   now: Date = new Date(),
+  opts: { manual?: boolean } = {},
 ): Promise<{ sendDate: string; group: string } | { skip: string }> {
   const schedule = formatConfigFor(formatName).schedule;
   if (!schedule?.trigger) return { skip: "not a video-triggered newsletter" };
-  if (!pillar.publishedAt) return { skip: "no publish date" };
-  if (new Date(pillar.publishedAt).getTime() < now.getTime() - VIDEO_LOOKBACK_DAYS * DAY_MS) return { skip: "published too long ago" };
+  if (!pillar.publishedAt && !opts.manual) return { skip: "no publish date" };
+  if (!opts.manual && new Date(pillar.publishedAt!).getTime() < now.getTime() - VIDEO_LOOKBACK_DAYS * DAY_MS) return { skip: "published too long ago" };
   const slotRows = await db
     .select({ sendDate: newsletterDrafts.sendDate, sourceItemId: newsletterDrafts.sourceItemId })
     .from(newsletterDrafts)
@@ -257,13 +260,15 @@ export async function planVideoEdition(
     ...slotRows.map((r) => r.sourceItemId).filter(Boolean),
     ...history.flatMap((h) => h.keys).filter((k) => k.startsWith("video:")).map((k) => k.slice("video:".length)),
   ]);
-  if (used.has(pillar.id)) return { skip: "this video already has an edition (here or in beehiiv)" };
+  if (used.has(pillar.id) && !opts.manual) return { skip: "this video already has an edition (here or in beehiiv)" };
   const today = easternDate(now);
   const taken = new Set([
     ...slotRows.filter((r) => r.sourceItemId && r.sendDate).map((r) => r.sendDate!),
     ...history.map((h) => h.sentDate!).filter((d) => d && d >= addDays(today, -7)),
   ]);
-  return { sendDate: videoSendDate(easternDate(pillar.publishedAt), today, schedule.days, schedule.trigger.maxPerWeek, taken), group: schedule.group };
+  // A manual edition is planned from today (an older video still gets the next open day).
+  const from = opts.manual || !pillar.publishedAt ? today : easternDate(pillar.publishedAt);
+  return { sendDate: videoSendDate(from, today, schedule.days, schedule.trigger.maxPerWeek, taken), group: schedule.group };
 }
 
 /** The edition (editor draft) for a queue item created by planVideoEdition's sweep. */

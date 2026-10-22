@@ -6,8 +6,8 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import type { PastIssue } from "./sources";
+import { newsletterModel } from "./agent";
 
-const MODEL = "claude-haiku-5-5";
 const MAX_EXEMPLARS = 3;
 
 export type SpecialRewriteResult = { ok: true; copy: string } | { ok: false; failure: string };
@@ -41,7 +41,8 @@ export async function rewriteSpecial(args: {
 
   try {
     const res = await client.messages.create({
-      model: MODEL,
+      // Same model as the drafts (Opus 5.5 by default), so the sponsor copy reads like the rest of the issue.
+      model: newsletterModel(),
       max_tokens: 4000,
       output_config: { effort: "low" },
       system,
