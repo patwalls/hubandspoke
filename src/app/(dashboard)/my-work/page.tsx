@@ -5,7 +5,8 @@ import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { contentComments, productionItems, users } from "@/lib/db/schema";
 import { getMyWork, getRowNews } from "@/lib/my-work/queries";
-import { ago, type RowNews } from "@/lib/my-work/news";
+import { ago, previewText, type RowNews } from "@/lib/my-work/news";
+import { htmlToPlainText } from "@/lib/comments/sanitize";
 import { cn } from "@/lib/utils";
 import { statusClassWithPalette } from "@/lib/badge-colors";
 import { getAllStatusPalettes } from "@/lib/db/brand-statuses";
@@ -169,7 +170,7 @@ export default async function MyWorkPage() {
                     </span>
                   </div>
                   <p className="text-sm text-foreground line-clamp-2 mt-0.5">
-                    {c.body}
+                    {previewText(htmlToPlainText(c.body))}
                   </p>
                 </Link>
               </li>

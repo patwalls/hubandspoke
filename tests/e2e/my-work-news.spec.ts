@@ -77,6 +77,11 @@ test("My Work rows show new comments and send-backs", async ({ page }) => {
     await expect(note).not.toContainText("Sent back");
 
     await expect(row(quiet).locator("[data-my-work-news]")).toHaveCount(0);
+
+    // Recent comments shows plain text, not the comment's HTML.
+    const recent = page.locator("div.rounded-lg", { has: page.getByRole("heading", { name: "Recent comments" }) });
+    await expect(recent).toContainText("Love this one, can we add captions?");
+    await expect(recent).not.toContainText("<p>");
     if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT, fullPage: true });
   } finally {
     await sql.end();
