@@ -50,5 +50,9 @@ describe("newsletter formats + past issues", () => {
     // Only one Saj issue: not enough to stand alone, so every issue is an example.
     expect((await getPastIssues("starter-story", fmt.name, "Saj")).map((i) => i.subject)).toEqual(["Saj one", "Kevin two", "Kevin one"]);
     expect(await getPastIssues("starter-story", fmt.name)).toHaveLength(3);
+    // Unattributed issues (no byline) fill in after the voice's own, ahead of nothing from the other voice.
+    await createTestProductionItem({ postType: "newsletter", format: fmt.name, contentBody: "U1", title: "No byline", authorDisplayName: null, publishedAt: at("1-04") });
+    expect((await getPastIssues("starter-story", fmt.name, "Kevin")).map((i) => i.subject)).toEqual(["Kevin two", "Kevin one", "No byline"]);
+    expect((await getPastIssues("starter-story", fmt.name, "Saj")).map((i) => i.subject)).toEqual(["Saj one", "No byline"]);
   });
 });

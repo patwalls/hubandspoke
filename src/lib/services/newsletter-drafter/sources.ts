@@ -179,8 +179,10 @@ export function htmlToPlainText(html: string): string {
  * anchor. Deliberately NOT `getTopPerformingCaptions`: that one has a
  * freshness cutoff (newsletter rows stopped syncing with Klaviyo) and an
  * on-demand enrichment hop we don't want here.
- * `voice` (one-video formats with two voices, e.g. Kevin / Saj): prefer issues
- * by that author (author_display_name), falling back to all when fewer than 2.
+ * `voice` (one-video formats with two voices, e.g. Kevin / Saj): issues by that
+ * author (author_display_name) first, then unattributed ones (beehiiv only
+ * started recording bylines in Oct 2026), never the other voice's, unless
+ * that leaves fewer than 2.
  */
 export async function getPastIssues(brand: string, formatName: string, voice?: string | null): Promise<PastIssue[]> {
   const all = await db
@@ -209,8 +211,9 @@ export async function getPastIssues(brand: string, formatName: string, voice?: s
     )
     .orderBy(desc(productionItems.publishedAt))
     .limit(voice ? MAX_EXEMPLARS * 4 : MAX_EXEMPLARS);
-  const sameVoice = voice ? all.filter((r) => (r.author ?? "").toLowerCase().includes(voice.toLowerCase())) : [];
-  const rows = (sameVoice.length >= 2 ? sameVoice : all).slice(0, MAX_EXEMPLARS);
+  const mine = (r: (typeof all)[number]) => (r.author ?? "").toLowerCase().includes(voice!.toLowerCase());
+  const ok = voice ? [...all.filter(mine), ...all.filter((r) => !r.author?.trim())] : all;
+  const rows = (ok.length >= 2 ? ok : all).slice(0, MAX_EXEMPLARS);
 
   return rows.map((r) => {
     const body = r.html?.trim() ? htmlToPlainText(r.html) : (r.contentBody ?? "").trim();
