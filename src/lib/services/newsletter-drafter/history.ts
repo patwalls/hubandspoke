@@ -14,13 +14,21 @@
 //     aren't re-read.
 // Emails our own push created are skipped (the draft already counts them).
 // Idempotent: upsert by external_id.
+//
+// Sent beehiiv How-To editions also become published "Futurepedia Newsletter"
+// content items (importBeehiivHowToIssues), the way Starter Story's past issues
+// live in production_items: the format page lists them, and the drafter reads
+// the most recent ones (same voice) as example issues.
 
-import { and, eq, isNotNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, lte, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { newsletterDrafts, newsletterIssueHistory, productionItems } from "@/lib/db/schema";
+import { formatChannels, formats, newsletterDrafts, newsletterIssueHistory, productionItems } from "@/lib/db/schema";
 import { emailRichTextHtml, listEmailsCreatedAfter } from "@/lib/hubspot-marketing-email";
 import { getFuturepediaPost, listFuturepediaPosts } from "@/lib/beehiiv";
 import { extractStoryRefs, usageGroupFor, videoKeysForYoutubeIds } from "./usage";
+import { resolveEditor } from "@/lib/services/assignees";
+import { scheduledPrimaries } from "./format-config";
+import { htmlToPlainText } from "./sources";
 
 const STARTER_STORY_BUSINESS_UNIT = "4057751";
 
@@ -120,10 +128,99 @@ async function syncBeehiivHistory(since: Date): Promise<number> {
   return n;
 }
 
-export async function syncNewsletterHistory(opts: { since: Date }): Promise<{ hubspot: number; items: number; beehiiv: number }> {
+/** Kevin or Saj from a beehiiv post's authors ("Kevin at Futurepedia", "Saj Adib"). Pure; exported for tests. */
+export function voiceFromAuthors(authors: unknown): string | null {
+  const names = Array.isArray(authors) ? authors.map((a) => (typeof a === "string" ? a : ((a as { name?: string })?.name ?? ""))) : [];
+  const joined = names.join(" ").toLowerCase();
+  if (/\bkevin\b/.test(joined)) return "Kevin";
+  if (/\bsaj\b/.test(joined)) return "Saj";
+  return names.find(Boolean) ?? null;
+}
+
+/**
+ * Sent Futurepedia How-To editions (history group "futurepedia-howto", origin
+ * "beehiiv", send date passed) → published content items in the group's
+ * format, one per post (platform_content_id = the beehiiv post id), linked
+ * to the video they cover. Read-only on beehiiv; only posts without an item
+ * yet are fetched. The team's scheduled and draft posts are never imported.
+ */
+export async function importBeehiivHowToIssues(now: Date = new Date()): Promise<number> {
+  if (!process.env.BEEHIIV_API_KEY) return 0;
+  const today = now.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+  const sent = await db
+    .select({ externalId: newsletterIssueHistory.externalId, sourceKeys: newsletterIssueHistory.sourceKeys, sentDate: newsletterIssueHistory.sentDate })
+    .from(newsletterIssueHistory)
+    .where(and(eq(newsletterIssueHistory.scheduleGroup, "futurepedia-howto"), eq(newsletterIssueHistory.origin, "beehiiv"), lte(newsletterIssueHistory.sentDate, today)));
+  if (!sent.length) return 0;
+  const postIds = sent.map((r) => r.externalId.replace(/^beehiiv:/, ""));
+  const imported = new Set(
+    (
+      await db
+        .select({ id: productionItems.platformContentId })
+        .from(productionItems)
+        .where(and(eq(productionItems.brand, "futurepedia"), eq(productionItems.postType, "newsletter"), inArray(productionItems.platformContentId, postIds)))
+    ).map((r) => r.id),
+  );
+  const todo = sent.filter((r) => !imported.has(r.externalId.replace(/^beehiiv:/, "")));
+  if (!todo.length) return 0;
+
+  // The group's format (the Futurepedia Newsletter) and its newsletter account.
+  const formatName = scheduledPrimaries().find((p) => p.schedule.group === "futurepedia-howto")?.formatName;
+  if (!formatName) return 0;
+  const [format] = await db
+    .select({ id: formats.id, name: formats.name })
+    .from(formats)
+    .where(and(eq(formats.brand, "futurepedia"), sql`lower(${formats.name}) = ${formatName}`))
+    .limit(1);
+  if (!format) return 0;
+  const [channel] = await db
+    .select({ accountId: formatChannels.accountId })
+    .from(formatChannels)
+    .where(and(eq(formatChannels.formatId, format.id), eq(formatChannels.postType, "newsletter")))
+    .limit(1);
+
+  // Owner like any synced item: the format's default editor, else the brand's.
+  const editorUserId = await resolveEditor({ brand: "futurepedia", format: format.name });
+
+  let n = 0;
+  for (const row of todo) {
+    const postId = row.externalId.replace(/^beehiiv:/, "");
+    const p = await getFuturepediaPost(postId, ["free_web_content"]);
+    if (p.status !== "confirmed") continue;
+    const ts = p.publish_date ?? p.displayed_date ?? null;
+    if (!ts || ts * 1000 > now.getTime()) continue; // scheduled, not sent yet
+    const html = p.content?.free?.web ?? "";
+    const video = (row.sourceKeys ?? []).find((k) => k.startsWith("video:"))?.slice("video:".length) ?? null;
+    await db.insert(productionItems).values({
+      brand: "futurepedia",
+      title: (p.subject_line as string | undefined) ?? p.title ?? null,
+      postType: "newsletter",
+      status: "Published",
+      format: format.name,
+      accountId: channel?.accountId ?? null,
+      platformContentId: postId,
+      publishedAt: new Date(ts * 1000),
+      publishedDate: beehiivDate(ts),
+      publishedLink: p.web_url ?? null,
+      newsletterPreviewText: (p.preview_text as string | undefined) ?? p.subtitle ?? null,
+      newsletterBodyHtml: html || null,
+      contentBody: html ? htmlToPlainText(html) : null,
+      authorDisplayName: voiceFromAuthors(p.authors),
+      pillarContentItemId: video,
+      sourceType: "original",
+      editorUserId,
+      createdVia: "sync:beehiiv",
+    });
+    n++;
+  }
+  return n;
+}
+
+export async function syncNewsletterHistory(opts: { since: Date }): Promise<{ hubspot: number; items: number; beehiiv: number; beehiivImported: number }> {
   let hubspot = 0;
   let items = 0;
   const beehiiv = await syncBeehiivHistory(opts.since);
+  const beehiivImported = await importBeehiivHowToIssues();
 
   const pushed = await db
     .select({ id: newsletterDrafts.hubspotEmailId })
@@ -181,5 +278,5 @@ export async function syncNewsletterHistory(opts: { since: Date }): Promise<{ hu
     });
     items++;
   }
-  return { hubspot, items, beehiiv };
+  return { hubspot, items, beehiiv, beehiivImported };
 }

@@ -38,4 +38,17 @@ describe("newsletter formats + past issues", () => {
     expect(issues).toHaveLength(1);
     expect(issues[0]).toMatchObject({ subject: "Subject one", body: "Issue body one" });
   });
+
+  it("prefers same-voice issues for a two-voice format, and falls back to all when that voice has too few", async () => {
+    const fmt = await createTestFormat();
+    const at = (d: string) => new Date(`2031-0${d}T12:00:00Z`);
+    await createTestProductionItem({ postType: "newsletter", format: fmt.name, contentBody: "K1", title: "Kevin one", authorDisplayName: "Kevin", publishedAt: at("1-01") });
+    await createTestProductionItem({ postType: "newsletter", format: fmt.name, contentBody: "K2", title: "Kevin two", authorDisplayName: "Kevin", publishedAt: at("1-02") });
+    await createTestProductionItem({ postType: "newsletter", format: fmt.name, contentBody: "S1", title: "Saj one", authorDisplayName: "Saj", publishedAt: at("1-03") });
+    const kevin = await getPastIssues("starter-story", fmt.name, "Kevin");
+    expect(kevin.map((i) => i.subject)).toEqual(["Kevin two", "Kevin one"]);
+    // Only one Saj issue: not enough to stand alone, so every issue is an example.
+    expect((await getPastIssues("starter-story", fmt.name, "Saj")).map((i) => i.subject)).toEqual(["Saj one", "Kevin two", "Kevin one"]);
+    expect(await getPastIssues("starter-story", fmt.name)).toHaveLength(3);
+  });
 });

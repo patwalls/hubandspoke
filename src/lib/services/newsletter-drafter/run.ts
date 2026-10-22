@@ -133,7 +133,8 @@ export async function runNewsletterDraft(
     const usage = video ? undefined : await loadUsage(usageGroupFor(row.formatName), { excludeDraftId: row.id });
     const blocked = usage ? blockedKeys(usage, row.sendDate) : undefined;
     const [pastIssues, special] = await Promise.all([
-      getPastIssues(row.brand, row.formatName),
+      // Same-voice past issues for two-voice formats (Kevin / Saj by the video's channel).
+      getPastIssues(row.brand, row.formatName, video?.voiceName ?? null),
       findSpecial(row.formatName, row.sendDate),
     ]);
     const sponsored = special?.ok ? special : null;
