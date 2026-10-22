@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ArrowRightIcon, ChevronDownIcon } from "lucide-react";
+import { ChevronDownIcon } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -101,7 +101,6 @@ export function HandoffButton({
         }
         className={cn(BTN, hasMore ? "rounded-l-md" : "rounded-md")}
       >
-        <ArrowRightIcon className="size-3" />
         {label}
       </button>
       {hasMore && (

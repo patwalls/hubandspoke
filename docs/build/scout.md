@@ -4,6 +4,43 @@ The `/build` loop's notebook: what people actually do, candidates considered (bu
 why), and what other tools ship. Newest first. Never re-propose something listed here without
 new evidence.
 
+## 2026-10-22 — lap 7 (polish lap)
+
+**Learned** (2 days of usage, 30 days of actions)
+- The team passes work along with two clicks every time: set the editor to the next person, then
+  move the status. ~200 such pairs in 30 days: John 53 Assigned → Review (to the brand's
+  reviewer), Andrew 42 Review → Ready To Publish (editor back to John), the curator 34 to Review
+  + 24 back to Assigned. So the editor field *is* the handoff, and every brand has one clear
+  reviewer by history (futurepedia Andrew, matg Lauren, MFM Cassie, science-of-scaling Nuriel).
+  My Work's row actions move only the status, not the editor.
+- Today John exported 4 clips and handed each off from the content page right after the export
+  (editor + status, ~3 s apart). Andrew opened two items from production and approved each with
+  the same two clicks.
+- Sam used My Work's row action once (`my-work:send-to-review`); Pat and Sam opened `/my-work`.
+  The status-only people haven't been in since it shipped.
+- Pipeline: 385 items, 38 clips, 13 designs so far this week (Mon–Thu), on pace. No failed renders.
+  Sentry: nothing new people hit; slow p95s are `/api/warm` cold starts (ops loop).
+
+**Did the last features land?** `my-work-row-actions`: 1 use by Sam within hours. `my-work-waiting`:
+2 people (Pat, Sam). `clip-editor-next-idea`, `publish-way-in`: no marks yet. The curator's last
+session (00:07–02:23 UTC) was reposts and clip comparing; they compared 11 ideas *before*
+next-idea shipped (05:30).
+
+**Outward**
+- Asana rules can assign a fixed person when a field changes, but users have asked for years to
+  "assign back to the original owner" and there's no rule for it.
+  https://forum.asana.com/t/re-assigning-tasks-back-to-original-owners/148333 ,
+  https://help.asana.com/s/article/request-a-task-review-with-a-simple-automation
+- Lesson: we have the history Asana lacks (who sent it, who reviews each brand), so the
+  hand-back can be one click with the right name already on the button.
+
+**Candidates**
+- → building: **One-click handoff** on the content page ("Send to review → Andrew",
+  "Approve → back to John"). source: usage (~200 two-click handoffs / 30 days)
+- My Work's row actions should hand off the editor too (same rules), so both surfaces agree.
+  source: usage. Small; next my-day lap.
+- The paste box on the Cross-post tab rows (still open). source: usage
+
 ## 2026-10-22 — lap 6 (project lap: my-day, milestone 2)
 
 **Learned** (2 days of usage)
@@ -200,6 +237,7 @@ week of Oct 12). Cross-posts steady at 60–80/week.
   source: usage
 
 ## Built
+- 2026-10-22 One-click handoff on the content page (polish). Card `2026-10-22-handoff-button`.
 - 2026-10-22 Approve / Send back / Send to review from My Work rows + keys (project my-day
   milestone 2). Card `2026-10-22-my-work-row-actions`.
 - 2026-10-22 My Work in the header with a count + To review (project my-day milestone 1).

@@ -29,6 +29,16 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-10-22-handoff-button",
+    shippedAt: "2026-10-22T19:00:00Z",
+    kind: "feature",
+    title: "Hand a post to your reviewer in one click",
+    body:
+      "On a post's page, next to its status, a new button does both steps at once: \"Send to review → (name)\" moves your " +
+      "post to Review and makes your brand's reviewer its editor. When you review, \"Approve → back to (name)\" marks it Ready To Publish and hands it back.",
+    screen: "/[brand]/content/[id]",
+  },
+  {
     id: "2026-10-22-my-work-row-actions",
     shippedAt: "2026-10-22T14:00:00Z",
     kind: "feature",
