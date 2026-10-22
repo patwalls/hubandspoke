@@ -55,4 +55,14 @@ describe("newsletter formats + past issues", () => {
     expect((await getPastIssues("starter-story", fmt.name, "Kevin")).map((i) => i.subject)).toEqual(["Kevin two", "Kevin one", "No byline"]);
     expect((await getPastIssues("starter-story", fmt.name, "Saj")).map((i) => i.subject)).toEqual(["Saj one", "No byline"]);
   });
+
+  it("uses only issues in the current template when the template has section headings", async () => {
+    const fmt = await createTestFormat();
+    const at = (d: string) => new Date(`2031-0${d}T12:00:00Z`);
+    await createTestProductionItem({ postType: "newsletter", format: fmt.name, title: "New layout", contentBody: "How We Did It ... Free Resource ... Use Cases ... Bonus Tips", publishedAt: at("2-02") });
+    await createTestProductionItem({ postType: "newsletter", format: fmt.name, title: "Old layout", contentBody: "How We Did It ... Level Up ... Other Use Cases ... Pro Tips", publishedAt: at("2-03") });
+    const heads = ["How We Did It", "Free Resource", "How We Did It (continued)", "Use Cases", "Bonus Tips"];
+    expect((await getPastIssues("starter-story", fmt.name, null, heads)).map((i) => i.subject)).toEqual(["New layout"]);
+    expect(await getPastIssues("starter-story", fmt.name)).toHaveLength(2);
+  });
 });

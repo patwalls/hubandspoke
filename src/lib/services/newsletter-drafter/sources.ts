@@ -174,6 +174,22 @@ export function htmlToPlainText(html: string): string {
     .trim();
 }
 
+const normalizeHeading = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+/**
+ * The issue uses the format's current template: it contains most (60%+) of the
+ * template's section headings. Older issues in a retired layout (Futurepedia's
+ * Mar–Sep Step-by-Step Guide: "Level Up", "Pro Tips") drop out; a template
+ * with no headings (Daily Seinfeld) accepts every issue. Structural match on
+ * our own template labels. Pure; exported for tests.
+ */
+export function usesCurrentTemplate(body: string, templateHeadings: string[]): boolean {
+  const heads = templateHeadings.map(normalizeHeading).filter(Boolean);
+  if (!heads.length) return true;
+  const text = normalizeHeading(body);
+  return heads.filter((h) => text.includes(h)).length / heads.length >= 0.6;
+}
+
 /**
  * Most recent published issues of a newsletter format — the voice/structure
  * anchor. Deliberately NOT `getTopPerformingCaptions`: that one has a
@@ -182,10 +198,11 @@ export function htmlToPlainText(html: string): string {
  * `voice` (one-video formats with two voices, e.g. Kevin / Saj): issues by that
  * author (author_display_name) first, then unattributed ones (beehiiv only
  * started recording bylines in Oct 2026), never the other voice's, unless
- * that leaves fewer than 2.
+ * that leaves fewer than 2. `templateHeadings`: only issues in the current
+ * template count (usesCurrentTemplate), so a retired layout never becomes an example.
  */
-export async function getPastIssues(brand: string, formatName: string, voice?: string | null): Promise<PastIssue[]> {
-  const all = await db
+export async function getPastIssues(brand: string, formatName: string, voice?: string | null, templateHeadings: string[] = []): Promise<PastIssue[]> {
+  const fetched = await db
     .select({
       author: productionItems.authorDisplayName,
       title: productionItems.title,
@@ -210,13 +227,15 @@ export async function getPastIssues(brand: string, formatName: string, voice?: s
       ),
     )
     .orderBy(desc(productionItems.publishedAt))
-    .limit(voice ? MAX_EXEMPLARS * 4 : MAX_EXEMPLARS);
+    .limit(templateHeadings.length ? 200 : voice ? MAX_EXEMPLARS * 4 : MAX_EXEMPLARS);
+  const bodyOf = (r: { html: string | null; contentBody: string | null }) => (r.html?.trim() ? htmlToPlainText(r.html) : (r.contentBody ?? "").trim());
+  const all = fetched.filter((r) => usesCurrentTemplate(bodyOf(r), templateHeadings));
   const mine = (r: (typeof all)[number]) => (r.author ?? "").toLowerCase().includes(voice!.toLowerCase());
   const ok = voice ? [...all.filter(mine), ...all.filter((r) => !r.author?.trim())] : all;
   const rows = (ok.length >= 2 ? ok : all).slice(0, MAX_EXEMPLARS);
 
   return rows.map((r) => {
-    const body = r.html?.trim() ? htmlToPlainText(r.html) : (r.contentBody ?? "").trim();
+    const body = bodyOf(r);
     return {
       subject: r.title,
       previewText: r.previewText,

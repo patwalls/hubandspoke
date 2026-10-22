@@ -134,7 +134,8 @@ export async function runNewsletterDraft(
     const blocked = usage ? blockedKeys(usage, row.sendDate) : undefined;
     const [pastIssues, special] = await Promise.all([
       // Same-voice past issues for two-voice formats (Kevin / Saj by the video's channel).
-      getPastIssues(row.brand, row.formatName, video?.voiceName ?? null),
+      // Only issues in the current template count as examples (never a retired layout).
+      getPastIssues(row.brand, row.formatName, video?.voiceName ?? null, template?.sections.map((s) => s.heading ?? "").filter(Boolean) ?? []),
       findSpecial(row.formatName, row.sendDate),
     ]);
     const sponsored = special?.ok ? special : null;
