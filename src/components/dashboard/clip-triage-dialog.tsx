@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import { KillIdeaDialog } from "./kill-idea-dialog";
 import { SocialEmbedHeader } from "./preview/social-embed-header";
+import type { IdeaNav } from "./idea-nav";
 import { useDialogUrl } from "./use-dialog-url";
 import { useFeatureFlags } from "@/components/clip-editor/use-feature-flags";
 import { CLIP_PARAM, refreshClipDrafts } from "@/components/clip-editor/drafts";
@@ -120,6 +121,9 @@ interface Props {
    *  in-app editor open instantly and restore itself from `?clip=<id>` after
    *  a reload. Ignored by the classic dialog. */
   ideaId?: string | null;
+  /** Previous / Next between the queue's clip ideas, editor only. `onGo`
+   *  closes this row's dialog and opens the neighbour's. */
+  nav?: IdeaNav;
 }
 
 function fmtTs(sec: number): string {
@@ -148,7 +152,7 @@ export function ClipTriageDialog(props: Props) {
   // The open dialog lives in the URL (`?clip=<id>`) — editor or classic —
   // so it has a link to send, a reload lands back in it, and closing goes
   // back to the queue.
-  useDialogUrl({ param: CLIP_PARAM, id: ideaId, open, onOpenChange });
+  const handOffUrl = useDialogUrl({ param: CLIP_PARAM, id: ideaId, open, onOpenChange });
   useEffect(() => {
     if (useEditor && !open) refreshClipDrafts(); // closing may have just created / updated a draft
   }, [useEditor, open]);
@@ -162,6 +166,15 @@ export function ClipTriageDialog(props: Props) {
         brand={props.brand}
         onDone={props.onDone}
         onUnsupported={() => setUnsupported((prev) => new Set(prev).add(ideaId!))}
+        nav={
+          props.nav && {
+            ...props.nav,
+            onGo: (target) => {
+              handOffUrl(target);
+              props.nav!.onGo(target);
+            },
+          }
+        }
       />
     );
   }

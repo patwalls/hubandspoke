@@ -7,6 +7,7 @@ import { TriageDialog } from "./triage-dialog";
 import { NewsletterItemEditor } from "./newsletter-item-editor";
 import { useFeatureFlags } from "@/components/clip-editor/use-feature-flags";
 import { ClipTriageDialog } from "./clip-triage-dialog";
+import { ideaNeighbours, type IdeaNeighbours } from "./idea-nav";
 import { ClipDraftBadge } from "@/components/clip-editor/drafts";
 import { BulkKillDialog } from "./bulk-kill-dialog";
 import { cn } from "@/lib/utils";
@@ -125,6 +126,18 @@ export function IdeaQueueTable({
   const RENDER_CAP = 150;
   const [showAllRows, setShowAllRows] = useState(false);
   const visibleQueueRows = showAllRows ? sortedItems : sortedItems.slice(0, RENDER_CAP);
+
+  // Previous / Next in the clip editor walks the clip rows in table order.
+  // `navOpenId` is the idea the editor moved to (its row opens itself).
+  const clipIdeaIds = useMemo(
+    () => sortedItems.filter((i) => i.sourceClipIdeaId && i.postType !== "newsletter").map((i) => i.sourceClipIdeaId!),
+    [sortedItems],
+  );
+  const [navOpenId, setNavOpenId] = useState<string | null>(null);
+  const goToIdea = (ideaId: string) => {
+    if (!visibleQueueRows.some((i) => i.sourceClipIdeaId === ideaId)) setShowAllRows(true);
+    setNavOpenId(ideaId);
+  };
 
   // Prune selection to ids that are still in the visible list — keeps selection
   // sane when the user changes filters or items refresh.
@@ -364,6 +377,10 @@ export function IdeaQueueTable({
                   onDone={onMutate}
                   isSelected={selected.has(item.id)}
                   onToggleSelected={(checked) => toggleOne(item.id, checked)}
+                  nav={item.sourceClipIdeaId ? ideaNeighbours(clipIdeaIds, item.sourceClipIdeaId) : null}
+                  navOpen={!!navOpenId && navOpenId === item.sourceClipIdeaId}
+                  onGoToIdea={goToIdea}
+                  onNavClosed={() => setNavOpenId(null)}
                   formatId={
                     item.format
                       ? (formatNameToId?.[item.format] ?? null)
@@ -531,6 +548,10 @@ function IdeaQueueRow({
   isSelected,
   onToggleSelected,
   formatId,
+  nav,
+  navOpen,
+  onGoToIdea,
+  onNavClosed,
 }: {
   item: ProductionItem;
   brand: string;
@@ -539,8 +560,18 @@ function IdeaQueueRow({
   isSelected: boolean;
   onToggleSelected: (checked: boolean) => void;
   formatId: string | null;
+  nav: IdeaNeighbours | null;
+  /** Opened by Previous / Next from a neighbour's editor, not a click. */
+  navOpen: boolean;
+  onGoToIdea: (ideaId: string) => void;
+  onNavClosed: () => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [clicked, setClicked] = useState(false);
+  const open = clicked || navOpen;
+  const setOpen = (next: boolean) => {
+    setClicked(next);
+    if (!next && navOpen) onNavClosed();
+  };
   const isClip = !!item.sourceClipIdeaId;
   const flags = useFeatureFlags();
   // Newsletter ideas open the newsletter editor (flagged); others still triage them.
@@ -710,6 +741,17 @@ function IdeaQueueRow({
             ideaId={item.sourceClipIdeaId}
             onDone={onDone}
             brand={brand}
+            nav={
+              nav
+                ? {
+                    ...nav,
+                    onGo: (ideaId) => {
+                      setClicked(false);
+                      onGoToIdea(ideaId);
+                    },
+                  }
+                : undefined
+            }
           />
         ) : (
           <TriageDialog

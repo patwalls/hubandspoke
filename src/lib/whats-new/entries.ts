@@ -29,6 +29,18 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-10-22-clip-editor-next-idea",
+    shippedAt: "2026-10-22T05:30:00Z",
+    kind: "feature",
+    title: "Flip through clip ideas without leaving the editor",
+    body:
+      "Open a clip idea from the Queue and use the arrows next to \"2 of 12\" at the top of the editor to go to " +
+      "the previous or next idea (or press [ and ]). No more closing and reopening to compare ideas; your edits still save as you go.",
+    href: "/[brand]/queue",
+    screen: "modal:clip-editor",
+    audience: { flag: "clipEditor" },
+  },
+  {
     id: "2026-10-22-publish-way-in",
     shippedAt: "2026-10-22T00:54:00Z",
     kind: "feature",
