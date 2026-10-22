@@ -12,7 +12,8 @@
 
 import { Open_Sans, Poppins } from "next/font/google";
 import ReactMarkdown from "react-markdown";
-import { Camera, Loader2 } from "lucide-react";
+import { Camera } from "lucide-react";
+import { EditableSection, emptySectionHint, type PreviewEditing } from "@/components/dashboard/editable-section";
 import { cn } from "@/lib/utils";
 import { formatTimestamp, replaceScreenshotMarks, screenshotKey, type ChosenScreenshot } from "@/lib/newsletter-screenshots";
 import { sponsorBlock, type NewsletterSection, type NewsletterTemplate } from "@/lib/newsletter-template";
@@ -30,18 +31,7 @@ function toolFromWhy(md: string): string | null {
   return m ? m[1].replace(/[*_#]/g, "").trim() : null;
 }
 
-export interface PreviewEditing {
-  /** The selected section key, or `shot:<markKey>`. */
-  selected: string | null;
-  /** The section whose text is open in place. */
-  editingSection: string | null;
-  regenerating: string[];
-  onSelectSection: (key: string) => void;
-  onChangeSection: (key: string, markdown: string) => void;
-  onDoneEditing: () => void;
-  onSelectShot: (sectionKey: string, markKey: string) => void;
-  onDropShot: (sectionKey: string, markKey: string, file: File) => void;
-}
+export type { PreviewEditing };
 
 export interface PreviewScreenshots {
   chosen: Record<string, ChosenScreenshot>;
@@ -155,7 +145,7 @@ export function BeehiivPreview({
   const rendered = (key: string, linkButtons: boolean) => {
     const text = md(key);
     if (!text) {
-      if (edit) return <p className="my-3 text-[14px] italic text-[#9ca3af]">Click to write this section{secByKey.get(key)?.hint ? `: ${secByKey.get(key)!.hint}` : ""}</p>;
+      if (edit) return emptySectionHint(secByKey.get(key)?.hint);
       return showHints ? <p className="text-[13px] italic text-[#9ca3af]">{secByKey.get(key)?.hint || `(${key})`}</p> : null;
     }
     return (
@@ -180,7 +170,6 @@ export function BeehiivPreview({
               rel="noreferrer"
               className="underline"
               style={{ color: linkButtons ? "inherit" : "#3e81de" }}
-              onClick={edit ? (e) => e.preventDefault() : undefined}
             >
               {children}
             </a>
@@ -208,42 +197,10 @@ export function BeehiivPreview({
 
   const body = (key: string, linkButtons: boolean) => {
     if (!edit) return rendered(key, linkButtons);
-    const isSponsor = secByKey.get(key)?.kind === "sponsor";
-    const regenerating = edit.regenerating.includes(key);
-    if (edit.editingSection === key && !isSponsor && !regenerating) {
-      return (
-        <textarea
-          autoFocus
-          value={byKey.get(key) ?? ""}
-          onChange={(e) => edit.onChangeSection(key, e.target.value)}
-          onBlur={edit.onDoneEditing}
-          onClick={(e) => e.stopPropagation()}
-          className="-mx-2 my-2 block min-h-24 w-[calc(100%+1rem)] resize-none rounded-md bg-white px-2 py-1.5 text-[15px] leading-[1.6] text-[#222222] outline-2 outline-[#49adff] outline-solid [field-sizing:content]"
-        />
-      );
-    }
-    const selected = edit.selected === key;
     return (
-      <div
-        role="button"
-        tabIndex={0}
-        onClick={() => edit.onSelectSection(key)}
-        onKeyDown={(e) => e.key === "Enter" && e.target === e.currentTarget && edit.onSelectSection(key)}
-        title={isSponsor ? "Click to edit the sponsor section" : "Click to edit"}
-        className={cn(
-          "relative -mx-2 rounded-md px-2",
-          isSponsor ? "cursor-pointer" : "cursor-text",
-          selected ? "outline-2 outline-[#49adff] outline-solid" : "hover:outline-2 hover:outline-dashed hover:outline-[#49adff]/60",
-          regenerating && "pointer-events-none opacity-50",
-        )}
-      >
-        {regenerating && (
-          <span className="absolute right-2 top-2 z-10 flex items-center gap-1 rounded bg-white px-1.5 py-0.5 text-[11px] shadow">
-            <Loader2 className="size-3 animate-spin" /> Rewriting…
-          </span>
-        )}
+      <EditableSection sectionKey={key} markdown={byKey.get(key) ?? ""} isSponsor={secByKey.get(key)?.kind === "sponsor"} edit={edit}>
         {rendered(key, linkButtons)}
-      </div>
+      </EditableSection>
     );
   };
 

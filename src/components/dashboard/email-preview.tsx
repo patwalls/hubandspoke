@@ -4,10 +4,13 @@
 // pill headings, tinted boxes, dividers — every style from emailCss(), the
 // same map renderEmailHtml uses for the sent email, so they can't drift.
 // `scale` shrinks it into a thumbnail (the format page's template card).
+// With `edit` it is the newsletter editor's canvas: click a section to edit it
+// in place (EditableSection — the same behavior for every newsletter).
 
 import type { CSSProperties } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
-import { BeehiivPreview, type PreviewEditing, type PreviewScreenshots } from "@/components/dashboard/beehiiv-preview";
+import { BeehiivPreview, type PreviewScreenshots } from "@/components/dashboard/beehiiv-preview";
+import { EditableSection, emptySectionHint, type PreviewEditing } from "@/components/dashboard/editable-section";
 import { emailCss, sponsorBlock, type CssProps, type NewsletterSection, type NewsletterTemplate } from "@/lib/newsletter-template";
 
 const asStyle = (c: CssProps) => c as CSSProperties;
@@ -31,8 +34,9 @@ export function EmailPreview({
   /** Thumbnail mode: the visible height in px (a scaled element keeps its unscaled layout height). */
   clipHeight?: number;
   className?: string;
-  /** beehiiv formats only: the editor's click-to-edit canvas (see BeehiivPreview). */
+  /** The editor's click-to-edit canvas. */
   edit?: PreviewEditing;
+  /** beehiiv formats only: picked images for screenshot placeholders. */
   screenshots?: PreviewScreenshots;
 }) {
   // beehiiv formats (Futurepedia): draw the card layout the push builds.
@@ -69,6 +73,13 @@ export function EmailPreview({
       if (sec.kind === "sponsor" && sponsor?.copy?.trim()) md = sponsorBlock(sponsor.copy, sponsor.landingUrl);
       let content = md ? <ReactMarkdown components={components}>{md}</ReactMarkdown> : null;
       if (!content && showHints) content = <p style={asStyle(css.hint)}>{sec.hint || "(content)"}</p>;
+      if (edit) {
+        content = (
+          <EditableSection sectionKey={sec.key} markdown={byKey.get(sec.key) ?? ""} isSponsor={sec.kind === "sponsor"} edit={edit}>
+            {content ?? emptySectionHint(sec.hint)}
+          </EditableSection>
+        );
+      }
       if (content && sec.boxColor) content = <div style={asStyle(css.box(sec.boxColor))}>{content}</div>;
       const heading = sec.heading ? (
         sec.pillColor ? (

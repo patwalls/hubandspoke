@@ -6,7 +6,7 @@
 // Regenerate + optional instruction) next to a live preview of the whole
 // issue. The sponsor section shows the Asana promo controls; How-To slots can
 // switch their source video. Saves are revision-checked (409 on a stale tab).
-// beehiiv formats open in the visual view: the email itself is the canvas
+// Templated newsletters open in the visual view: the email itself is the canvas
 // (click text to edit it in place, click a screenshot to pick or upload its
 // image) with the selection's controls in a side panel, like the design
 // editor; "Text view" is the original side-by-side layout.
@@ -177,8 +177,8 @@ function Workspace({
   // The revision the next save is based on, and the save in flight (saves run one at a time).
   const revisionRef = useRef(draft.revision);
   const saveChain = useRef<Promise<boolean>>(Promise.resolve(true));
-  // Visual view (beehiiv formats): what's selected on the canvas, and the section open for typing.
-  const [view, setView] = useState<"visual" | "text">(draft.template?.beehiiv ? "visual" : "text");
+  // Visual view (every templated newsletter): what's selected on the canvas, and the section open for typing.
+  const [view, setView] = useState<"visual" | "text">(draft.template ? "visual" : "text");
   const [selected, setSelected] = useState<string | null>(null);
   const [editingSection, setEditingSection] = useState<string | null>(null);
 
@@ -306,7 +306,7 @@ function Workspace({
         {message && <span className="text-xs text-muted-foreground">{message}</span>}
         {draft.status === "ready" && (
           <>
-            {draft.template?.beehiiv && (
+            {draft.template && (
               <Button variant="ghost" size="sm" onClick={() => setView((v) => (v === "visual" ? "text" : "visual"))}>
                 {view === "visual" ? <FileText /> : <LayoutTemplate />}
                 {view === "visual" ? "Text view" : "Visual view"}
@@ -362,6 +362,24 @@ function Workspace({
   const selSection = selected && !selected.startsWith("shot:") ? (draft.template?.sections.find((s) => s.key === selected) ?? null) : null;
   const selShot = selected?.startsWith("shot:") ? selected.slice(5) : null;
   const shotMark = selShot ? (draft.template?.sections.flatMap((s) => parseScreenshotMarks(s.key, sectionMd(s.key))).find((m) => m.key === selShot) ?? null) : null;
+
+  const sourcesList = draft.sources.length > 0 && draft.kind === "roundup" && (
+  <div className="flex flex-col gap-1 text-sm">
+    <span className="font-medium">Sources used</span>
+    {draft.sources.map((s, i) => (
+      <span key={i} className="text-xs text-muted-foreground">
+        <span className="mr-2 rounded bg-muted px-1.5 py-0.5">{s.kind === "video" ? "Video" : "Case study"}</span>
+        {s.url ? (
+          <a className="text-primary underline" href={s.url} target="_blank" rel="noreferrer">
+            {s.title ?? s.url}
+          </a>
+        ) : (
+          (s.title ?? "Untitled")
+        )}
+      </span>
+    ))}
+  </div>
+);
 
   const subjectFields = (
     <>
@@ -434,7 +452,8 @@ function Workspace({
           }}
         />
         <p className="flex items-center justify-center gap-1.5 pb-6 text-center text-xs text-muted-foreground">
-          <MousePointerClick className="size-3.5" /> Click any text to edit it · click a screenshot to pick a frame or upload one · or drop an image on it
+          <MousePointerClick className="size-3.5" /> Click any text to edit it
+          {draft.kind === "single_video" && " · click a screenshot to pick a frame or upload one · or drop an image on it"}
         </p>
       </div>
 
@@ -494,8 +513,9 @@ function Workspace({
           <>
             {subjectFields}
             <p className="rounded-md bg-muted/60 p-3 text-xs text-muted-foreground">
-              Click any part of the email to edit it. Text opens right where it is; a screenshot opens its frames, Upload and Remove here.
+              Click any part of the email to edit it. Text opens right where it is{draft.kind === "single_video" ? "; a screenshot opens its frames, Upload and Remove here" : "; Regenerate and Find new story show here"}.
             </p>
+            {sourcesList}
           </>
         )}
       </div>
@@ -610,23 +630,7 @@ function Workspace({
               </label>
             )}
 
-            {draft.sources.length > 0 && draft.kind === "roundup" && (
-              <div className="flex flex-col gap-1 text-sm">
-                <span className="font-medium">Sources used</span>
-                {draft.sources.map((s, i) => (
-                  <span key={i} className="text-xs text-muted-foreground">
-                    <span className="mr-2 rounded bg-muted px-1.5 py-0.5">{s.kind === "video" ? "Video" : "Case study"}</span>
-                    {s.url ? (
-                      <a className="text-primary underline" href={s.url} target="_blank" rel="noreferrer">
-                        {s.title ?? s.url}
-                      </a>
-                    ) : (
-                      (s.title ?? "Untitled")
-                    )}
-                  </span>
-                ))}
-              </div>
-            )}
+            {sourcesList}
           </div>
 
           <div className="min-h-0 overflow-y-auto bg-muted/40">
@@ -793,9 +797,9 @@ function SectionEditor({
       )}
       {!hideText && <Textarea className="min-h-28 font-mono text-xs" value={value} onChange={(e) => onChange(e.target.value)} disabled={regenerating} />}
       {children}
-      <div className="flex items-center gap-2">
+      <div className={cn("flex items-center gap-2", hideText && "flex-wrap")}>
         <Input
-          className="h-7 text-xs"
+          className={cn("h-7 text-xs", hideText && "basis-full")}
           placeholder="Optional: how to change it (e.g. 'shorter', 'lead with the $50K')"
           value={instruction}
           onChange={(e) => setInstruction(e.target.value)}
