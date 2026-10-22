@@ -127,6 +127,7 @@ import { recordVisit } from "@/lib/hooks/use-recent-items";
 import { startVisibleInterval } from "@/lib/visible-interval";
 import { validatePublishedLinkPlatform } from "@/lib/published-link-validation";
 import { trackUsage } from "@/lib/usage/track";
+import { HandoffButton } from "./handoff-button";
 
 interface BrandFormat {
   id: string;
@@ -455,6 +456,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     (s) => s.name !== "Published" && s.name !== "Scheduled",
   );
   const statusPalette = new Map(allStatusOptions.map((s) => [s.name, s.color] as const));
+  const statusNameSet = new Set(allStatusOptions.map((s) => s.name));
 
   const router = useRouter();
   const pathname = usePathname();
@@ -2524,6 +2526,28 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                 ))}
               </SelectContent>
             </Select>
+
+            {/* One-click handoff: status + editor together, the way the
+             *  team passes work along (Assigned → reviewer, Review → back
+             *  to the sender). Hidden when there's nobody to hand to. */}
+            <HandoffButton
+              itemId={contentId}
+              brand={brand}
+              status={status}
+              editorUserId={editorUserId}
+              brandStatuses={statusNameSet}
+              onHandoff={async (patch) => {
+                const prev = { status, editorUserId };
+                setStatus(patch.status);
+                setEditorUserId(patch.editorUserId);
+                const ok = await persistField(patch);
+                if (!ok) {
+                  setStatus(prev.status);
+                  setEditorUserId(prev.editorUserId);
+                }
+                return ok;
+              }}
+            />
 
             {/* Reconciler gave up auto-detecting this Scheduled post going
              *  live (aged past its window). Prompts a manual check/publish. */}
