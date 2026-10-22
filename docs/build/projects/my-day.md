@@ -39,7 +39,7 @@ comments in the app ask for this directly.
    header button shows your turn + to review; `/my-work` gets To review (Review items on brands
    you approved last month, oldest first, with the editor's name). Your turn = Assigned / Ready
    To Publish only (Review is the reviewer's turn now).
-2. **Act from the row**: "Send to review" on Assigned rows and "Approve" / "Send back" (with a
+2. **Act from the row** (2026-10-22, lap 6 — shipped, card `2026-10-22-my-work-row-actions`; send-to-review key is r): "Send to review" on Assigned rows and "Approve" / "Send back" (with a
    note that lands as a comment) on To review rows, without opening the item. Keyboard: j/k to
    move, a approve, b send back.
 3. **What changed since you last looked**: per-row "new comment" / "sent back" dots, and the
@@ -50,6 +50,7 @@ comments in the app ask for this directly.
 ## Watch next
 
 - Do people click the button (`my-work:header`) and open `/my-work`? Which roles?
+- Row actions: `my-work:approve` / `send-back` / `send-to-review` marks vs. the same status changes made from the content page.
 - Does the review wait (Review → next status, hours) drop for brands with a known reviewer?
 
 ## Done when
