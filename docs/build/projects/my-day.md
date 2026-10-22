@@ -42,12 +42,14 @@ comments in the app ask for this directly.
 2. **Act from the row** (2026-10-22, lap 6 — shipped, card `2026-10-22-my-work-row-actions`; send-to-review key is r): "Send to review" on Assigned rows and "Approve" / "Send back" (with a
    note that lands as a comment) on To review rows, without opening the item. Keyboard: j/k to
    move, a approve, b send back.
-3. **What changed since you last looked**: per-row "new comment" / "sent back" dots, and the
+3. **What changed since you last looked** (2026-10-22, lap 8 — shipped, card `2026-10-22-my-work-news`; "last looked" = your last event or comment on the item, since usage_events doesn't record item ids; at ship time 8 people had 38 rows with a comment from someone else, 21 of them new): per-row "new comment" / "sent back" dots, and the
    comment preview on the row. Replaces the ignored inbox for the people who never open it.
 4. **Morning email digest** (opt-out): one email a day with your count and the top 5, instead
    of one email per assignment.
 
 ## Watch next
+
+- After M3: do people with a dotted row open that item (content-page views) or act from the row sooner?
 
 - Do people click the button (`my-work:header`) and open `/my-work`? Which roles?
 - Row actions: `my-work:approve` / `send-back` / `send-to-review` marks vs. the same status changes made from the content page.
