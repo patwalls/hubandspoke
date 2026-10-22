@@ -145,7 +145,7 @@ describe("beehiiv draft request", () => {
       sponsor: null,
       thumbnailUrl: null,
       screenshots: { "steps:the skills page": { frameId: "f1", sec: 272, bucket: "www.starterstory.com", key: "k.jpg" } },
-      screenshotUrls: { f1: "https://s3.us-east-1.amazonaws.com/www.starterstory.com/k.jpg" },
+      screenshotUrls: { "k.jpg": "https://s3.us-east-1.amazonaws.com/www.starterstory.com/k.jpg" },
     }) as { blocks: B[] };
     const guide = out.blocks.filter((b) => b.type === "section")[0].blocks!;
     expect(guide).toContainEqual(expect.objectContaining({ type: "image", imageUrl: "https://s3.us-east-1.amazonaws.com/www.starterstory.com/k.jpg" }));

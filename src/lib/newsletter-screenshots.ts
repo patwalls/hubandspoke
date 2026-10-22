@@ -17,12 +17,19 @@ export interface ScreenshotMark {
   raw: string;
 }
 
-/** A chosen frame for a placeholder (stored on newsletter_drafts.screenshots, keyed by ScreenshotMark.key). */
+/**
+ * The image chosen for a placeholder (stored on newsletter_drafts.screenshots,
+ * keyed by ScreenshotMark.key): a frame grabbed from the video, or an image
+ * the editor uploaded.
+ */
 export interface ChosenScreenshot {
-  frameId: string;
-  sec: number;
+  /** The design_frames row, for a video frame; null for an upload. */
+  frameId: string | null;
+  /** Video moment (frames only). */
+  sec: number | null;
   bucket: string;
   key: string;
+  source?: "frame" | "upload";
 }
 
 const MARK = /[*_]?\[Screenshot(?:\s*@\s*(\d{1,2}(?::\d{2}){1,2}))?\s*:\s*([^\]]+?)\s*\][*_]?/gi;
@@ -64,12 +71,13 @@ export function applyScreenshots(
   sectionKey: string,
   markdown: string,
   chosen: Record<string, ChosenScreenshot> | null | undefined,
-  urlFor: (c: ChosenScreenshot) => string | null,
+  urlFor: (c: ChosenScreenshot, markKey: string) => string | null,
 ): string {
   if (!chosen || !Object.keys(chosen).length) return markdown;
   return markdown.replace(MARK, (raw, _ts: string, label: string) => {
-    const c = chosen[screenshotKey(sectionKey, label)];
-    const url = c ? urlFor(c) : null;
+    const markKey = screenshotKey(sectionKey, label);
+    const c = chosen[markKey];
+    const url = c ? urlFor(c, markKey) : null;
     return url ? `\n![${label.trim().replace(/[[\]]/g, "")}](${url})\n` : raw;
   });
 }

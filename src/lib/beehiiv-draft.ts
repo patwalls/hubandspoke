@@ -62,7 +62,7 @@ export function buildBeehiivDraftRequest(args: {
   thumbnailUrl: string | null;
   /** Kevin or Saj from the video's channel (one-format newsletters); else the template's author. */
   author?: "kevin" | "saj" | null;
-  /** Picked screenshot frames (newsletter_drafts.screenshots) and the public link for each, by frame id. */
+  /** Picked screenshots (newsletter_drafts.screenshots) and the public link for each, by S3 key. */
   screenshots?: Record<string, ChosenScreenshot> | null;
   screenshotUrls?: Record<string, string> | null;
 }): Record<string, unknown> {
@@ -73,7 +73,7 @@ export function buildBeehiivDraftRequest(args: {
     return args.sections.find((x) => x.key === key)?.markdown ?? "";
   };
   // Picked screenshots replace their placeholders as image lines (→ image blocks).
-  const md = (key: string) => applyScreenshots(key, rawMd(key), args.screenshots, (c) => args.screenshotUrls?.[c.frameId] ?? null);
+  const md = (key: string) => applyScreenshots(key, rawMd(key), args.screenshots, (c) => args.screenshotUrls?.[c.key] ?? null);
 
   const layout = args.template.beehiiv.layout;
   const tool = toolFromWhy(md("why")) ?? "AI";

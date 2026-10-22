@@ -69,7 +69,7 @@ export const beehiivNewsletterCreateDraftTask: Task = async (rawPayload, helpers
       author: voiceForChannel(row.formatName, row.channelHandle)?.voice ?? null,
       screenshots: row.screenshots,
       screenshotUrls: Object.fromEntries(
-        await Promise.all(Object.values(row.screenshots).map(async (c) => [c.frameId, await publicScreenshotUrl(c)] as const)),
+        await Promise.all(Object.values(row.screenshots).map(async (c) => [c.key, await publicScreenshotUrl(c)] as const)),
       ),
     });
     // Record the post the moment it exists, so a failed check below can never lead to a second post.
