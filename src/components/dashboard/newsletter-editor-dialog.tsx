@@ -6,10 +6,14 @@
 // Regenerate + optional instruction) next to a live preview of the whole
 // issue. The sponsor section shows the Asana promo controls; How-To slots can
 // switch their source video. Saves are revision-checked (409 on a stale tab).
+// beehiiv formats open in the visual view: the email itself is the canvas
+// (click text to edit it in place, click a screenshot to pick or upload its
+// image) with the selection's controls in a side panel, like the design
+// editor; "Text view" is the original side-by-side layout.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { ExternalLink, Loader2, RefreshCw, Shuffle, Sparkles, X } from "lucide-react";
+import { ExternalLink, FileText, LayoutTemplate, Loader2, MousePointerClick, RefreshCw, Shuffle, Sparkles, X } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,8 +22,8 @@ import { cn } from "@/lib/utils";
 import { startVisibleInterval } from "@/lib/visible-interval";
 import { composeIssue, type NewsletterSection, type NewsletterTemplate } from "@/lib/newsletter-template";
 import { EmailPreview } from "@/components/dashboard/email-preview";
-import { ScreenshotPicker, useScreenshots } from "@/components/dashboard/newsletter-screenshot-picker";
-import { applyScreenshots } from "@/lib/newsletter-screenshots";
+import { ScreenshotMarkPanel, ScreenshotPicker, useScreenshots } from "@/components/dashboard/newsletter-screenshot-picker";
+import { applyScreenshots, parseScreenshotMarks } from "@/lib/newsletter-screenshots";
 import type { NewsletterDraftSource, NewsletterSpecialSource } from "@/lib/db/schema";
 import { NEWSLETTER_START_DELAY_MS } from "@/lib/services/newsletter-drafter/format-config";
 
@@ -170,6 +174,13 @@ function Workspace({
   const shots = useScreenshots(draft.id, draft.kind === "single_video" && draft.status === "ready", draft.screenshotPreviews ?? {});
   const seenRevision = useRef(draft.revision);
   const seenStatus = useRef(draft.status);
+  // The revision the next save is based on, and the save in flight (saves run one at a time).
+  const revisionRef = useRef(draft.revision);
+  const saveChain = useRef<Promise<boolean>>(Promise.resolve(true));
+  // Visual view (beehiiv formats): what's selected on the canvas, and the section open for typing.
+  const [view, setView] = useState<"visual" | "text">(draft.template?.beehiiv ? "visual" : "text");
+  const [selected, setSelected] = useState<string | null>(null);
+  const [editingSection, setEditingSection] = useState<string | null>(null);
 
   // Re-seed local edits when the server version moves under us (draft landed, a
   // section regenerated, the sponsor refreshed) — never on an unchanged poll.
@@ -177,6 +188,7 @@ function Workspace({
     if (draft.revision === seenRevision.current && draft.status === seenStatus.current) return;
     seenRevision.current = draft.revision;
     seenStatus.current = draft.status;
+    revisionRef.current = draft.revision;
     setSubject(draft.subject ?? "");
     setPreviewText(draft.previewText ?? "");
     setSections(draft.sections);
@@ -196,7 +208,13 @@ function Workspace({
     return composeIssue(draft.template, sections, specialCopy.trim() ? { copy: specialCopy, landingUrl: draft.specialSource?.landingUrl ?? null } : null);
   }, [draft.template, draft.specialSource, sections, specialCopy, body]);
 
-  async function save(): Promise<boolean> {
+  function save(): Promise<boolean> {
+    const next = saveChain.current.then(() => saveNow());
+    saveChain.current = next;
+    return next;
+  }
+
+  async function saveNow(): Promise<boolean> {
     setSaving(true);
     setMessage(null);
     try {
@@ -207,12 +225,16 @@ function Workspace({
           subject,
           previewText,
           specialCopy,
-          revision: draft.revision,
+          revision: revisionRef.current,
           ...(draft.template ? { sections } : { bodyMarkdown: body }),
         }),
       });
       const json = (await res.json().catch(() => ({}))) as { draft?: EditorDraft; error?: string };
       if (!res.ok || !json.draft) throw new Error(json.error ?? "Couldn't save");
+      // Our own save: don't re-seed local edits from it (you may already be typing elsewhere).
+      revisionRef.current = json.draft.revision;
+      seenRevision.current = json.draft.revision;
+      seenStatus.current = json.draft.status;
       setDraft(json.draft);
       setMessage("Saved");
       onChanged();
@@ -284,6 +306,12 @@ function Workspace({
         {message && <span className="text-xs text-muted-foreground">{message}</span>}
         {draft.status === "ready" && (
           <>
+            {draft.template?.beehiiv && (
+              <Button variant="ghost" size="sm" onClick={() => setView((v) => (v === "visual" ? "text" : "visual"))}>
+                {view === "visual" ? <FileText /> : <LayoutTemplate />}
+                {view === "visual" ? "Text view" : "Visual view"}
+              </Button>
+            )}
             <Button variant="ghost" size="sm" onClick={redraft} disabled={busyAction !== null}>
               {busyAction === "redraft" && <Loader2 className="animate-spin" />}
               Redraft
@@ -324,6 +352,156 @@ function Workspace({
     </div>
   );
 
+  const sectionMd = (key: string) => sections.find((x) => x.key === key)?.markdown ?? "";
+  const setSectionMd = (key: string, md: string) =>
+    setSections((cur) => (cur.some((x) => x.key === key) ? cur.map((x) => (x.key === key ? { ...x, markdown: md } : x)) : [...cur, { key, markdown: md }]));
+  const deselect = () => {
+    setSelected(null);
+    setEditingSection(null);
+  };
+  const selSection = selected && !selected.startsWith("shot:") ? (draft.template?.sections.find((s) => s.key === selected) ?? null) : null;
+  const selShot = selected?.startsWith("shot:") ? selected.slice(5) : null;
+  const shotMark = selShot ? (draft.template?.sections.flatMap((s) => parseScreenshotMarks(s.key, sectionMd(s.key))).find((m) => m.key === selShot) ?? null) : null;
+
+  const subjectFields = (
+    <>
+      <div className="flex flex-col gap-2">
+        <span className="text-sm font-medium">Subject</span>
+        {draft.subjectOptions.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {draft.subjectOptions.map((opt) => (
+              <button
+                key={opt}
+                type="button"
+                onClick={() => setSubject(opt)}
+                className={cn("rounded-full border px-3 py-1 text-left text-xs hover:bg-muted", subject === opt && "border-primary bg-muted")}
+              >
+                {opt}
+              </button>
+            ))}
+          </div>
+        )}
+        <Input value={subject} onChange={(e) => setSubject(e.target.value)} />
+      </div>
+      <label className="flex flex-col gap-2 text-sm">
+        <span className="font-medium">Preview text</span>
+        <Input value={previewText} onChange={(e) => setPreviewText(e.target.value)} />
+      </label>
+    </>
+  );
+
+  const visual = draft.template ? (
+    <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_400px]">
+      <div className="min-h-0 overflow-y-auto bg-muted/40">
+        <div className="mx-auto max-w-[640px] px-5 pt-5">
+          <button
+            type="button"
+            onClick={deselect}
+            title="Edit the subject and preview text"
+            className={cn("block w-full rounded-t-lg border border-b-0 bg-background px-4 py-2 text-left hover:bg-muted/60", !selected && "ring-2 ring-[#49adff]")}
+          >
+            <div className="text-sm font-semibold">{subject || "(no subject)"}</div>
+            <div className="text-xs text-muted-foreground">{previewText || "(no preview text)"}</div>
+          </button>
+        </div>
+        <EmailPreview
+          template={draft.template}
+          sections={sections}
+          sponsor={specialCopy.trim() ? { copy: specialCopy, landingUrl: draft.specialSource?.landingUrl ?? null } : null}
+          screenshots={draft.kind === "single_video" ? { chosen: shots.chosen, urlFor: shots.urlFor } : undefined}
+          edit={{
+            selected,
+            editingSection,
+            regenerating: draft.regenerating,
+            onSelectSection: (key) => {
+              setSelected(key);
+              if (draft.template?.sections.find((s) => s.key === key)?.kind !== "sponsor") setEditingSection(key);
+            },
+            onChangeSection: setSectionMd,
+            onDoneEditing: () => {
+              setEditingSection(null);
+              if (dirty) void save();
+            },
+            onSelectShot: (_sectionKey, markKey) => {
+              setEditingSection(null);
+              setSelected(`shot:${markKey}`);
+            },
+            onDropShot: (_sectionKey, markKey, file) => {
+              setEditingSection(null);
+              setSelected(`shot:${markKey}`);
+              void shots.upload(markKey, file);
+            },
+          }}
+        />
+        <p className="flex items-center justify-center gap-1.5 pb-6 text-center text-xs text-muted-foreground">
+          <MousePointerClick className="size-3.5" /> Click any text to edit it · click a screenshot to pick a frame or upload one · or drop an image on it
+        </p>
+      </div>
+
+      <div className="flex min-h-0 flex-col gap-4 overflow-y-auto border-l p-4">
+        {selected && (
+          <button type="button" onClick={deselect} className="self-start text-xs text-muted-foreground hover:text-foreground">
+            ← Subject &amp; preview text
+          </button>
+        )}
+        {selSection ? (
+          selSection.kind === "sponsor" ? (
+            <SponsorSection
+              label={draft.specialLabel ?? selSection.heading ?? "Sponsor"}
+              draft={draft}
+              copy={specialCopy}
+              setCopy={setSpecialCopy}
+              agentMarkdown={sectionMd(selSection.key)}
+              setAgentMarkdown={(md) => setSectionMd(selSection.key, md)}
+              busyAction={busyAction}
+              onAction={special}
+            />
+          ) : (
+            <>
+              <SectionEditor
+                key={selSection.key}
+                label={selSection.heading ?? selSection.key.replace(/_/g, " ")}
+                hint={selSection.hint}
+                value={sectionMd(selSection.key)}
+                onChange={(md) => setSectionMd(selSection.key, md)}
+                hideText
+                regenerating={draft.regenerating.includes(selSection.key)}
+                disabled={busyAction !== null}
+                onRegenerate={(instruction) => regenerate(selSection.key, instruction)}
+                source={draft.kind === "roundup" ? (sections.find((x) => x.key === selSection.key)?.source ?? null) : null}
+                usage={draft.sectionUsage?.[selSection.key] ?? null}
+                onFindNewStory={draft.kind === "roundup" ? (instruction) => regenerate(selSection.key, instruction, true) : undefined}
+                onCancel={() => cancelRun(selSection.key)}
+              />
+              <p className="text-xs text-muted-foreground">
+                {editingSection === selSection.key
+                  ? "Typing in the email edits this section. **bold**, [text](link) and “- ” bullets work. Click outside it to finish; it saves on its own."
+                  : "Click the section in the email to edit its text."}
+              </p>
+            </>
+          )
+        ) : selShot ? (
+          <div className="flex flex-col gap-3">
+            <span className="text-sm font-medium">Screenshot</span>
+            {shotMark ? (
+              <ScreenshotMarkPanel key={shotMark.key} mark={shotMark} shots={shots} />
+            ) : (
+              <span className="text-xs text-muted-foreground">This placeholder is no longer in the text.</span>
+            )}
+            {shots.error && <span className="text-xs text-destructive">{shots.error}</span>}
+          </div>
+        ) : (
+          <>
+            {subjectFields}
+            <p className="rounded-md bg-muted/60 p-3 text-xs text-muted-foreground">
+              Click any part of the email to edit it. Text opens right where it is; a screenshot opens its frames, Upload and Remove here.
+            </p>
+          </>
+        )}
+      </div>
+    </div>
+  ) : null;
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {header}
@@ -360,6 +538,8 @@ function Workspace({
             Try again
           </Button>
         </div>
+      ) : view === "visual" && visual ? (
+        visual
       ) : (
         <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
           <div className="flex min-h-0 flex-col gap-4 overflow-y-auto border-r p-5">
@@ -551,6 +731,7 @@ function SectionEditor({
   usage,
   onFindNewStory,
   onCancel,
+  hideText = false,
   children,
 }: {
   label: string;
@@ -564,6 +745,8 @@ function SectionEditor({
   usage?: { count: number; lastDate: string | null; label: string; published?: string | null } | null;
   onFindNewStory?: (instruction: string) => void;
   onCancel?: () => void;
+  /** Visual view: the text is edited in the email itself, not here. */
+  hideText?: boolean;
   /** Extra controls under the section (the How-To's screenshot picker). */
   children?: React.ReactNode;
 }) {
@@ -608,7 +791,7 @@ function SectionEditor({
           </span>
         </div>
       )}
-      <Textarea className="min-h-28 font-mono text-xs" value={value} onChange={(e) => onChange(e.target.value)} disabled={regenerating} />
+      {!hideText && <Textarea className="min-h-28 font-mono text-xs" value={value} onChange={(e) => onChange(e.target.value)} disabled={regenerating} />}
       {children}
       <div className="flex items-center gap-2">
         <Input

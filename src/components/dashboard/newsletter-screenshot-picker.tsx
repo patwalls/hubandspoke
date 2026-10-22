@@ -123,14 +123,15 @@ export function ScreenshotPicker({ sectionKey, markdown, shots }: { sectionKey: 
         <Camera className="size-3.5" /> Screenshots
       </span>
       {marks.map((m) => (
-        <MarkRow key={m.key} mark={m} shots={shots} />
+        <ScreenshotMarkPanel key={m.key} mark={m} shots={shots} />
       ))}
       {shots.error && <span className="text-xs text-destructive">{shots.error}</span>}
     </div>
   );
 }
 
-function MarkRow({ mark: m, shots }: { mark: ScreenshotMark; shots: ScreenshotsState }) {
+/** One placeholder: its image, frames near its moment, Grab at, Upload, Remove. */
+export function ScreenshotMarkPanel({ mark: m, shots }: { mark: ScreenshotMark; shots: ScreenshotsState }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [at, setAt] = useState(m.sec != null ? formatTimestamp(m.sec) : "");
   const pick = shots.chosen[m.key];

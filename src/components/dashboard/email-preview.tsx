@@ -7,7 +7,7 @@
 
 import type { CSSProperties } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
-import { BeehiivPreview } from "@/components/dashboard/beehiiv-preview";
+import { BeehiivPreview, type PreviewEditing, type PreviewScreenshots } from "@/components/dashboard/beehiiv-preview";
 import { emailCss, sponsorBlock, type CssProps, type NewsletterSection, type NewsletterTemplate } from "@/lib/newsletter-template";
 
 const asStyle = (c: CssProps) => c as CSSProperties;
@@ -20,6 +20,8 @@ export function EmailPreview({
   scale = 1,
   clipHeight,
   className,
+  edit,
+  screenshots,
 }: {
   template: NewsletterTemplate;
   sections?: NewsletterSection[];
@@ -29,10 +31,13 @@ export function EmailPreview({
   /** Thumbnail mode: the visible height in px (a scaled element keeps its unscaled layout height). */
   clipHeight?: number;
   className?: string;
+  /** beehiiv formats only: the editor's click-to-edit canvas (see BeehiivPreview). */
+  edit?: PreviewEditing;
+  screenshots?: PreviewScreenshots;
 }) {
   // beehiiv formats (Futurepedia): draw the card layout the push builds.
   if (template.beehiiv?.layout) {
-    return <BeehiivPreview template={template} sections={sections} sponsor={sponsor} showHints={showHints} scale={scale} clipHeight={clipHeight} className={className} />;
+    return <BeehiivPreview template={template} sections={sections} sponsor={sponsor} showHints={showHints} scale={scale} clipHeight={clipHeight} className={className} edit={edit} screenshots={screenshots} />;
   }
   const st = template.style;
   const css = emailCss(st);

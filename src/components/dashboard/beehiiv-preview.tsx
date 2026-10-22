@@ -5,23 +5,55 @@
 // labels, outro image, the feedback poll, and a note for the footer (it comes
 // from the "Hub & Spoke" template in beehiiv). So the format page and the
 // editor show what lands in beehiiv.
+//
+// With `edit` it is the newsletter editor's canvas (like the design editor):
+// click a section to edit its text in place, click a screenshot to pick or
+// upload its image (or drop an image file on it). The editor owns all state.
 
 import { Open_Sans, Poppins } from "next/font/google";
 import ReactMarkdown from "react-markdown";
-import { formatTimestamp, replaceScreenshotMarks } from "@/lib/newsletter-screenshots";
+import { Camera, Loader2 } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { formatTimestamp, replaceScreenshotMarks, screenshotKey, type ChosenScreenshot } from "@/lib/newsletter-screenshots";
 import { sponsorBlock, type NewsletterSection, type NewsletterTemplate } from "@/lib/newsletter-template";
 
 // The Kevin/Saj templates' fonts: Open Sans body (16px, 1.5), Poppins headings.
 const openSans = Open_Sans({ subsets: ["latin"], weight: ["400", "600", "700"], style: ["normal", "italic"] });
 const poppins = Poppins({ subsets: ["latin"], weight: ["400", "600", "700"] });
 
-/** Alt text marking an unpicked screenshot placeholder (drawn as a "screenshot goes here" box). */
+/** Alt-text prefix marking a screenshot placeholder; the number indexes this render's list. */
 const SHOT = "__shot__";
 
 /** "### Why Claude Works" → "Claude" — same rule as the push's card labels. */
 function toolFromWhy(md: string): string | null {
   const m = md.match(/Why\s+(.+?)\s+Works/i);
   return m ? m[1].replace(/[*_#]/g, "").trim() : null;
+}
+
+export interface PreviewEditing {
+  /** The selected section key, or `shot:<markKey>`. */
+  selected: string | null;
+  /** The section whose text is open in place. */
+  editingSection: string | null;
+  regenerating: string[];
+  onSelectSection: (key: string) => void;
+  onChangeSection: (key: string, markdown: string) => void;
+  onDoneEditing: () => void;
+  onSelectShot: (sectionKey: string, markKey: string) => void;
+  onDropShot: (sectionKey: string, markKey: string, file: File) => void;
+}
+
+export interface PreviewScreenshots {
+  chosen: Record<string, ChosenScreenshot>;
+  urlFor: (c: ChosenScreenshot, markKey: string) => string | null;
+}
+
+interface Shot {
+  sectionKey: string;
+  markKey: string;
+  sec: number | null;
+  label: string;
+  url: string | null;
 }
 
 export function BeehiivPreview({
@@ -32,6 +64,8 @@ export function BeehiivPreview({
   scale = 1,
   clipHeight,
   className,
+  edit,
+  screenshots,
 }: {
   template: NewsletterTemplate;
   sections?: NewsletterSection[];
@@ -40,18 +74,27 @@ export function BeehiivPreview({
   scale?: number;
   clipHeight?: number;
   className?: string;
+  edit?: PreviewEditing;
+  /** Picked images for the placeholders; without it every placeholder draws as a box. */
+  screenshots?: PreviewScreenshots;
 }) {
   const layout = template.beehiiv?.layout;
   if (!layout) return null;
   const byKey = new Map(sections.map((x) => [x.key, x.markdown]));
   const secByKey = new Map(template.sections.map((s) => [s.key, s]));
+  const shots: Shot[] = [];
   const md = (key: string) => {
     const sec = secByKey.get(key);
     if (sec?.kind === "sponsor" && sponsor?.copy?.trim()) return sponsorBlock(sponsor.copy, sponsor.landingUrl);
     // Same rules as the push (beehiiv-blocks.ts): every line is its own paragraph, and
-    // "- Saj" / "- Kevin" is the intro's sign-off, not a list.
-    // Unpicked screenshot placeholders → an image marker the img renderer draws as a box.
-    return replaceScreenshotMarks((byKey.get(key) ?? "").trim(), (sec, label) => `\n![${SHOT}${sec != null ? formatTimestamp(sec) : ""}|${label.replace(/[[\]]/g, "")}](#screenshot)\n`)
+    // "- Saj" / "- Kevin" is the intro's sign-off, not a list. Screenshot placeholders
+    // become image markers the img renderer draws (the picked image, or a box).
+    return replaceScreenshotMarks((byKey.get(key) ?? "").trim(), (sec, label) => {
+      const markKey = screenshotKey(key, label);
+      const c = screenshots?.chosen[markKey];
+      shots.push({ sectionKey: key, markKey, sec, label, url: c ? screenshots!.urlFor(c, markKey) : null });
+      return `\n![${SHOT}${shots.length - 1}](#screenshot)\n`;
+    })
       .replace(/^- (Saj|Kevin)$/gm, "\\- $1")
       .replace(/\n(?!\n)/g, "\n\n");
   };
@@ -59,9 +102,60 @@ export function BeehiivPreview({
   const placed = new Set(layout.cards.flatMap((c) => c.sections.map((x) => x.key)));
   const unplaced = template.sections.filter((s) => !placed.has(s.key));
 
-  const body = (key: string, linkButtons: boolean) => {
+  const shotBlock = (shot: Shot) => {
+    const selected = edit?.selected === `shot:${shot.markKey}`;
+    const inner = shot.url ? (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img src={shot.url} alt={shot.label} className="block w-full rounded-[10px]" />
+    ) : (
+      <span className="flex w-full flex-col items-center justify-center gap-0.5 rounded-[10px] border-2 border-dashed border-[#c7d2dc] bg-[#f7fafc] px-6 py-6 text-center text-[13px] text-[#6b7280]">
+        <span className="flex items-center gap-1.5 font-semibold">
+          {edit && <Camera className="size-3.5" />}
+          Screenshot{shot.sec != null ? ` @ ${formatTimestamp(shot.sec)}` : ""}
+        </span>
+        <span>{shot.label}</span>
+        {edit && <span className="mt-1 text-[12px] text-[#49adff]">Click to pick a frame, or drop an image here</span>}
+      </span>
+    );
+    if (!edit) return <span className="my-3 block">{inner}</span>;
+    return (
+      <span
+        role="button"
+        tabIndex={0}
+        title={shot.url ? "Click to change or remove this screenshot" : undefined}
+        onClick={(e) => {
+          e.stopPropagation();
+          edit.onSelectShot(shot.sectionKey, shot.markKey);
+        }}
+        onKeyDown={(e) => {
+          if (e.key !== "Enter") return;
+          e.stopPropagation();
+          edit.onSelectShot(shot.sectionKey, shot.markKey);
+        }}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const f = e.dataTransfer.files?.[0];
+          if (f?.type.startsWith("image/")) edit.onDropShot(shot.sectionKey, shot.markKey, f);
+        }}
+        className={cn(
+          "group relative my-3 block cursor-pointer rounded-[12px] outline-offset-2",
+          selected ? "outline-2 outline-[#49adff] outline-solid" : "hover:outline-2 hover:outline-[#49adff]/60 hover:outline-solid",
+        )}
+      >
+        {inner}
+        {shot.url && (
+          <span className="absolute right-2 top-2 rounded bg-white/90 px-1.5 py-0.5 text-[11px] text-[#222] opacity-0 shadow group-hover:opacity-100">Change</span>
+        )}
+      </span>
+    );
+  };
+
+  const rendered = (key: string, linkButtons: boolean) => {
     const text = md(key);
     if (!text) {
+      if (edit) return <p className="my-3 text-[14px] italic text-[#9ca3af]">Click to write this section{secByKey.get(key)?.hint ? `: ${secByKey.get(key)!.hint}` : ""}</p>;
       return showHints ? <p className="text-[13px] italic text-[#9ca3af]">{secByKey.get(key)?.hint || `(${key})`}</p> : null;
     }
     return (
@@ -80,7 +174,14 @@ export function BeehiivPreview({
             );
           },
           a: ({ children, href }) => (
-            <a href={href} target="_blank" rel="noreferrer" className="underline" style={{ color: linkButtons ? "inherit" : "#3e81de" }}>
+            <a
+              href={href}
+              target="_blank"
+              rel="noreferrer"
+              className="underline"
+              style={{ color: linkButtons ? "inherit" : "#3e81de" }}
+              onClick={edit ? (e) => e.preventDefault() : undefined}
+            >
               {children}
             </a>
           ),
@@ -92,13 +193,8 @@ export function BeehiivPreview({
           li: ({ children }) => <li className="my-1">{children}</li>,
           img: ({ src, alt }) => {
             if (alt?.startsWith(SHOT)) {
-              const [ts, label] = alt.slice(SHOT.length).split("|");
-              return (
-                <span className="my-3 flex w-full flex-col items-center justify-center gap-0.5 rounded-[10px] py-6 border-2 border-dashed border-[#c7d2dc] bg-[#f7fafc] px-6 text-center text-[13px] text-[#6b7280]">
-                  <span className="font-semibold">Screenshot{ts ? ` @ ${ts}` : ""}</span>
-                  <span>{label}</span>
-                </span>
-              );
+              const shot = shots[Number(alt.slice(SHOT.length))];
+              return shot ? shotBlock(shot) : null;
             }
             // eslint-disable-next-line @next/next/no-img-element
             return <img src={typeof src === "string" ? src : undefined} alt={alt ?? ""} className="my-3 block w-full rounded-[10px]" />;
@@ -107,6 +203,47 @@ export function BeehiivPreview({
       >
         {text}
       </ReactMarkdown>
+    );
+  };
+
+  const body = (key: string, linkButtons: boolean) => {
+    if (!edit) return rendered(key, linkButtons);
+    const isSponsor = secByKey.get(key)?.kind === "sponsor";
+    const regenerating = edit.regenerating.includes(key);
+    if (edit.editingSection === key && !isSponsor && !regenerating) {
+      return (
+        <textarea
+          autoFocus
+          value={byKey.get(key) ?? ""}
+          onChange={(e) => edit.onChangeSection(key, e.target.value)}
+          onBlur={edit.onDoneEditing}
+          onClick={(e) => e.stopPropagation()}
+          className="-mx-2 my-2 block min-h-24 w-[calc(100%+1rem)] resize-none rounded-md bg-white px-2 py-1.5 text-[15px] leading-[1.6] text-[#222222] outline-2 outline-[#49adff] outline-solid [field-sizing:content]"
+        />
+      );
+    }
+    const selected = edit.selected === key;
+    return (
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => edit.onSelectSection(key)}
+        onKeyDown={(e) => e.key === "Enter" && e.target === e.currentTarget && edit.onSelectSection(key)}
+        title={isSponsor ? "Click to edit the sponsor section" : "Click to edit"}
+        className={cn(
+          "relative -mx-2 rounded-md px-2",
+          isSponsor ? "cursor-pointer" : "cursor-text",
+          selected ? "outline-2 outline-[#49adff] outline-solid" : "hover:outline-2 hover:outline-dashed hover:outline-[#49adff]/60",
+          regenerating && "pointer-events-none opacity-50",
+        )}
+      >
+        {regenerating && (
+          <span className="absolute right-2 top-2 z-10 flex items-center gap-1 rounded bg-white px-1.5 py-0.5 text-[11px] shadow">
+            <Loader2 className="size-3 animate-spin" /> Rewriting…
+          </span>
+        )}
+        {rendered(key, linkButtons)}
+      </div>
     );
   };
 
