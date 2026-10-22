@@ -17,11 +17,8 @@ describe("newsletter schedules", () => {
   it("schedules Sunday Breakfast Sun, Daily Seinfeld Tue/Thu, and one Futurepedia Newsletter (queue-triggered) for both channels", () => {
     expect(formatConfigFor("Sunday Breakfast").schedule?.days).toEqual([0]);
     expect(formatConfigFor("Daily Seinfeld").schedule?.days).toEqual([2, 4]);
-    // The one-format newsletter plus the two retired pilots share the history group.
-    expect(groupFormatNames("futurepedia-howto")).toEqual(expect.arrayContaining(["futurepedia newsletter", "how-to newsletter - futurepedia (pilot)"]));
-    const primaries = scheduledPrimaries().map((p) => p.formatName);
-    expect(primaries).toContain("futurepedia newsletter");
-    expect(primaries).not.toContain("how-to newsletter - futurepedia (pilot)");
+    expect(groupFormatNames("futurepedia-howto")).toEqual(["futurepedia newsletter"]);
+    expect(scheduledPrimaries().map((p) => p.formatName)).toContain("futurepedia newsletter");
   });
 
   it("keys a slot by group + date and gives roundups the week before the send date", () => {

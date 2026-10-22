@@ -32,8 +32,6 @@ describe("formatConfigFor", () => {
     expect(voiceForChannel("Futurepedia Newsletter", "futurepedia_io")).toEqual({ voice: "kevin", voiceName: "Kevin" });
     expect(voiceForChannel("Futurepedia Newsletter", "skillleapai")).toEqual({ voice: "saj", voiceName: "Saj" });
     expect(voiceForChannel("Futurepedia Newsletter", "Howfinity")).toBeNull();
-    // The retired pilots no longer queue editions.
-    expect(formatConfigFor("How-To Newsletter - Skill Leap (pilot)").schedule?.trigger).toBeUndefined();
   });
 
   it("keeps Sunday Breakfast a roundup whose Special falls back to the agent, and defaults others to plain roundups", () => {

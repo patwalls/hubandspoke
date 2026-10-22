@@ -7,8 +7,8 @@ import { createNewsletterDraft, listFormatVideos } from "./queries";
 
 // Format behavior is keyed by name (format-config.ts), so the test uses the
 // real How-To name under a throwaway brand: the (brand, name) unique index
-// then never clashes with the real pilot format.
-const HOW_TO = "How-To Newsletter - Futurepedia (pilot)";
+// then never clashes with the real format.
+const HOW_TO = "Futurepedia Newsletter";
 
 /** The futurepedia_io YouTube account the How-To config points at (created on a fresh DB). */
 async function futurepediaChannelId(): Promise<string> {

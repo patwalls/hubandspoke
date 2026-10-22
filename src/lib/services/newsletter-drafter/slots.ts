@@ -75,8 +75,7 @@ async function loadGroupFormats(group: string): Promise<GroupFormat[]> {
 
 /**
  * account id → the format a video from it sits on. The group's primary format
- * wins when several formats share a channel (the one-format newsletter over
- * the retired per-channel pilots).
+ * wins when several formats share a channel.
  */
 function formatsByAccount(groupFormats: GroupFormat[]): Map<string, { formatId: string; formatName: string; handle: string }> {
   const out = new Map<string, { formatId: string; formatName: string; handle: string }>();

@@ -39,12 +39,13 @@ describe("beehiiv draft request", () => {
     expect(toolFromWhy("nothing")).toBeNull();
   });
 
-  const template = DEFAULT_TEMPLATES["how-to newsletter - skill leap (pilot)"];
+  const template = DEFAULT_TEMPLATES["futurepedia newsletter"];
   const body = buildBeehiivDraftRequest({
     template,
     subject: "Turn Meeting Notes Into a Plan",
     previewText: "A 10-minute workflow",
     sendDate: "2026-10-27",
+    author: "saj",
     sections: [
       { key: "intro", markdown: "Hey friends\n- Saj\n[Grab our free guide →](https://g.com)" },
       { key: "article", markdown: "## Turn Notes Into a Plan\n![thumb](https://img.youtube.com/vi/x/maxresdefault.jpg)\nOne line." },
@@ -93,7 +94,7 @@ describe("beehiiv draft request", () => {
   });
 
   it("builds from the template's layout: relabel a card, move a section, drop the poll", () => {
-    const base = DEFAULT_TEMPLATES["how-to newsletter - skill leap (pilot)"];
+    const base = DEFAULT_TEMPLATES["futurepedia newsletter"];
     const layout = base.beehiiv!.layout;
     const edited = {
       ...base,
@@ -135,7 +136,7 @@ describe("beehiiv draft request", () => {
   });
 
   it("puts a picked screenshot in as an image where its placeholder was; unpicked ones stay text", () => {
-    const template = DEFAULT_TEMPLATES["how-to newsletter - skill leap (pilot)"];
+    const template = DEFAULT_TEMPLATES["futurepedia newsletter"];
     const out = buildBeehiivDraftRequest({
       template,
       subject: "S",

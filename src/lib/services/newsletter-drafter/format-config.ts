@@ -106,22 +106,6 @@ const FORMAT_CONFIG: Record<string, NewsletterFormatConfig> = {
     model: "claude-sonnet-5-5",
     promo: { projectGid: FUTUREPEDIA_PROMO_PROJECT, section: "Native Ad", label: "Free Resource", onMiss: "placeholder" },
   },
-  // The two pilot formats (one per channel), kept until they're deleted so
-  // their existing editions still open. They no longer make new editions.
-  "how-to newsletter - futurepedia (pilot)": {
-    kind: "single_video",
-    sources: [FUTUREPEDIA_SOURCES[0]],
-    schedule: { group: "futurepedia-howto", days: [2, 5] },
-    model: "claude-sonnet-5-5",
-    promo: { projectGid: FUTUREPEDIA_PROMO_PROJECT, section: "Native Ad", label: "Free Resource", onMiss: "placeholder" },
-  },
-  "how-to newsletter - skill leap (pilot)": {
-    kind: "single_video",
-    sources: [FUTUREPEDIA_SOURCES[1]],
-    schedule: { group: "futurepedia-howto", days: [2, 5] },
-    model: "claude-sonnet-5-5",
-    promo: { projectGid: FUTUREPEDIA_PROMO_PROJECT, section: "Native Ad", label: "Free Resource", onMiss: "placeholder" },
-  },
 };
 
 const ROUNDUP: NewsletterFormatConfig = { kind: "roundup" };
