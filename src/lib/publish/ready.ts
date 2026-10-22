@@ -43,20 +43,25 @@ export interface ReadyToPublishItem {
 const READY_LIMIT = 200;
 const DOWNLOAD_TTL_SECONDS = 60 * 60;
 
-function readyWhere(brand: string) {
+function readyWhere(brand: string, pillarId?: string | null) {
   return and(
     eq(productionItems.brand, brand),
     eq(productionItems.status, "Ready To Publish"),
     isNull(productionItems.deletedAt),
+    pillarId ? eq(productionItems.pillarContentItemId, pillarId) : undefined,
   );
 }
 
-/** The number on the Publish tab. */
-export async function countReadyToPublish(brand: string): Promise<number> {
+/** The number on the Publish tab; with `pillarId`, just that video's posts
+ *  (the content page's "paste them all on the Publish tab" link). */
+export async function countReadyToPublish(
+  brand: string,
+  pillarId?: string | null,
+): Promise<number> {
   const [row] = await db
     .select({ n: count() })
     .from(productionItems)
-    .where(readyWhere(brand));
+    .where(readyWhere(brand, pillarId));
   return Number(row?.n ?? 0);
 }
 

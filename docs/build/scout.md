@@ -4,6 +4,43 @@ The `/build` loop's notebook: what people actually do, candidates considered (bu
 why), and what other tools ship. Newest first. Never re-propose something listed here without
 new evidence.
 
+## 2026-10-22 — lap 3 (project lap: publish-day, milestone 4 second half)
+
+**Learned** (1 day of usage)
+- The curator opened the Publish tab twice for about 10 s (23:12, 23:32 UTC). In between, they
+  cross-posted one pillar to 6 platforms from the content page's Cross-post tab, then pasted 5
+  live links back one at a time: production → item page → Publish dialog → production, about
+  1.5 minutes each. No `publish:link-pasted` marks yet. The new tab never met them where they
+  publish: right after cross-posting, on the content page.
+- 3 people opened Publish (curator, Sam, Pat); only Sam clicked a What's new card. Content page
+  (26 opens, 4 people) and production (22) are where the work happens.
+- Pipeline: 229 items created and 28 clips rendered so far this week (Mon–Wed), on pace with last
+  week. No failed renders. Sentry has nothing user-facing (an info-level overhead event and the
+  boot lock warning). Slow: `/api/warm` p95 20 s (cold starts, ops loop) and one 10 s draft POST.
+- Pat's words (21 days): mostly newsletters, background removal and the loops. He also mentioned
+  a line-graph request that went missing (10-20), but there's no detail to build from.
+
+**Did the last features land?** `publish-screen` / `publish-grouped-live`: opened by 3 people,
+links pasted by nobody. The reason is the way in, not the screen (above). This lap builds that.
+
+**Outward**
+- Publer (reminder publishing): tapping the reminder's "Open in app" marks the post as posted on its
+  own; skip that, and you mark it by hand from the calendar or post list. The record is kept at the
+  moment of posting, from where you post.
+  https://publer.com/help/en/article/how-to-mark-posts-as-successfully-posted-qxmpvs/
+- Planable: "marked as published" is a per-post status flag (a flag icon) for posts that went out
+  outside Planable. You set it on the post itself, not from a separate list.
+  https://help.planable.io/hc/en-us/articles/21715457342492-Post-status
+- Lesson: a separate publish list only gets used if it's one click from where the posting
+  happens. For us, that's the content page right after cross-posting.
+
+**Candidates**
+- → building: **Way in to Publish** from the Cross-post tab and the Publish dialog, landing on
+  that video's posts. source: usage (the curator's 5 one-at-a-time publishes on 2026-10-21)
+- The paste box right on the Cross-post tab's rows (no page change). source: usage. Next lap,
+  if the way in isn't taken.
+- Curator keyboard triage of the cross-post queue (still open). source: usage
+
 ## 2026-10-21 — lap 1 (project lap: publish-day, milestone 1)
 
 **Learned**
@@ -62,6 +99,8 @@ week of Oct 12). Cross-posts steady at 60–80/week.
   source: usage
 
 ## Built
+- 2026-10-22 Way in to Publish from the content page (project publish-day milestone 4). Card
+  `2026-10-22-publish-way-in`.
 - 2026-10-21 Publish screen (`/[brand]/publish`, project publish-day milestone 1). Card
   `2026-10-21-publish-screen`.
 - 2026-10-21 What's new pop-up + usage tracking (interactive session, not the loop) — the

@@ -39,3 +39,18 @@ export function groupByPillar<
   }
   return out;
 }
+
+/**
+ * Arriving from a content page (`/[brand]/publish?focus=<itemId>`): the group
+ * holding that post moves to the top, so the video someone just cross-posted
+ * is the first thing on the screen. Unknown or missing id → order unchanged.
+ */
+export function focusGroupFirst<T extends { id: string }>(
+  groups: PillarGroup<T>[],
+  focusId: string | null | undefined,
+): PillarGroup<T>[] {
+  if (!focusId) return groups;
+  const at = groups.findIndex((g) => g.items.some((i) => i.id === focusId));
+  if (at <= 0) return groups;
+  return [groups[at], ...groups.slice(0, at), ...groups.slice(at + 1)];
+}
