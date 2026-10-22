@@ -5,6 +5,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { TriageDialog } from "./triage-dialog";
 import { NewsletterItemEditor } from "./newsletter-item-editor";
+import { NewsletterDraftBadge } from "./newsletter-draft-badge";
 import { useFeatureFlags } from "@/components/clip-editor/use-feature-flags";
 import { ClipTriageDialog } from "./clip-triage-dialog";
 import { ideaNeighbours, type IdeaNeighbours } from "./idea-nav";
@@ -289,9 +290,10 @@ export function IdeaQueueTable({
             <colgroup>
               <col className="w-[36px]" />
               <col className="w-[176px]" />
-              <col className="w-[340px]" />
+              <col className="w-[284px]" />
               <col className="w-[200px]" />
-              <col className="w-[104px]" />
+              {/* Wide enough for "Pillar Publish Date ↓" on one line (it overflowed into Format at 104px). */}
+              <col className="w-[160px]" />
               <col className="w-[184px]" />
               <col className="w-[88px]" />
               <col className="w-[88px]" />
@@ -653,6 +655,8 @@ function IdeaQueueRow({
           </button>
           {/* Renders nothing without the `clipEditor` feature flag. */}
           <ClipDraftBadge clipIdeaId={item.sourceClipIdeaId} />
+          {/* A drafted newsletter edition (flag `newsletterDrafter`). */}
+          <NewsletterDraftBadge itemId={item.id} postType={item.postType} />
         </div>
       </td>
       <td className="px-3 py-2 text-sm text-muted-foreground max-w-[220px]">

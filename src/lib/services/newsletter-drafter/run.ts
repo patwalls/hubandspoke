@@ -9,7 +9,6 @@ import { brands, formats, newsletterDrafts, newsletterIssueHistory } from "@/lib
 import { newsletterModel, NewsletterCancelledError, runNewsletterAgent, storyKeyOf, type NewsletterSubmission } from "./agent";
 import { blockedKeys, loadUsage, toStoredSources, usageGroupFor, withInferredSources } from "./usage";
 import { buildStoryPlan, withPlanDates } from "./story-plan";
-import { advanceNewsletterItem } from "./queue-status";
 import { composeIssue, templateFor, type NewsletterSection } from "@/lib/newsletter-template";
 import { formatConfigFor, voiceForChannel } from "./format-config";
 import { findSpecial } from "./promo";
@@ -208,7 +207,6 @@ export async function runNewsletterDraft(
       .returning({ id: newsletterDrafts.id });
     if (!saved.length) return { ok: false, skipped: "cancelled" };
     await autoPickScreenshotsSafely(row.id, opts.log);
-    await advanceNewsletterItem(row.id, "Review");
     return { ok: true, turns: result.turns, sources: sources.length };
   } catch (err) {
     if (err instanceof NewsletterCancelledError) return { ok: false, skipped: "cancelled" };

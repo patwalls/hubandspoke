@@ -79,6 +79,8 @@ interface VideoOption {
 }
 
 const POLL_MS = 4_000;
+/** Autosave this long after the last edit. */
+const AUTOSAVE_MS = 1200;
 
 /** Same sections, field by field (the server's copy comes back with its fields in another order). */
 function sameSections(a: NewsletterSection[], b: NewsletterSection[]): boolean {
@@ -133,6 +135,13 @@ export function NewsletterEditorDialog({
     };
   }, [open, draftId]);
 
+  // Closing (clicking out, Esc, ×, "Save draft & close") saves unsaved edits first; a failed save keeps it open.
+  const flushRef = useRef<() => Promise<boolean>>(() => Promise.resolve(true));
+  const requestOpenChange = (o: boolean) => {
+    if (o) return onOpenChange(true);
+    void flushRef.current().then((ok) => ok && onOpenChange(false));
+  };
+
   const busy =
     draft?.status === "drafting" || (draft?.regenerating.length ?? 0) > 0 || draft?.hubspotStatus === "pending" || draft?.beehiivStatus === "pending";
   useEffect(() => {
@@ -145,7 +154,7 @@ export function NewsletterEditorDialog({
   }, [open, busy, load, onChanged]);
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={requestOpenChange}>
       <DialogContent className="flex h-[94vh] w-[97vw] max-w-[97vw] flex-col gap-0 overflow-hidden p-0 sm:max-w-[min(1500px,97vw)]">
         <DialogTitle className="sr-only">Newsletter editor</DialogTitle>
         {!draft ? (
@@ -153,7 +162,15 @@ export function NewsletterEditorDialog({
             {loadError ?? <Loader2 className="size-5 animate-spin" />}
           </div>
         ) : (
-          <Workspace key={draft.id} draft={draft} setDraft={setDraft} reload={load} onChanged={onChanged} />
+          <Workspace
+            key={draft.id}
+            draft={draft}
+            setDraft={setDraft}
+            reload={load}
+            onChanged={onChanged}
+            flushRef={flushRef}
+            onClose={() => requestOpenChange(false)}
+          />
         )}
       </DialogContent>
     </Dialog>
@@ -165,11 +182,16 @@ function Workspace({
   setDraft,
   reload,
   onChanged,
+  flushRef,
+  onClose,
 }: {
   draft: EditorDraft;
   setDraft: (d: EditorDraft) => void;
   reload: () => Promise<EditorDraft | null>;
   onChanged: () => void;
+  /** Set to "save if anything's unsaved", run before the dialog closes. */
+  flushRef: React.MutableRefObject<() => Promise<boolean>>;
+  onClose: () => void;
 }) {
   const [subject, setSubject] = useState(draft.subject ?? "");
   const [previewText, setPreviewText] = useState(draft.previewText ?? "");
@@ -223,6 +245,15 @@ function Workspace({
     (!draft.template && body !== (draft.bodyMarkdown ?? "")) ||
     specialCopy !== (draft.specialCopy ?? "") ||
     !sameSections(sections, draft.sections);
+
+  // Autosave, like the design editor: a moment after the last change.
+  useEffect(() => {
+    if (!dirty || draft.status !== "ready") return;
+    const t = setTimeout(() => void save(), AUTOSAVE_MS);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-arm on every edit; save() reads the latest state
+  }, [dirty, draft.status, subject, previewText, sections, body, specialCopy]);
+  flushRef.current = () => (dirty ? save() : saveChain.current);
 
   const preview = useMemo(() => {
     if (!draft.template) return body;
@@ -325,7 +356,7 @@ function Workspace({
         </span>
       </div>
       <div className="flex flex-wrap items-center gap-2 pr-8">
-        {message && <span className="text-xs text-muted-foreground">{message}</span>}
+        {saving ? <span className="text-xs text-muted-foreground">Saving…</span> : message && <span className="text-xs text-muted-foreground">{message}</span>}
         {draft.status === "ready" && (
           <>
             {draft.template && (
@@ -338,9 +369,14 @@ function Workspace({
               {busyAction === "redraft" && <Loader2 className="animate-spin" />}
               Redraft
             </Button>
-            <Button variant="outline" size="sm" onClick={() => void save()} disabled={!dirty || saving}>
-              {saving && <Loader2 className="animate-spin" />}
-              Save
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onClose}
+              disabled={saving}
+              title="Saves your edits and closes. The newsletter stays in the queue as a Draft until you create the email draft."
+            >
+              Save draft &amp; close
             </Button>
             {draft.template?.beehiiv ? (
               draft.beehiivPostUrl ? (
@@ -352,10 +388,10 @@ function Workspace({
                   size="sm"
                   onClick={pushToBeehiiv}
                   disabled={busyAction !== null || draft.beehiivStatus === "pending"}
-                  title="Creates an unsent DRAFT post in beehiiv from Kevin's or Saj's template. Never publishes or schedules."
+                  title="Creates an unsent DRAFT post in beehiiv and moves this newsletter out of the queue into production. Never publishes or schedules."
                 >
                   {(busyAction === "beehiiv" || draft.beehiivStatus === "pending") && <Loader2 className="animate-spin" />}
-                  Create beehiiv draft
+                  Create email draft in beehiiv
                 </Button>
               )
             ) : draft.hubspotEmailUrl ? (
@@ -363,9 +399,14 @@ function Workspace({
                 Open in HubSpot <ExternalLink />
               </a>
             ) : (
-              <Button size="sm" onClick={pushToHubspot} disabled={busyAction !== null || draft.hubspotStatus === "pending"}>
+              <Button
+                size="sm"
+                onClick={pushToHubspot}
+                disabled={busyAction !== null || draft.hubspotStatus === "pending"}
+                title="Creates an unsent DRAFT email in HubSpot and moves this newsletter out of the queue into production. Never sends or schedules."
+              >
                 {(busyAction === "hubspot" || draft.hubspotStatus === "pending") && <Loader2 className="animate-spin" />}
-                Create email draft
+                Create email draft in HubSpot
               </Button>
             )}
           </>

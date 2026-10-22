@@ -1,9 +1,10 @@
-// A newsletter edition's queue item follows the edition through the same
-// pipeline stages every format uses (both brands have them):
-//   Idea → Assigned (Draft clicked) → Review (draft written) → Ready To Publish
-//   (pushed to HubSpot / beehiiv as an unsent draft) → Published (later: send
-//   detection). Only ever moves FORWARD, and never touches an item someone set
-//   by hand to On Hold / Scheduled / Published / Killed (or any custom stage).
+// A newsletter edition's queue item, like a design (2026-10-22): it stays in
+// the queue (Idea, shown with a "Draft" badge once drafted) however often it's
+// drafted, edited and closed, and moves to production — Ready To Publish —
+// only when its unsent email draft is created in HubSpot / beehiiv (the
+// design editor's "Save & export"). Later: Published by send detection. Only
+// ever moves FORWARD, and never touches an item someone set by hand to On
+// Hold / Scheduled / Published / Killed (or any custom stage).
 
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";

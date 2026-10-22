@@ -10,6 +10,7 @@ import { Loader2, Mail } from "lucide-react";
 import { useFeatureFlags } from "@/components/clip-editor/use-feature-flags";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { NewsletterEditorDialog } from "@/components/dashboard/newsletter-editor-dialog";
+import { refreshNewsletterDraftBadges } from "@/components/dashboard/newsletter-draft-badge";
 
 export function NewsletterItemEditor({
   itemId,
@@ -24,14 +25,16 @@ export function NewsletterItemEditor({
 }) {
   const [draftId, setDraftId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // Hold the caller's refresh until the editor closes: drafting moves the item
-  // Idea → Assigned, and refreshing the queue mid-edit would drop its row (and
-  // this editor with it). Refresh once, on close, if anything changed.
+  // Hold the caller's refresh until the editor closes: creating the email
+  // draft moves the item out of the queue (→ Ready To Publish), and refreshing
+  // mid-edit would drop its row (and this editor with it). Refresh once, on
+  // close, if anything changed — the queue's Draft badges too.
   const changed = useRef(false);
   const close = (o: boolean) => {
     onOpenChange(o);
     if (!o && changed.current) {
       changed.current = false;
+      refreshNewsletterDraftBadges();
       onDone();
     }
   };
