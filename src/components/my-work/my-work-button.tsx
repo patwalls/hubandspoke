@@ -24,20 +24,18 @@ export function MyWorkButton() {
     const now = Date.now();
     if (now - lastFetch.current < MIN_REFRESH_MS) return;
     lastFetch.current = now;
-    let cancelled = false;
-    (async () => {
+    // No cancel-on-cleanup: with the throttle, a cancelled fetch (React's dev
+    // double-run, a quick second navigation) would leave the badge empty.
+    void (async () => {
       try {
         const res = await fetch("/api/my-work/count");
         if (!res.ok) return;
         const json = (await res.json()) as { count?: number };
-        if (!cancelled) setCount(Number(json?.count ?? 0));
+        setCount(Number(json?.count ?? 0));
       } catch {
         // A missing badge is fine; never break the nav over it.
       }
     })();
-    return () => {
-      cancelled = true;
-    };
   }, [pathname]);
 
   const active = pathname === "/my-work";
