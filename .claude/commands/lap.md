@@ -259,6 +259,9 @@ account misconfiguration, ambiguous root cause, repeated failures):
   --severity warn --title "…" --body-file <evidence.md>
 ```
 
+`--body-file` must be an **absolute** path (`$TMPDIR/evidence.md`, not `evidence.md`): the action runs
+on the MacBook Pro's broker, and `ship run` carries only absolute-path files across (cockpit #243).
+
 The **fingerprint is the contract** — a stable key describing the condition, not the
 moment (`sync-error:linkedin:company-page-url`, not `sync-error-2026-08-09`). Same
 condition next lap must produce the same string, or dedup fails and Pat gets spammed.
