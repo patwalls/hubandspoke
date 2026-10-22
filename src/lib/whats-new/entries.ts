@@ -29,6 +29,17 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-10-22-my-work-row-actions",
+    shippedAt: "2026-10-22T14:00:00Z",
+    kind: "feature",
+    title: "Approve, send back or send to review right from My Work",
+    body:
+      "Each post in My Work now has its next step as a button: Send to review on your assigned posts, Approve or " +
+      "Send back on posts to review (add a note and it lands as a comment for the editor). Or use the keys: j/k to move, r, a, b to act.",
+    href: "/my-work",
+    screen: "/my-work",
+  },
+  {
     id: "2026-10-22-my-work-waiting",
     shippedAt: "2026-10-22T09:39:00Z",
     kind: "feature",

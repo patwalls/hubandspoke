@@ -8,6 +8,9 @@ import { getMyWork } from "@/lib/my-work/queries";
 import { cn } from "@/lib/utils";
 import { statusClassWithPalette } from "@/lib/badge-colors";
 import { getAllStatusPalettes } from "@/lib/db/brand-statuses";
+import { rowActionsFor, type MyWorkSection } from "@/lib/my-work/actions";
+import { RowActions } from "@/components/my-work/row-actions";
+import { MyWorkKeys } from "@/components/my-work/my-work-keys";
 
 export const dynamic = "force-dynamic";
 
@@ -85,12 +88,14 @@ export default async function MyWorkPage() {
         <p className="text-xs text-muted-foreground mt-0.5">
           Everything you&apos;re on the hook for, across every brand.
         </p>
+        <MyWorkKeys />
       </div>
 
       <Section
         title="Your turn"
         subtitle="Assigned to you to edit, or ready for you to post."
         rows={yourTurn}
+        section="your-turn"
         emptyText="Nothing in your queue. Nice."
         userId={userId}
         palettes={palettes}
@@ -101,6 +106,7 @@ export default async function MyWorkPage() {
           title="To review"
           subtitle="In Review on brands you've approved posts for this month. Oldest first."
           rows={toReview}
+          section="to-review"
           emptyText="Nothing to review."
           userId={userId}
           palettes={palettes}
@@ -112,6 +118,7 @@ export default async function MyWorkPage() {
         title="Waiting on others"
         subtitle="Assigned to you, but the next step is someone else's (review, on hold, scheduled)."
         rows={waitingOnOthers}
+        section="waiting"
         emptyText="Nothing here yet."
         userId={userId}
         palettes={palettes}
@@ -181,6 +188,7 @@ function Section({
   title,
   subtitle,
   rows,
+  section,
   emptyText,
   userId,
   palettes,
@@ -189,6 +197,7 @@ function Section({
   title: string;
   subtitle: string;
   rows: Row[];
+  section: MyWorkSection;
   emptyText: string;
   userId: string;
   palettes: ReadonlyMap<string, ReadonlyMap<string, string>>;
@@ -234,13 +243,15 @@ function Section({
                 <th className="px-3 py-2 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
                   Status
                 </th>
+                {section !== "waiting" && <th className="px-3 py-2" />}
               </tr>
             </thead>
             <tbody>
               {rows.map((r) => (
                 <tr
                   key={r.id}
-                  className="border-b border-border/50 hover:bg-accent/30 transition-colors"
+                  data-my-work-row
+                  className="border-b border-border/50 hover:bg-accent/30 transition-colors data-[focused]:bg-accent/50 data-[focused]:outline data-[focused]:outline-1 data-[focused]:outline-primary/40"
                 >
                   <td className="px-3 py-2">
                     <Link
@@ -277,6 +288,16 @@ function Section({
                       <span className="text-muted-foreground">—</span>
                     )}
                   </td>
+                  {section !== "waiting" && (
+                    <td className="px-3 py-2 text-right">
+                      <RowActions
+                        id={r.id}
+                        brand={r.brand}
+                        title={r.title || "(Untitled)"}
+                        actions={rowActionsFor(section, r.status, palettes.get(r.brand))}
+                      />
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

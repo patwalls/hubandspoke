@@ -4,6 +4,36 @@ The `/build` loop's notebook: what people actually do, candidates considered (bu
 why), and what other tools ship. Newest first. Never re-propose something listed here without
 new evidence.
 
+## 2026-10-22 — lap 6 (project lap: my-day, milestone 2)
+
+**Learned** (2 days of usage)
+- Since My Work shipped (09:44 UTC) one person opened the app (the home page, 7 times) and nobody
+  opened `/my-work` yet; the curator and the status-only editors haven't been in. Too early.
+- The curator is still the whole pipeline (3,145 actions / 30 days); this week's throughput is on
+  pace (235 items, 30 clips Mon–Wed, 13 designs, the most yet). No failed renders.
+- Sentry: nothing new people hit (an info-level HTTP overhead on /queue, 2 users); slow p95s are
+  cold starts on /api/warm and the queues — ops loop.
+- Every brand has Assigned / Review / Ready To Publish, so row actions apply everywhere.
+
+**Did the last features land?** `my-work-waiting`: 0 opens in 4 h — the people it is for (two
+editors, two reviewers) act every few days, so the moment hasn't come. `clip-editor-next-idea`,
+`publish-way-in`: still no marks; the curator hasn't been in since.
+
+**Outward** (short; the Linear/Workfront notes from lap 5 still hold)
+- Linear Triage: a single key per decision on the focused row (1 accept, 3 decline), j/k to move.
+  https://linear.app/docs/triage — the model for the My Work keys.
+- Frame.io review links (legacy): the reviewer sets Approved / In Progress / Needs Review in one
+  click from the review page and the project is notified.
+  https://help.frame.io/en/articles/1161479-review-links-explained-for-clients — a decision is
+  one click where you look at the work; our send-back note is optional (the status-only
+  reviewers rarely comment today).
+
+**Candidates**
+- → building: **Act from the My Work row** (my-day M2). source: usage (status-only people move
+  one item at a time through item pages)
+- What changed since you last looked (my-day M3). source: usage (ignored inbox)
+- The paste box on the Cross-post tab rows (still open). source: usage
+
 ## 2026-10-22 — lap 5 (project lap: my-day, milestone 1; publish-day closed to measuring)
 
 **Learned** (2 days of usage)
@@ -170,6 +200,8 @@ week of Oct 12). Cross-posts steady at 60–80/week.
   source: usage
 
 ## Built
+- 2026-10-22 Approve / Send back / Send to review from My Work rows + keys (project my-day
+  milestone 2). Card `2026-10-22-my-work-row-actions`.
 - 2026-10-22 My Work in the header with a count + To review (project my-day milestone 1).
   Card `2026-10-22-my-work-waiting`.
 - 2026-10-22 Previous / Next idea in the clip editor (polish). Card
