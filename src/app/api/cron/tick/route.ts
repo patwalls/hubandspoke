@@ -27,6 +27,7 @@ const SCHEDULED_TASK_NAMES: ReadonlyArray<keyof TaskPayloads> = [
   "youtube-download-sweep",
   "yt-archive-watch",
   "newsletter-history-sync",
+  "newsletter-send-sweep",
 ];
 
 export async function GET(request: NextRequest) {

@@ -48,5 +48,6 @@ export const CRONTAB = `
 45 * * * * yt-archive-watch
 5 12 * * * newsletter-history-sync
 10 */2 * * * newsletter-slots-sweep
+20 * * * * newsletter-send-sweep
 30 15 * * * clip-idea-drought-watch
 `.trim();

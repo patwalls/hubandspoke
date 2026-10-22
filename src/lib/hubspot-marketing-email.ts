@@ -170,6 +170,11 @@ export async function createDraftEmailFromTemplate(args: {
   return { id: String(clone.id), editUrl: emailEditUrl(String(clone.id)) };
 }
 
+/** One email, for its send state (`state`, `publishDate`). The same GET the push already uses. */
+export async function getHubspotEmail(emailId: string): Promise<HubspotEmail> {
+  return hubspotFetch<HubspotEmail>(`/marketing/v3/emails/${emailId}`, { method: "GET" });
+}
+
 export interface HubspotEmailSummary extends HubspotEmail {
   name?: string;
   subject?: string;

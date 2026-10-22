@@ -12,6 +12,7 @@
 //   - aged past MATCH_ABANDON_HOURS with no match → stop matching entirely
 //     (assume it was cancelled / will never publish)
 
+import { notNewsletter } from "./scope";
 import type Anthropic from "@anthropic-ai/sdk";
 import { and, eq, gte, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
@@ -56,6 +57,7 @@ export async function selectAccountsForScheduleSync(
     .where(
       and(
         eq(productionItems.status, "Scheduled"),
+        notNewsletter,
         isNotNull(productionItems.accountId),
         isNull(productionItems.deletedAt),
         // Keep re-syncing an account even for items already flagged
@@ -178,6 +180,7 @@ export async function runScheduleReconcile(opts?: {
     .where(
       and(
         eq(productionItems.status, "Scheduled"),
+        notNewsletter,
         isNotNull(productionItems.scheduledAt),
         isNotNull(productionItems.accountId),
         isNull(productionItems.deletedAt),
@@ -365,6 +368,7 @@ export async function runScheduleNodateReconcile(opts?: {
     .where(
       and(
         eq(productionItems.status, "Scheduled"),
+        notNewsletter,
         eq(productionItems.scheduledNoDate, true),
         isNotNull(productionItems.scheduledAt),
         isNotNull(productionItems.accountId),

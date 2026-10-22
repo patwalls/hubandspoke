@@ -3,6 +3,7 @@
 // `src/jobs/crontab.ts`. Zero logic change — the point of Phase 2 is to move
 // scheduling off Heroku Scheduler and onto the worker dyno we already run.
 
+import { notNewsletter } from "@/lib/services/schedule-reconcile/scope";
 import type { Task } from "graphile-worker";
 import { syncFromNotion } from "@/lib/services/notion-sync";
 import { syncPerformanceData } from "@/lib/services/performance-decay";
@@ -305,6 +306,7 @@ export const scheduleNodateSweepTask: Task = async (_payload, helpers) => {
     .where(
       and(
         eq(productionItems.status, "Scheduled"),
+        notNewsletter,
         eq(productionItems.scheduledNoDate, true),
         isNotNull(productionItems.accountId),
         isNull(productionItems.deletedAt),

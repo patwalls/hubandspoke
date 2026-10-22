@@ -31,6 +31,7 @@ import {
   type NewsletterSectionRegeneratePayload,
 } from "./newsletter-section-regenerate";
 import { newsletterSlotsSweepTask } from "./newsletter-slots-sweep";
+import { newsletterSendSweepTask, newsletterSendCheckTask, type NewsletterSendCheckPayload } from "./newsletter-send-sweep";
 import { newsletterHistorySyncTask, type NewsletterHistorySyncPayload } from "./newsletter-history-sync";
 import {
   hubspotNewsletterCreateDraftTask,
@@ -148,6 +149,8 @@ export interface TaskPayloads {
   "newsletter-draft": NewsletterDraftPayload;
   "newsletter-section-regenerate": NewsletterSectionRegeneratePayload;
   "newsletter-slots-sweep": Record<string, never>;
+  "newsletter-send-sweep": Record<string, never>;
+  "newsletter-send-check": NewsletterSendCheckPayload;
   "newsletter-history-sync": NewsletterHistorySyncPayload;
   "hubspot-newsletter-create-draft": HubspotNewsletterCreateDraftPayload;
   "beehiiv-newsletter-create-draft": BeehiivNewsletterCreateDraftPayload;
@@ -219,6 +222,8 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "newsletter-draft": newsletterDraftTask,
   "newsletter-section-regenerate": newsletterSectionRegenerateTask,
   "newsletter-slots-sweep": newsletterSlotsSweepTask,
+  "newsletter-send-sweep": newsletterSendSweepTask,
+  "newsletter-send-check": newsletterSendCheckTask,
   "newsletter-history-sync": newsletterHistorySyncTask,
   "hubspot-newsletter-create-draft": hubspotNewsletterCreateDraftTask,
   "beehiiv-newsletter-create-draft": beehiivNewsletterCreateDraftTask,

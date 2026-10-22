@@ -643,6 +643,22 @@ describe("selectAccountsForScheduleSync (targeted-freshness gate)", () => {
     expect(ids).not.toContain(acct.id);
   });
 
+  it("never syncs an account for a Scheduled newsletter (an email isn't a social post)", async () => {
+    const acct = await createTestAccount();
+    const now = new Date();
+    await createTestProductionItem({
+      accountId: acct.id,
+      status: "Scheduled",
+      postType: "newsletter",
+      scheduledAt: now,
+      expectedPublishAt: new Date(now.getTime() - HOUR),
+      publishedAt: null,
+      publishedDate: null,
+    });
+
+    expect(await selectAccountsForScheduleSync(now)).not.toContain(acct.id);
+  });
+
   it("includes an account whose pending item has no expected date, regardless of last sync", async () => {
     const acct = await createTestAccount();
     const now = new Date();
