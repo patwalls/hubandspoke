@@ -1,4 +1,4 @@
-Status: active
+Status: done — measuring (all 4 milestones shipped by 2026-10-22; read "Done when" weekly, reopen only with evidence)
 
 # Publish day — getting posts from Ready To Publish to Published without the busywork
 
