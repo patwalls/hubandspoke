@@ -40,6 +40,11 @@ test("My Work rows show new comments and send-backs", async ({ page }) => {
     const commentedId = await create(commented);
     await create(quiet);
 
+    // Creating them logged my own events at "now"; move them two days back so
+    // the seeded comments and send-back come after my last touch.
+    await sql`
+      UPDATE content_events SET created_at = now() - interval '2 days'
+      WHERE user_id = ${me} AND content_item_id IN (${sentBackId}, ${commentedId})`;
     // I sent it to review yesterday; the reviewer sent it back with a note.
     await sql`
       INSERT INTO content_events (content_item_id, user_id, event_type, payload, created_at) VALUES
