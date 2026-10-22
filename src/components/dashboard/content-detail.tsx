@@ -126,6 +126,7 @@ import { renderInstructions } from "@/lib/utils/markdown";
 import { recordVisit } from "@/lib/hooks/use-recent-items";
 import { startVisibleInterval } from "@/lib/visible-interval";
 import { validatePublishedLinkPlatform } from "@/lib/published-link-validation";
+import { trackUsage } from "@/lib/usage/track";
 
 interface BrandFormat {
   id: string;
@@ -1347,6 +1348,28 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
   // an item to status='Published' or 'Scheduled' (the generic PUT route
   // rejects those status values directly so editors can't half-publish).
   const [publishDialogOpen, setPublishDialogOpen] = useState(false);
+  // How many of this pillar's posts are Ready To Publish, fetched when the
+  // dialog opens on a Ready post: if siblings are waiting too, the dialog
+  // points at the Publish tab, where each one is a paste + Enter.
+  const [pillarReadyCount, setPillarReadyCount] = useState(0);
+  const readyPillarId =
+    data?.item?.status === "Ready To Publish" ? pillar?.id ?? null : null;
+  useEffect(() => {
+    setPillarReadyCount(0);
+    if (!publishDialogOpen || !readyPillarId) return;
+    let cancelled = false;
+    fetch(
+      `/api/publish/ready-count?brand=${encodeURIComponent(brand)}&pillar=${readyPillarId}`,
+    )
+      .then((r) => (r.ok ? r.json() : null))
+      .then((json) => {
+        if (!cancelled && json) setPillarReadyCount(Number(json.count) || 0);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [publishDialogOpen, readyPillarId, brand]);
   // TikTok draft-to-inbox (Zernio) confirm dialog. Only offered for tiktok
   // items; sends the video to the creator's TikTok inbox as a draft.
   const [tiktokDialogOpen, setTiktokDialogOpen] = useState(false);
@@ -4100,7 +4123,34 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
               avatarUrl: a.avatarUrl ?? null,
               syncedFromNotion: a.syncedFromNotion,
             }));
+          // Cross-posts are born Ready To Publish: once they're posted, the
+          // Publish tab takes every live link on one screen instead of a trip
+          // to each post's page.
+          const readyCrossPosts = (data.crossPosts ?? []).filter(
+            (cp) => cp.status === "Ready To Publish",
+          );
           return (
+            <div className="space-y-3">
+            {readyCrossPosts.length > 0 && (
+              <div
+                data-testid="cross-post-publish-tab"
+                className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm"
+              >
+                <span className="text-muted-foreground">
+                  {readyCrossPosts.length === 1
+                    ? "1 cross-post is ready to publish."
+                    : `${readyCrossPosts.length} cross-posts are ready to publish.`}{" "}
+                  Posted them? Paste their live links on one screen.
+                </span>
+                <Link
+                  href={`/${brand}/publish?focus=${readyCrossPosts[0].id}`}
+                  onClick={() => trackUsage("publish:way-in:cross-post-tab", brand)}
+                  className={buttonVariants({ variant: "outline", size: "sm" })}
+                >
+                  <UploadIcon className="size-3.5" /> Open Publish tab
+                </Link>
+              </div>
+            )}
             <div className="rounded-lg border border-border bg-card p-5">
               <CrossPostTriagePanel
                 candidate={{
@@ -4120,6 +4170,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                 showSecondaryFooter={false}
                 onActioned={() => void load()}
               />
+            </div>
             </div>
           );
         })()}
@@ -4727,6 +4778,11 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
         initialExpectedPublishAt={item.expectedPublishAt ?? null}
         initialNoDate={item.scheduledNoDate ?? false}
         currentStatus={item.status ?? null}
+        publishTab={
+          pillarReadyCount > 1
+            ? { href: `/${brand}/publish?focus=${item.id}`, others: pillarReadyCount - 1 }
+            : null
+        }
         onSuccess={() => {
           void load();
         }}

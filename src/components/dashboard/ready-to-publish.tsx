@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { AlertTriangle, Check, Copy, Download, ExternalLink, Radar } from "lucide-react";
@@ -11,7 +11,7 @@ import { postTypeLabel } from "@/lib/badge-colors";
 import { validatePublishedLinkPlatform } from "@/lib/published-link-validation";
 import { trackUsage } from "@/lib/usage/track";
 import { READY_CHANGED_EVENT } from "@/lib/publish/events";
-import { groupByPillar } from "@/lib/publish/group";
+import { focusGroupFirst, groupByPillar } from "@/lib/publish/group";
 import type { ReadyToPublishItem } from "@/lib/publish/ready";
 
 // The Publish screen: every Ready To Publish post in the brand, one row each,
@@ -37,18 +37,35 @@ function since(iso: string | null): string {
 export function ReadyToPublish({
   brand,
   items,
+  focusId = null,
 }: {
   brand: string;
   items: ReadyToPublishItem[];
+  /** `?focus=<itemId>` from a content page: that post's group goes on top
+   *  and its link box gets the cursor. */
+  focusId?: string | null;
 }) {
   const [published, setPublished] = useState<Record<string, string>>({});
   // Mirror of `published` so two rows finishing back to back both land.
   const publishedRef = useRef<Record<string, string>>({});
   const inputs = useRef<Record<string, HTMLInputElement | null>>({});
   const left = items.filter((i) => !published[i.id]).length;
-  const groups = groupByPillar(items);
+  const groups = focusGroupFirst(groupByPillar(items), focusId);
+  const focusGroupKey = focusId
+    ? groups.find((g) => g.items.some((i) => i.id === focusId))?.key ?? null
+    : null;
+  // The cursor starts on the top row: with ?focus= that is the first post of
+  // the arriving video (its group is moved to the top).
+  const firstRowId = groups[0]?.items[0]?.id ?? null;
   // Focus walks rows in the order they're shown (group by group).
   const order = groups.flatMap((g) => g.items.map((i) => i.id));
+
+  // Arriving with ?focus=: autoFocus doesn't fire after a client-side
+  // navigation, so put the cursor in the video's first link box ourselves.
+  useEffect(() => {
+    if (!focusGroupKey || !firstRowId) return;
+    inputs.current[firstRowId]?.focus();
+  }, [focusGroupKey, firstRowId]);
 
   function focusNextOpen(fromId: string, done: Record<string, string>) {
     for (let j = order.indexOf(fromId) + 1; j < order.length; j++) {
@@ -79,7 +96,16 @@ export function ReadyToPublish({
         {groups.map((group) => {
           const groupLeft = group.items.filter((i) => !published[i.id]).length;
           return (
-            <section key={group.key} data-testid="publish-group">
+            <section
+              key={group.key}
+              data-testid="publish-group"
+              data-focused={group.key === focusGroupKey ? "true" : undefined}
+              className={
+                group.key === focusGroupKey
+                  ? "-mx-3 rounded-lg bg-primary/5 px-3 py-2 ring-1 ring-primary/20"
+                  : undefined
+              }
+            >
               <div className="mb-2 flex items-baseline justify-between gap-3">
                 <h2 className="min-w-0 truncate text-sm font-semibold text-foreground">
                   {group.pillarId ? (
@@ -104,7 +130,7 @@ export function ReadyToPublish({
                     inputRef={(el) => {
                       inputs.current[item.id] = el;
                     }}
-                    autoFocus={item.id === order[0]}
+                    autoFocus={item.id === firstRowId}
                     onPublished={(link) => {
                       const next = { ...publishedRef.current, [item.id]: link };
                       publishedRef.current = next;

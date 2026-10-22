@@ -44,10 +44,18 @@ starter-story-app), so none of Pat's words were read this lap.
    schedule-reconcile matcher over Ready To Publish items against sync-discovered posts since the
    item went ready. ≥85 merges on its own, 55–84 shows "Looks like this is already live" on the row
    with That's it / Not it. Haiku only, no SC credits.
-4. **A way in where they work** (2026-10-21, half shipped): the Publish tab shows the brand's ready
-   count. Not yet: a link from the content page's Publish dialog ("publish the rest of this pillar").
+4. **A way in where they work** (2026-10-22, shipped): the Publish tab shows the brand's ready
+   count; the content page's Cross-post tab ("N cross-posts are ready → Open Publish tab") and the
+   Publish dialog on a Ready post ("N more from this video") open `/[brand]/publish?focus=<id>`
+   with that video's group on top and the cursor in its first box. Why: on 2026-10-21 the curator
+   opened the Publish tab for ~10 s, then cross-posted a pillar to 6 platforms and pasted 5 links
+   back through production → item → dialog → production, ~1.5 minutes each.
 
 ## Watch next
+
+- Do people take the way in (`publish:way-in:cross-post-tab`, `publish:way-in:dialog`), and do
+  `publish:link-pasted` marks follow within minutes? If the curator still uses the dialog after a
+  week, the next step is the paste box on the Cross-post tab itself (no page change at all).
 
 - Do the 55–84 suggestions get confirmed or rejected (`publish:live-confirmed` vs
   `publish:live-rejected`)? A lot of rejects means the Ready window is too wide.

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -13,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { trackUsage } from "@/lib/usage/track";
 
 // The one and only path to status='Published' / status='Scheduled'. The
 // generic PUT /api/production-items route rejects those status values
@@ -49,6 +51,9 @@ interface Props {
   currentStatus?: string | null;
   /** Fires after a successful save so the parent can refetch. */
   onSuccess?: () => void;
+  /** Other posts from the same video waiting in Ready To Publish: the
+   *  dialog offers the Publish tab, where they all take a paste + Enter. */
+  publishTab?: { href: string; others: number } | null;
 }
 
 function todayIsoDate(): string {
@@ -77,6 +82,7 @@ export function PublishScheduleDialog({
   initialNoDate,
   currentStatus,
   onSuccess,
+  publishTab,
 }: Props) {
   const isAlreadyScheduled = currentStatus === "Scheduled";
   const isAlreadyPublished = currentStatus === "Published";
@@ -317,6 +323,24 @@ export function PublishScheduleDialog({
               )}
             </div>
           </div>
+        )}
+
+        {mode === "publish" && !isAlreadyPublished && publishTab && publishTab.others > 0 && (
+          <p
+            data-testid="publish-dialog-publish-tab"
+            className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground"
+          >
+            {publishTab.others === 1
+              ? "1 more post from this video is ready to publish. "
+              : `${publishTab.others} more posts from this video are ready to publish. `}
+            <Link
+              href={publishTab.href}
+              onClick={() => trackUsage("publish:way-in:dialog")}
+              className="font-medium text-foreground underline underline-offset-2"
+            >
+              Paste all their links on the Publish tab
+            </Link>
+          </p>
         )}
 
         <DialogFooter className="gap-2">
