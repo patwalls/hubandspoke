@@ -206,6 +206,15 @@ account also cascades the flag to every production item linked to it.
   WHERE id = '…';`. If a restore UI is ever needed it's a small addition to
   the Accounts page.
 
+## Newsletters — one editor, driven by template settings
+
+Every newsletter (Starter Story's HubSpot formats, Futurepedia's beehiiv one, the next one we add) uses the **same** editor (`newsletter-editor-dialog.tsx`: the visual canvas + side panel) and the same preview pieces (`EditableSection`, `preview-screenshots.tsx`, used by both `EmailPreview` and `BeehiivPreview`).
+
+- **A new editing or drafting capability is a template setting, not a branch on the newsletter.** Put it on the template section (`sectionSchema` in `src/lib/newsletter-template.ts`, with a control in `newsletter-template-section.tsx`) and read the setting everywhere: the drafter prompt (`describeTemplate`), the editor, both previews and both pushes. Example: `screenshots` (any section, any newsletter).
+- **Never gate UI or prompt text on a format name or on `kind`** (`single_video` vs `roundup`) for something that isn't inherently about the kind. `kind` decides *where stories come from* (one picked video vs a lookback window) — that's it. Format-name lookups belong only in `format-config.ts` (schedules, sources, voices, promo).
+- **Changing one newsletter's look or sections** = edit its template (or its default in `DEFAULT_TEMPLATES`), not the editor.
+- New preview behavior goes in the shared pieces so both previews get it; a push-side change (an image, a block) goes in both `beehiiv-draft.ts` and `hubspot-newsletter-create-draft.ts`.
+
 ## Feature flags — shipping unfinished work to production
 
 When a feature should be live in production for a few named people only, use

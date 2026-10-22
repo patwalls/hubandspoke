@@ -265,6 +265,18 @@ function TemplateEditorDialog({
                           HubSpot draft. Ask to have it linked.
                         </p>
                       )}
+                      {sec.kind !== "sponsor" && (
+                        <label className="flex items-start gap-2 text-xs">
+                          <input type="checkbox" className="mt-0.5" checked={sec.screenshots} onChange={(e) => setSec(i, { screenshots: e.target.checked })} />
+                          <span>
+                            Screenshots from the video
+                            <span className="block text-muted-foreground">
+                              The drafter marks where a screenshot goes and the moment in the video; Hub &amp; Spoke grabs that frame (you can swap or
+                              upload your own in the editor).
+                            </span>
+                          </span>
+                        </label>
+                      )}
                       <label className="flex flex-col gap-1 text-xs">
                         <span className="text-muted-foreground">Instructions: what the drafter picks and writes here</span>
                         <Textarea className="min-h-20 text-xs" value={sec.hint} onChange={(e) => setSec(i, { hint: e.target.value })} />
@@ -299,7 +311,7 @@ function TemplateEditorDialog({
                 onClick={() => {
                   setT({
                     ...t,
-                    sections: [...t.sections, { key: `section_${t.sections.length + 1}`, heading: "New section", headingLevel: 2, kind: "text", hint: "", pillColor: null, boxColor: null }],
+                    sections: [...t.sections, { key: `section_${t.sections.length + 1}`, heading: "New section", headingLevel: 2, kind: "text", hint: "", pillColor: null, boxColor: null, screenshots: false }],
                   });
                   setOpen(t.sections.length);
                 }}

@@ -520,19 +520,30 @@ export function PicturePicker({ title, images, frames, photos, source, brand, on
   );
 }
 
-/** Scrub the source video and grab the exact frame you're looking at. */
-function FrameScrubber({ videoUrl, onGrab }: { videoUrl: string; onGrab: (sec: number) => void }) {
+/** Scrub the source video and grab the exact frame you're looking at (also the newsletter editor's screenshot panel). */
+export function FrameScrubber({ videoUrl, onGrab, initialSec = 0, busy = false }: { videoUrl: string; onGrab: (sec: number) => void; initialSec?: number; busy?: boolean }) {
   const ref = useRef<HTMLVideoElement | null>(null);
   const [duration, setDuration] = useState(0);
-  const [sec, setSec] = useState(0);
+  const [sec, setSec] = useState(initialSec);
   return (
     <div className="flex flex-col gap-1.5 rounded-md border border-border bg-muted/40 p-2">
       <span className="text-[11px] text-muted-foreground">Grab any moment</span>
-      <video ref={ref} src={videoUrl} muted playsInline preload="metadata" onLoadedMetadata={(e) => setDuration(e.currentTarget.duration || 0)} className="w-full rounded bg-black" />
+      <video
+        ref={ref}
+        src={videoUrl}
+        muted
+        playsInline
+        preload="metadata"
+        onLoadedMetadata={(e) => {
+          setDuration(e.currentTarget.duration || 0);
+          if (sec) e.currentTarget.currentTime = sec;
+        }}
+        className="w-full rounded bg-black"
+      />
       <input type="range" min={0} max={duration || 1} step={0.1} value={sec} onChange={(e) => { const v = Number(e.target.value); setSec(v); if (ref.current) ref.current.currentTime = v; }} className="h-1 w-full cursor-pointer accent-sky-500" />
       <div className="flex items-center justify-between">
         <span className="font-mono text-[11px] text-muted-foreground">{formatSec(sec)} / {formatSec(duration)}</span>
-        <button type="button" onClick={() => onGrab(sec)} className="inline-flex items-center gap-1 rounded-md bg-foreground px-2 py-1 text-[11px] font-medium text-background">
+        <button type="button" onClick={() => onGrab(sec)} disabled={busy} className="inline-flex items-center gap-1 rounded-md bg-foreground px-2 py-1 text-[11px] font-medium text-background disabled:opacity-50">
           <CameraIcon className="size-3" /> Use this frame
         </button>
       </div>

@@ -1,4 +1,4 @@
-// Screenshot placeholders in a How-To draft — `*[Screenshot @ 4:32: the
+// Screenshot placeholders in a newsletter draft (sections whose template setting asks for screenshots) — `*[Screenshot @ 4:32: the
 // Skills page with Record selected]*` — and the frames chosen for them.
 // The drafter tags each with the moment in the video it shows (it gets the
 // timestamped transcript); the editor grabs frames around that moment from the
@@ -19,17 +19,21 @@ export interface ScreenshotMark {
 
 /**
  * The image chosen for a placeholder (stored on newsletter_drafts.screenshots,
- * keyed by ScreenshotMark.key): a frame grabbed from the video, or an image
- * the editor uploaded.
+ * keyed by ScreenshotMark.key): a frame grabbed from the video (picked
+ * automatically when the draft lands, or by hand), or an image the editor
+ * uploaded.
  */
 export interface ChosenScreenshot {
   /** The design_frames row, for a video frame; null for an upload. */
   frameId: string | null;
   /** Video moment (frames only). */
   sec: number | null;
+  /** Empty while `pending`. */
   bucket: string;
   key: string;
-  source?: "frame" | "upload";
+  source?: "frame" | "upload" | "auto";
+  /** The frame is still being grabbed (filled in by resolvePendingScreenshots). */
+  pending?: boolean;
 }
 
 const MARK = /[*_]?\[Screenshot(?:\s*@\s*(\d{1,2}(?::\d{2}){1,2}))?\s*:\s*([^\]]+?)\s*\][*_]?/gi;

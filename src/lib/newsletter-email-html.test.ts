@@ -50,4 +50,11 @@ describe("renderEmailHtml", () => {
     expect(html).toContain("&lt;b&gt;x&lt;/b&gt;");
     expect(html).not.toContain("<script");
   });
+
+  it("fits images (full-size video frames) to the email's width", () => {
+    const html = markdownToEmailHtml("![the dashboard](https://s3.example.com/f.jpg)");
+    expect(html).toContain('src="https://s3.example.com/f.jpg"');
+    expect(html).toContain('width="100%"');
+    expect(html).toContain("max-width:100%");
+  });
 });

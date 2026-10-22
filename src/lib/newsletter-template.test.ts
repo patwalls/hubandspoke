@@ -9,6 +9,7 @@ const sec = (key: string, heading: string | null, extra: Partial<NewsletterTempl
   hint: "",
   pillColor: null,
   boxColor: null,
+  screenshots: false,
   ...extra,
 });
 const T: NewsletterTemplate = {

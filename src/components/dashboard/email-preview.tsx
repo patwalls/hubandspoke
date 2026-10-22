@@ -9,7 +9,8 @@
 
 import type { CSSProperties } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
-import { BeehiivPreview, type PreviewScreenshots } from "@/components/dashboard/beehiiv-preview";
+import { BeehiivPreview } from "@/components/dashboard/beehiiv-preview";
+import { markShots, shotFor, ShotBlock, type PreviewScreenshots, type Shot } from "@/components/dashboard/preview-screenshots";
 import { EditableSection, emptySectionHint, type PreviewEditing } from "@/components/dashboard/editable-section";
 import { emailCss, sponsorBlock, type CssProps, type NewsletterSection, type NewsletterTemplate } from "@/lib/newsletter-template";
 
@@ -36,7 +37,7 @@ export function EmailPreview({
   className?: string;
   /** The editor's click-to-edit canvas. */
   edit?: PreviewEditing;
-  /** beehiiv formats only: picked images for screenshot placeholders. */
+  /** Picked images for screenshot placeholders; without it every placeholder draws as a box. */
   screenshots?: PreviewScreenshots;
 }) {
   // beehiiv formats (Futurepedia): draw the card layout the push builds.
@@ -46,6 +47,7 @@ export function EmailPreview({
   const st = template.style;
   const css = emailCss(st);
   const t = css.tags;
+  const shots: Shot[] = [];
   const components: Components = {
     p: (props) => <p style={asStyle(t.p)}>{props.children}</p>,
     h1: (props) => <h1 style={asStyle(t.h1)}>{props.children}</h1>,
@@ -59,8 +61,12 @@ export function EmailPreview({
         {props.children}
       </a>
     ),
-    // eslint-disable-next-line @next/next/no-img-element
-    img: (props) => <img src={typeof props.src === "string" ? props.src : undefined} alt={props.alt ?? ""} style={asStyle(t.img)} />,
+    img: (props) => {
+      const shot = shotFor(props.alt, shots);
+      if (shot) return <ShotBlock shot={shot} edit={edit} />;
+      // eslint-disable-next-line @next/next/no-img-element
+      return <img src={typeof props.src === "string" ? props.src : undefined} alt={props.alt ?? ""} style={asStyle(t.img)} />;
+    },
     blockquote: (props) => <blockquote style={asStyle(t.blockquote)}>{props.children}</blockquote>,
     hr: () => <hr style={asStyle(t.hr)} />,
     code: (props) => <code style={asStyle(t.code)}>{props.children}</code>,
@@ -69,7 +75,7 @@ export function EmailPreview({
 
   const blocks = template.sections
     .map((sec) => {
-      let md = (byKey.get(sec.key) ?? "").trim();
+      let md = markShots(sec.key, (byKey.get(sec.key) ?? "").trim(), screenshots, shots);
       if (sec.kind === "sponsor" && sponsor?.copy?.trim()) md = sponsorBlock(sponsor.copy, sponsor.landingUrl);
       let content = md ? <ReactMarkdown components={components}>{md}</ReactMarkdown> : null;
       if (!content && showHints) content = <p style={asStyle(css.hint)}>{sec.hint || "(content)"}</p>;

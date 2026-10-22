@@ -14,6 +14,7 @@ import { blockedKeys, loadUsage, usageGroupFor, withInferredSources } from "./us
 import { formatConfigFor } from "./format-config";
 import { loadSourceVideo } from "./run";
 import { buildStoryPlan, withPlanDates } from "./story-plan";
+import { autoPickScreenshotsSafely, dropSectionScreenshots } from "./screenshots";
 
 /** Replace one section (or append it), keeping its other fields. Pure; exported for tests. */
 export function spliceSection(sections: NewsletterSection[], key: string, markdown: string, patch: Partial<NewsletterSection> = {}): NewsletterSection[] {
@@ -157,6 +158,9 @@ export async function regenerateDraftSection(
       })
       .where(and(eq(newsletterDrafts.id, row.id), sql`jsonb_exists(${newsletterDrafts.regenerating}, ${sectionKey})`));
     await clearRegenerating(row.id, sectionKey, null);
+    // New placeholders get frames picked; a new story means a new video, so its old picks go.
+    if (opts.newStory) await dropSectionScreenshots(row.id, sectionKey);
+    await autoPickScreenshotsSafely(row.id, opts.log);
     return { ok: true };
   } catch (err) {
     if (err instanceof NewsletterCancelledError) return { ok: false, reason: "cancelled" };

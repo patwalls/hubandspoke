@@ -15,6 +15,7 @@ import { formatConfigFor, voiceForChannel } from "./format-config";
 import { findSpecial } from "./promo";
 import { SINGLE_VIDEO_TRANSCRIPT_BUDGET, getPastIssues, getSingleVideo, getTimestampedTranscript, youtubeThumbnailUrl } from "./sources";
 import type { SourceVideo } from "./agent";
+import { autoPickScreenshotsSafely } from "./screenshots";
 
 export type NewsletterDraftRunResult =
   | { ok: true; turns: number; sources: number }
@@ -183,6 +184,8 @@ export async function runNewsletterDraft(
         subject: s.subject,
         previewText: s.preview_text,
         sections,
+        // A fresh issue: earlier screenshot picks belong to the old text (autoPick below makes new ones).
+        screenshots: {},
         // Templated: the composed issue (what the HubSpot push sends); free-form: the agent's body.
         bodyMarkdown: template
           ? composeIssue(template, sections, sponsored ? { copy: sponsored.copy, landingUrl: sponsored.source.landingUrl } : null)
@@ -202,6 +205,7 @@ export async function runNewsletterDraft(
       .where(ours)
       .returning({ id: newsletterDrafts.id });
     if (!saved.length) return { ok: false, skipped: "cancelled" };
+    await autoPickScreenshotsSafely(row.id, opts.log);
     await advanceNewsletterItem(row.id, "Review");
     return { ok: true, turns: result.turns, sources: sources.length };
   } catch (err) {

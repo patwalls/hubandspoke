@@ -23,7 +23,7 @@ import { startVisibleInterval } from "@/lib/visible-interval";
 import { composeIssue, type NewsletterSection, type NewsletterTemplate } from "@/lib/newsletter-template";
 import { EmailPreview } from "@/components/dashboard/email-preview";
 import { ScreenshotMarkPanel, ScreenshotPicker, useScreenshots } from "@/components/dashboard/newsletter-screenshot-picker";
-import { applyScreenshots, parseScreenshotMarks } from "@/lib/newsletter-screenshots";
+import { parseScreenshotMarks } from "@/lib/newsletter-screenshots";
 import type { NewsletterDraftSource, NewsletterSpecialSource } from "@/lib/db/schema";
 import { NEWSLETTER_START_DELAY_MS } from "@/lib/services/newsletter-drafter/format-config";
 
@@ -170,8 +170,10 @@ function Workspace({
   const [message, setMessage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [busyAction, setBusyAction] = useState<string | null>(null);
-  // How-To screenshot placeholders → frames from the video (only once there's a written draft).
-  const shots = useScreenshots(draft.id, draft.kind === "single_video" && draft.status === "ready", draft.screenshotPreviews ?? {});
+  // Screenshots: any template section can ask for them (its "Screenshots from the video" setting).
+  const hasShots = !!draft.template?.sections.some((s) => s.kind !== "sponsor" && s.screenshots);
+  const shots = useScreenshots(draft.id, hasShots && draft.status === "ready", draft.screenshotPreviews ?? {});
+  const previewShots = hasShots ? { chosen: shots.chosen, urlFor: shots.urlFor } : undefined;
   const seenRevision = useRef(draft.revision);
   const seenStatus = useRef(draft.status);
   // The revision the next save is based on, and the save in flight (saves run one at a time).
@@ -426,7 +428,7 @@ function Workspace({
           template={draft.template}
           sections={sections}
           sponsor={specialCopy.trim() ? { copy: specialCopy, landingUrl: draft.specialSource?.landingUrl ?? null } : null}
-          screenshots={draft.kind === "single_video" ? { chosen: shots.chosen, urlFor: shots.urlFor } : undefined}
+          screenshots={previewShots}
           edit={{
             selected,
             editingSection,
@@ -453,7 +455,7 @@ function Workspace({
         />
         <p className="flex items-center justify-center gap-1.5 pb-6 text-center text-xs text-muted-foreground">
           <MousePointerClick className="size-3.5" /> Click any text to edit it
-          {draft.kind === "single_video" && " · click a screenshot to pick a frame or upload one · or drop an image on it"}
+          {hasShots && " · click a screenshot to pick a frame or upload one · or drop an image on it"}
         </p>
       </div>
 
@@ -513,7 +515,7 @@ function Workspace({
           <>
             {subjectFields}
             <p className="rounded-md bg-muted/60 p-3 text-xs text-muted-foreground">
-              Click any part of the email to edit it. Text opens right where it is{draft.kind === "single_video" ? "; a screenshot opens its frames, Upload and Remove here" : "; Regenerate and Find new story show here"}.
+              Click any part of the email to edit it. Text opens right where it is; its Regenerate{draft.kind === "roundup" ? " and Find new story" : ""} show here{hasShots ? "; a screenshot opens its video scrubber, frames, Upload and Remove" : ""}.
             </p>
             {sourcesList}
           </>
@@ -617,7 +619,7 @@ function Workspace({
                     onFindNewStory={draft.kind === "roundup" ? (instruction) => regenerate(sec.key, instruction, true) : undefined}
                     onCancel={() => cancelRun(sec.key)}
                   >
-                    {draft.kind === "single_video" && (
+                    {hasShots && (
                       <ScreenshotPicker sectionKey={sec.key} markdown={sections.find((x) => x.key === sec.key)?.markdown ?? ""} shots={shots} />
                     )}
                   </SectionEditor>
@@ -644,7 +646,8 @@ function Workspace({
                 </div>
                 <EmailPreview
                   template={draft.template}
-                  sections={sections.map((x) => ({ ...x, markdown: applyScreenshots(x.key, x.markdown, shots.chosen, shots.urlFor) }))}
+                  sections={sections}
+                  screenshots={previewShots}
                   sponsor={specialCopy.trim() ? { copy: specialCopy, landingUrl: draft.specialSource?.landingUrl ?? null } : null}
                   />
               </>

@@ -13,7 +13,7 @@ import { buildBeehiivDraftRequest } from "@/lib/beehiiv-draft";
 import { advanceNewsletterItem } from "@/lib/services/newsletter-drafter/queue-status";
 import { templateFor } from "@/lib/newsletter-template";
 import { voiceForChannel } from "@/lib/services/newsletter-drafter/format-config";
-import { publicScreenshotUrl } from "@/lib/services/newsletter-drafter/screenshots";
+import { resolvePendingScreenshots, screenshotUrlsByKey } from "@/lib/services/newsletter-drafter/screenshots";
 
 export interface BeehiivNewsletterCreateDraftPayload {
   newsletterDraftId: string;
@@ -58,6 +58,8 @@ export const beehiivNewsletterCreateDraftTask: Task = async (rawPayload, helpers
   const template = templateFor(row.formatName, row.formatTemplate);
   if (!template?.beehiiv) return fail(`"${row.formatName}" has no beehiiv template set up`);
   try {
+    // Frames still being grabbed when the draft was read: fill in any that have landed.
+    const screenshots = await resolvePendingScreenshots(row.id, row.screenshots);
     const body = buildBeehiivDraftRequest({
       template,
       subject: row.subject,
@@ -67,10 +69,8 @@ export const beehiivNewsletterCreateDraftTask: Task = async (rawPayload, helpers
       sponsor: row.specialCopy ? { copy: row.specialCopy, landingUrl: row.specialSource?.landingUrl ?? null } : null,
       thumbnailUrl: row.youtubeId ? `https://img.youtube.com/vi/${row.youtubeId}/maxresdefault.jpg` : null,
       author: voiceForChannel(row.formatName, row.channelHandle)?.voice ?? null,
-      screenshots: row.screenshots,
-      screenshotUrls: Object.fromEntries(
-        await Promise.all(Object.values(row.screenshots).map(async (c) => [c.key, await publicScreenshotUrl(c)] as const)),
-      ),
+      screenshots,
+      screenshotUrls: await screenshotUrlsByKey(screenshots),
     });
     // Record the post the moment it exists, so a failed check below can never lead to a second post.
     const post = await createFuturepediaDraft(body, async (p) => {

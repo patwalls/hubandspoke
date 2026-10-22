@@ -19,10 +19,12 @@ export function markdownToEmailHtml(markdown: string): string {
   const raw = renderToStaticMarkup(createElement(Markdown, null, markdown));
   return sanitizeHtml(raw, {
     allowedTags: EMAIL_TAGS,
-    allowedAttributes: { a: ["href", "target"], img: ["src", "alt", "width", "height"] },
+    allowedAttributes: { a: ["href", "target"], img: ["src", "alt", "width", "height", "style"] },
     allowedSchemes: ["http", "https", "mailto"],
     transformTags: {
       a: (tagName, attribs) => ({ tagName, attribs: { ...attribs, target: "_blank" } }),
+      // Screenshots are full-resolution video frames: fit them to the email's width.
+      img: (tagName, attribs) => ({ tagName, attribs: { ...attribs, width: "100%", style: "display:block;width:100%;max-width:100%;height:auto;border-radius:8px" } }),
     },
     allowedSchemesAppliedToAttributes: ["href", "src"],
   });

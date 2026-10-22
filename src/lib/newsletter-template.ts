@@ -64,6 +64,12 @@ export const sectionSchema = z.object({
   pillColor: color.nullable().default(null),
   /** Tinted box behind the section's content (e.g. the sponsor). */
   boxColor: color.nullable().default(null),
+  /**
+   * The drafter adds `*[Screenshot @ M:SS: …]*` placeholders here, and Hub &
+   * Spoke fills each with a frame from the section's video (the issue's video,
+   * or the section's story video in a roundup). Any newsletter, any section.
+   */
+  screenshots: z.boolean().default(false),
 });
 
 /**
@@ -207,7 +213,7 @@ const s = (
   key: string,
   heading: string | null,
   hint: string,
-  extra: Partial<Pick<NewsletterTemplateSection, "headingLevel" | "kind" | "pillColor" | "boxColor" | "story">> = {},
+  extra: Partial<Pick<NewsletterTemplateSection, "headingLevel" | "kind" | "pillColor" | "boxColor" | "story" | "screenshots">> = {},
 ): NewsletterTemplateSection => ({
   key,
   heading,
@@ -217,6 +223,7 @@ const s = (
   kind: extra.kind ?? "text",
   pillColor: extra.pillColor ?? null,
   boxColor: extra.boxColor ?? null,
+  screenshots: extra.screenshots ?? false,
 });
 
 /** Starter Story's email look, read off past issues (Klaviyo/HubSpot HTML). */
@@ -333,9 +340,9 @@ export const DEFAULT_TEMPLATES: Record<string, NewsletterTemplate> = {
           s("intro", null, "2 to 4 short first-person lines in the channel voice, the signature on its own line, then a one-line teaser text link to the Free Resource offer."),
           s("article", null, "The article headline as an H2 (the how-to, benefit-first), the video thumbnail as a Markdown image, then the one-line concrete example."),
           s("why", null, "An H3 'Why [Tool] Works', a benefit-first line, then 3 to 5 ✅ bullets each led by a bolded action verb."),
-          s("steps", "How We Did It", "The first half of the 4 to 6 numbered steps: one action each, action bolded, a concrete business impact, italic *[Screenshot @ M:SS: …]* placeholders (the moment in the video it shows).", { headingLevel: 3 }),
+          s("steps", "How We Did It", "The first half of the 4 to 6 numbered steps: one action each, action bolded, a concrete business impact, and a screenshot of the step.", { headingLevel: 3, screenshots: true }),
           s("free_resource", "Free Resource", "The offer: headline, 2 to 3 sentence body, 3 to 5 Key Takeaways bullets and the CTA link.", { kind: "sponsor", boxColor: "#f1f5f9" }),
-          s("steps_continued", "How We Did It (continued)", "The rest of the numbered steps (continue the numbering), then the line [Watch The Full Video ->](VIDEO_URL).", { headingLevel: 3 }),
+          s("steps_continued", "How We Did It (continued)", "The rest of the numbered steps (continue the numbering), each with a screenshot of the step, then the line [Watch The Full Video ->](VIDEO_URL).", { headingLevel: 3, screenshots: true }),
           s("use_cases", "Use Cases", "3 to 5 bullets: a fitting emoji, a bold role label, then the point.", { headingLevel: 3 }),
           s("bonus_tips", "Bonus Tips", "2 to 3 bullets: bold directive then explanation, at least one about scaling or saving time.", { headingLevel: 3 }),
         ],

@@ -49,6 +49,15 @@ describe("templated submissions", () => {
     expect(submissionProblem(sub(full({ special: "" })), t, true)).toBeNull();
   });
 
+  it("asks for screenshot placeholders only in sections whose template setting is on, in any newsletter", () => {
+    expect(describeTemplate(t, true)).not.toContain("SCREENSHOT RULE");
+    const withShots = { ...t, sections: t.sections.map((sec, i) => (i === 0 ? { ...sec, screenshots: true } : sec)) };
+    const text = describeTemplate(withShots, true);
+    expect(text).toContain("SCREENSHOT RULE");
+    expect(text.match(/SCREENSHOTS: add screenshot placeholders here/g)).toHaveLength(1);
+    expect(text).toContain(`key "${t.sections[0].key}"`);
+  });
+
   it("tells the model which sections are fixed-heading and which one the promo calendar fills", () => {
     const text = describeTemplate(t, true);
     expect(text).toContain('key "orange_juice" — fixed heading "The Orange Juice 🍊"');

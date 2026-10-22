@@ -12,18 +12,13 @@
 
 import { Open_Sans, Poppins } from "next/font/google";
 import ReactMarkdown from "react-markdown";
-import { Camera } from "lucide-react";
 import { EditableSection, emptySectionHint, type PreviewEditing } from "@/components/dashboard/editable-section";
-import { cn } from "@/lib/utils";
-import { formatTimestamp, replaceScreenshotMarks, screenshotKey, type ChosenScreenshot } from "@/lib/newsletter-screenshots";
+import { markShots, shotFor, ShotBlock, type PreviewScreenshots, type Shot } from "@/components/dashboard/preview-screenshots";
 import { sponsorBlock, type NewsletterSection, type NewsletterTemplate } from "@/lib/newsletter-template";
 
 // The Kevin/Saj templates' fonts: Open Sans body (16px, 1.5), Poppins headings.
 const openSans = Open_Sans({ subsets: ["latin"], weight: ["400", "600", "700"], style: ["normal", "italic"] });
 const poppins = Poppins({ subsets: ["latin"], weight: ["400", "600", "700"] });
-
-/** Alt-text prefix marking a screenshot placeholder; the number indexes this render's list. */
-const SHOT = "__shot__";
 
 /** "### Why Claude Works" → "Claude" — same rule as the push's card labels. */
 function toolFromWhy(md: string): string | null {
@@ -31,20 +26,7 @@ function toolFromWhy(md: string): string | null {
   return m ? m[1].replace(/[*_#]/g, "").trim() : null;
 }
 
-export type { PreviewEditing };
-
-export interface PreviewScreenshots {
-  chosen: Record<string, ChosenScreenshot>;
-  urlFor: (c: ChosenScreenshot, markKey: string) => string | null;
-}
-
-interface Shot {
-  sectionKey: string;
-  markKey: string;
-  sec: number | null;
-  label: string;
-  url: string | null;
-}
+export type { PreviewEditing, PreviewScreenshots };
 
 export function BeehiivPreview({
   template,
@@ -79,68 +61,13 @@ export function BeehiivPreview({
     // Same rules as the push (beehiiv-blocks.ts): every line is its own paragraph, and
     // "- Saj" / "- Kevin" is the intro's sign-off, not a list. Screenshot placeholders
     // become image markers the img renderer draws (the picked image, or a box).
-    return replaceScreenshotMarks((byKey.get(key) ?? "").trim(), (sec, label) => {
-      const markKey = screenshotKey(key, label);
-      const c = screenshots?.chosen[markKey];
-      shots.push({ sectionKey: key, markKey, sec, label, url: c ? screenshots!.urlFor(c, markKey) : null });
-      return `\n![${SHOT}${shots.length - 1}](#screenshot)\n`;
-    })
+    return markShots(key, (byKey.get(key) ?? "").trim(), screenshots, shots)
       .replace(/^- (Saj|Kevin)$/gm, "\\- $1")
       .replace(/\n(?!\n)/g, "\n\n");
   };
   const tool = toolFromWhy(md("why")) ?? (showHints ? "[Tool]" : "AI");
   const placed = new Set(layout.cards.flatMap((c) => c.sections.map((x) => x.key)));
   const unplaced = template.sections.filter((s) => !placed.has(s.key));
-
-  const shotBlock = (shot: Shot) => {
-    const selected = edit?.selected === `shot:${shot.markKey}`;
-    const inner = shot.url ? (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img src={shot.url} alt={shot.label} className="block w-full rounded-[10px]" />
-    ) : (
-      <span className="flex w-full flex-col items-center justify-center gap-0.5 rounded-[10px] border-2 border-dashed border-[#c7d2dc] bg-[#f7fafc] px-6 py-6 text-center text-[13px] text-[#6b7280]">
-        <span className="flex items-center gap-1.5 font-semibold">
-          {edit && <Camera className="size-3.5" />}
-          Screenshot{shot.sec != null ? ` @ ${formatTimestamp(shot.sec)}` : ""}
-        </span>
-        <span>{shot.label}</span>
-        {edit && <span className="mt-1 text-[12px] text-[#49adff]">Click to pick a frame, or drop an image here</span>}
-      </span>
-    );
-    if (!edit) return <span className="my-3 block">{inner}</span>;
-    return (
-      <span
-        role="button"
-        tabIndex={0}
-        title={shot.url ? "Click to change or remove this screenshot" : undefined}
-        onClick={(e) => {
-          e.stopPropagation();
-          edit.onSelectShot(shot.sectionKey, shot.markKey);
-        }}
-        onKeyDown={(e) => {
-          if (e.key !== "Enter") return;
-          e.stopPropagation();
-          edit.onSelectShot(shot.sectionKey, shot.markKey);
-        }}
-        onDragOver={(e) => e.preventDefault()}
-        onDrop={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          const f = e.dataTransfer.files?.[0];
-          if (f?.type.startsWith("image/")) edit.onDropShot(shot.sectionKey, shot.markKey, f);
-        }}
-        className={cn(
-          "group relative my-3 block cursor-pointer rounded-[12px] outline-offset-2",
-          selected ? "outline-2 outline-[#49adff] outline-solid" : "hover:outline-2 hover:outline-[#49adff]/60 hover:outline-solid",
-        )}
-      >
-        {inner}
-        {shot.url && (
-          <span className="absolute right-2 top-2 rounded bg-white/90 px-1.5 py-0.5 text-[11px] text-[#222] opacity-0 shadow group-hover:opacity-100">Change</span>
-        )}
-      </span>
-    );
-  };
 
   const rendered = (key: string, linkButtons: boolean) => {
     const text = md(key);
@@ -181,10 +108,8 @@ export function BeehiivPreview({
           ol: ({ children }) => <ol className="my-3 list-decimal pl-6">{children}</ol>,
           li: ({ children }) => <li className="my-1">{children}</li>,
           img: ({ src, alt }) => {
-            if (alt?.startsWith(SHOT)) {
-              const shot = shots[Number(alt.slice(SHOT.length))];
-              return shot ? shotBlock(shot) : null;
-            }
+            const shot = shotFor(alt, shots);
+            if (shot) return <ShotBlock shot={shot} edit={edit} />;
             // eslint-disable-next-line @next/next/no-img-element
             return <img src={typeof src === "string" ? src : undefined} alt={alt ?? ""} className="my-3 block w-full rounded-[10px]" />;
           },

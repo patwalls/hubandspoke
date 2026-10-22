@@ -7,7 +7,7 @@ import { templateFor } from "@/lib/newsletter-template";
 import { formatConfigFor } from "./format-config";
 import { loadUsage, publishedLabel, usageGroupFor, usageLabel, withInferredSources } from "./usage";
 import { computeWindow } from "./window";
-import { screenshotPreviewUrls } from "./screenshots";
+import { resolvePendingScreenshots, screenshotPreviewUrls } from "./screenshots";
 
 export interface NewsletterFormatOption {
   id: string;
@@ -141,7 +141,7 @@ export async function getNewsletterDraft(id: string) {
   return {
     ...rest,
     sections,
-    screenshotPreviews: await screenshotPreviewUrls(row.screenshots),
+    screenshotPreviews: await screenshotPreviewUrls(await resolvePendingScreenshots(row.id, row.screenshots)),
     specialLabel: config.promo?.label ?? null,
     kind: config.kind,
     template: templateFor(row.formatName, formatTemplate),

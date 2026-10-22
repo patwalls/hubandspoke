@@ -10,6 +10,8 @@ import { db } from "@/lib/db";
 import { brands, formats, newsletterDrafts } from "@/lib/db/schema";
 import { createDraftEmailFromTemplate } from "@/lib/hubspot-marketing-email";
 import { markdownToEmailHtml } from "@/lib/newsletter-email-html";
+import { applyScreenshots } from "@/lib/newsletter-screenshots";
+import { resolvePendingScreenshots, screenshotUrlsByKey } from "@/lib/services/newsletter-drafter/screenshots";
 import { advanceNewsletterItem } from "@/lib/services/newsletter-drafter/queue-status";
 import { blockMarkdown, hubspotEmailName, templateFor } from "@/lib/newsletter-template";
 
@@ -27,6 +29,7 @@ export const hubspotNewsletterCreateDraftTask: Task = async (rawPayload, helpers
       previewText: newsletterDrafts.previewText,
       sendDate: newsletterDrafts.sendDate,
       sections: newsletterDrafts.sections,
+      screenshots: newsletterDrafts.screenshots,
       bodyMarkdown: newsletterDrafts.bodyMarkdown,
       specialCopy: newsletterDrafts.specialCopy,
       specialSource: newsletterDrafts.specialSource,
@@ -57,7 +60,11 @@ export const hubspotNewsletterCreateDraftTask: Task = async (rawPayload, helpers
   const template = templateFor(row.formatName, row.formatTemplate);
   if (!template?.hubspot) return fail(`"${row.formatName}" has no HubSpot template email set up yet`);
   const sponsor = row.specialCopy ? { copy: row.specialCopy, landingUrl: row.specialSource?.landingUrl ?? null } : null;
-  const blocks = blockMarkdown(template, row.sections, sponsor);
+  // Picked screenshots replace their placeholders (unpicked ones stay as italic text, like beehiiv).
+  const screenshots = await resolvePendingScreenshots(row.id, row.screenshots);
+  const shotUrls = await screenshotUrlsByKey(screenshots);
+  const sections = row.sections.map((s) => ({ ...s, markdown: applyScreenshots(s.key, s.markdown, screenshots, (c) => shotUrls[c.key] ?? null) }));
+  const blocks = blockMarkdown(template, sections, sponsor);
   if (Object.keys(blocks).length === 0) return fail("this draft has no sections to send (redraft it with the template)");
   const blockHtml = Object.fromEntries(Object.entries(blocks).map(([id, md]) => [id, markdownToEmailHtml(md)]));
 

@@ -24,7 +24,7 @@ import type { NewsletterSection, NewsletterTemplate } from "@/lib/newsletter-tem
 import { listLeadMagnets } from "@/lib/services/starter-story-content";
 import { describeStoryPlan, newStoryGuidance, type StoryPlan } from "./story-plan";
 import { brandHasCaseStudies } from "./format-config";
-import { getVideoTranscript, listOlderVideos, listRecentCaseStudies, listRecentVideos, searchCaseStudies, type PastIssue } from "./sources";
+import { getTimestampedTranscript, getVideoTranscript, listOlderVideos, listRecentCaseStudies, listRecentVideos, searchCaseStudies, TRANSCRIPT_CHAR_BUDGET, type PastIssue } from "./sources";
 import { caseStudyKey, EVERGREEN_MIN_DAYS, isEvergreenOk, RECENT_BLOCK_DAYS, type StoryUsage } from "./usage";
 import { SPECIAL_MARKER } from "./special-compose";
 import { toolWindow, type DraftWindow } from "./window";
@@ -374,9 +374,11 @@ async function runClientTool(name: string, input: unknown, args: NewsletterAgent
     }
     case "get_video_transcript": {
       const { production_item_id } = TranscriptInput.parse(input);
-      const t = await getVideoTranscript(production_item_id);
+      // Screenshot sections need the moment each screen is on camera: [M:SS] per line.
+      const t = wantsScreenshots(args.template) ? await getTimestampedTranscript(production_item_id, TRANSCRIPT_CHAR_BUDGET) : await getVideoTranscript(production_item_id);
       if (!t) return "No transcript is available for this video.";
-      return t.truncated ? `${t.text}\n\n[transcript truncated]` : t.text;
+      const note = "timestamped" in t && t.timestamped ? "(each line starts with its [M:SS] timestamp in the video)\n" : "";
+      return `${note}${t.text}${t.truncated ? "\n\n[transcript truncated]" : ""}`;
     }
     case "list_recent_case_studies": {
       const { days } = DaysInput.parse(input ?? {});
@@ -403,15 +405,28 @@ export const STORY_RULES = `STORY RULES (enforced — a submission that breaks t
 - Never use the same story in two sections of one issue.
 - For every section that covers a video or case study, set its source (kind + production_item_id for a video, kind + url for a case study, + title).`;
 
+/** The template asks for screenshots in at least one section (any newsletter, set per section). */
+export function wantsScreenshots(template: NewsletterTemplate | null | undefined): boolean {
+  return !!template?.sections.some((sec) => sec.kind !== "sponsor" && sec.screenshots);
+}
+
+/**
+ * How to mark a screenshot (sections whose template setting asks for them).
+ * Hub & Spoke grabs the frame at that moment from the section's video and
+ * shows it in the editor, where the editor can swap it. Exported for tests.
+ */
+export const SCREENSHOT_RULE = `SCREENSHOT RULE (sections marked "SCREENSHOTS" below): wherever a screenshot helps the reader, put a placeholder on its own line as *[Screenshot @ M:SS: what the screen shows]*. M:SS is the moment in the section's video (this issue's video, or the section's story video in a roundup — read its timestamped transcript with get_video_transcript) when that screen is on camera: the thing being shown, not when it's first mentioned. Hub & Spoke grabs that frame, so pick a moment it is visible. No video for the section (a case study)? Leave screenshots out of that section.`;
+
 /** The template block of the first user turn. Exported for tests. */
 export function describeTemplate(template: NewsletterTemplate, sponsorSupplied: boolean): string {
   const lines = template.sections.map((sec, i) => {
     const heading = sec.heading ? `fixed heading "${sec.heading}" (added for you; don't repeat it)` : "no fixed heading (write your own if the section needs one)";
     const sponsor =
       sec.kind === "sponsor" && sponsorSupplied ? " — SUPPLIED BY THE PROMO CALENDAR: submit an empty string for this key" : "";
-    return `${i + 1}. key "${sec.key}" — ${heading}${sponsor}\n   ${sec.hint}`;
+    const shots = sec.kind !== "sponsor" && sec.screenshots ? "\n   SCREENSHOTS: add screenshot placeholders here (SCREENSHOT RULE)." : "";
+    return `${i + 1}. key "${sec.key}" — ${heading}${sponsor}\n   ${sec.hint}${shots}`;
   });
-  return `ISSUE TEMPLATE — submit exactly these sections, every key, in this order (sections[].key / sections[].markdown):\n${lines.join("\n")}`;
+  return `${wantsScreenshots(template) ? `${SCREENSHOT_RULE}\n\n` : ""}ISSUE TEMPLATE — submit exactly these sections, every key, in this order (sections[].key / sections[].markdown):\n${lines.join("\n")}`;
 }
 
 /** The first user turn. Exported for tests. */
@@ -440,11 +455,6 @@ export function buildUserTurn(args: NewsletterAgentArgs): string {
         .filter(Boolean)
         .join("\n"),
       `TRANSCRIPT${v.truncated ? " (truncated — very long video)" : ""}${v.timestamped ? " (each line starts with its [M:SS] timestamp in the video)" : ""}:\n${v.transcript}`,
-      ...(v.timestamped
-        ? [
-            "SCREENSHOT PLACEHOLDERS: write each one on its own line as *[Screenshot @ M:SS: what the screen shows]*, where M:SS is the transcript timestamp of the moment that screen is on camera (the step being shown, not when it's first mentioned). Hub & Spoke grabs that frame from the video, so pick the moment the thing is visible.",
-          ]
-        : []),
     );
     if (args.recentEditions?.length) {
       parts.push(
@@ -664,6 +674,7 @@ export async function regenerateSection(
     `THE ISSUE AS IT STANDS:\n${args.currentIssue}`,
     args.sourcesNote ? `SOURCES THIS ISSUE USES:\n${args.sourcesNote}` : null,
     `Rewrite ONLY the section "${sec.key}"${sec.heading ? ` (heading "${sec.heading}", added for you)` : ""}. What it should contain: ${sec.hint}`,
+    sec.kind !== "sponsor" && sec.screenshots ? `${SCREENSHOT_RULE}\nThis section is marked SCREENSHOTS.` : null,
     `Its current content:\n${current || "(empty)"}`,
     args.newStoryExclude
       ? `FIND A NEW STORY: replace this section's video/case study with a DIFFERENT one and rewrite the section around it. ${where ?? "Use the tools to find it: this window's stories first, then list_older_videos / search_case_studies."} Never use a story marked blocked, and never any of these: ${[...args.newStoryExclude].join(", ") || "(none)"}. Set source to the story you chose.${args.instruction?.trim() ? ` The editor's steer: ${args.instruction.trim()}` : ""}`
