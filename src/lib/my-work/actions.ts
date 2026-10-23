@@ -12,6 +12,8 @@
  * have all three.
  */
 
+import type { Handoff, HandoffPerson } from "@/lib/handoff/pick";
+
 export type RowActionKind = "send-to-review" | "approve" | "send-back";
 
 export interface RowAction {
@@ -21,6 +23,9 @@ export interface RowAction {
   to: string;
   /** Single key that fires it on the focused row. */
   key: string;
+  /** The person it's handed to (becomes the editor), as on the content
+   *  page's handoff button. Unset = status only. */
+  handTo?: HandoffPerson;
 }
 
 const ACTIONS: Record<RowActionKind, RowAction> = {
@@ -42,6 +47,25 @@ export function rowActionsFor(
   return kinds
     .map((k) => ACTIONS[k])
     .filter((a) => !brandStatuses || brandStatuses.size === 0 || brandStatuses.has(a.to));
+}
+
+/**
+ * Hand the row's work to the right person too, by the content page's rules
+ * (src/lib/handoff/pick.ts): "Send to review" goes to the brand's reviewer;
+ * "Approve" AND "Send back" go back to whoever sent it to review (both are
+ * that person's turn next). No handoff = the actions move the status only.
+ */
+export function withHandoff(actions: RowAction[], handoff: Handoff | null): RowAction[] {
+  if (!handoff) return actions;
+  return actions.map((a) => {
+    if (handoff.kind === "send-to-review" && a.kind === "send-to-review") {
+      return { ...a, handTo: handoff.person };
+    }
+    if (handoff.kind === "approve" && (a.kind === "approve" || a.kind === "send-back")) {
+      return { ...a, handTo: handoff.person };
+    }
+    return a;
+  });
 }
 
 /** The note typed on "Send back" as safe comment HTML; null when blank. */

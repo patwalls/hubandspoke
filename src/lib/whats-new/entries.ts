@@ -29,6 +29,17 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-10-23-my-work-handoff",
+    shippedAt: "2026-10-23T11:30:00Z",
+    kind: "feature",
+    title: "My Work hands the post to the next person",
+    body:
+      "The buttons on My Work rows now pass the post along too, like the handoff button on a post's page: " +
+      "Send to review goes to the brand's reviewer, and Approve or Send back goes to whoever sent it. The name is on the button.",
+    href: "/my-work",
+    screen: "/my-work",
+  },
+  {
     id: "2026-10-23-cross-post-paste",
     shippedAt: "2026-10-23T07:15:00Z",
     kind: "feature",

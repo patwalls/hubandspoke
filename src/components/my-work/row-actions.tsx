@@ -6,12 +6,16 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { trackUsage } from "@/lib/usage/track";
 import { sendBackCommentHtml, type RowAction } from "@/lib/my-work/actions";
+import { firstName } from "@/lib/handoff/pick";
 
 /**
  * The buttons on a My Work row (rules in src/lib/my-work/actions.ts). Moves
  * the item through the same PUT the content page uses, so status_change
  * events and notifications are unchanged. "Send back" asks for an optional
  * note first and posts it as a comment on the item.
+ *
+ * An action with `handTo` also makes that person the editor (the content
+ * page's one-click handoff), and says so on the button: "Approve → John".
  *
  * Each button carries `data-row-key` so MyWorkKeys can fire it from the
  * keyboard on the focused row.
@@ -54,12 +58,17 @@ export function RowActions({
       const res = await fetch("/api/production-items", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, status: action.to }),
+        body: JSON.stringify(
+          action.handTo
+            ? { id, status: action.to, editorUserId: action.handTo.id }
+            : { id, status: action.to },
+        ),
       });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Couldn't move it");
+      const to = action.handTo ? `${action.to} · ${firstName(action.handTo.name)}` : action.to;
       setNoting(false);
-      setDone(action.to);
-      toast.success(`“${title}” → ${action.to}`);
+      setDone(to);
+      toast.success(`“${title}” → ${to}`);
       router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Couldn't move it");
@@ -96,7 +105,7 @@ export function RowActions({
           disabled={busy}
         />
         <Button type="submit" size="xs" variant="outline" disabled={busy}>
-          Send back
+          {sendBack.handTo ? `Send back → ${firstName(sendBack.handTo.name)}` : "Send back"}
         </Button>
         <Button type="button" size="xs" variant="ghost" disabled={busy} onClick={() => setNoting(false)}>
           Cancel
@@ -114,10 +123,15 @@ export function RowActions({
           variant={a.kind === "send-back" ? "outline" : "default"}
           disabled={busy}
           data-row-key={a.key}
-          title={`${a.label} (${a.key})`}
+          title={
+            a.handTo
+              ? `${a.label}: moves it to ${a.to} and makes ${a.handTo.name} the editor (${a.key})`
+              : `${a.label} (${a.key})`
+          }
           onClick={() => (a.kind === "send-back" ? setNoting(true) : void run(a))}
         >
           {a.label}
+          {a.handTo && <span className="ml-1 opacity-80">→ {firstName(a.handTo.name)}</span>}
           <kbd className="ml-1 font-mono text-[10px] opacity-60">{a.key}</kbd>
         </Button>
       ))}
