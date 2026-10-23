@@ -29,6 +29,16 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-10-23-derivatives-assign-all",
+    shippedAt: "2026-10-23T20:30:00Z",
+    kind: "feature",
+    title: "Assign a video's new posts all at once",
+    body:
+      "When a video's Derivatives tab has posts still at Idea, pick one editor at the top and press Assign: " +
+      "they all move to Assigned with that editor, without opening each one.",
+    screen: "/[brand]/content/[id]?tab=derivatives",
+  },
+  {
     id: "2026-10-23-my-work-up-next",
     shippedAt: "2026-10-23T16:05:00Z",
     kind: "feature",
