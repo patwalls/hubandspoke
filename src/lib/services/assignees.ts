@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   brands,
@@ -6,26 +6,6 @@ import {
   productionItems,
   users,
 } from "@/lib/db/schema";
-
-const GLOBAL_FALLBACK_EMAIL = "patrickswalls@gmail.com";
-
-let cachedGlobalFallbackUserId: string | null = null;
-
-async function getGlobalFallbackUserId(): Promise<string> {
-  if (cachedGlobalFallbackUserId) return cachedGlobalFallbackUserId;
-  const [row] = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(sql`lower(${users.email}) = ${GLOBAL_FALLBACK_EMAIL.toLowerCase()}`)
-    .limit(1);
-  if (!row) {
-    throw new Error(
-      `resolveEditor: global fallback user ${GLOBAL_FALLBACK_EMAIL} not found in users table`
-    );
-  }
-  cachedGlobalFallbackUserId = row.id;
-  return row.id;
-}
 
 export interface ResolveEditorInput {
   brand: string;
@@ -35,12 +15,13 @@ export interface ResolveEditorInput {
 
 /**
  * Returns the editor user id for a new production_items row, falling through:
- * source item → format default (by name+brand) → brand default → global
- * fallback (pat). Never returns null — every item gets an owner.
+ * source item → format default (by name+brand) → brand default. Null when
+ * none of them has an owner: the item starts unassigned. (Until 2026-10-23
+ * the last step was "Pat", which handed him every ownerless item.)
  */
 export async function resolveEditor(
   input: ResolveEditorInput
-): Promise<string> {
+): Promise<string | null> {
   let editorUserId: string | null = null;
 
   if (input.sourceItemId) {
@@ -78,10 +59,6 @@ export async function resolveEditor(
       .where(eq(brands.slug, input.brand))
       .limit(1);
     if (bs?.defaultEditorUserId) editorUserId = bs.defaultEditorUserId;
-  }
-
-  if (!editorUserId) {
-    editorUserId = await getGlobalFallbackUserId();
   }
 
   return editorUserId;

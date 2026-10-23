@@ -28,6 +28,7 @@ export function UserCombobox({
   triggerClassName,
   chipSize = "sm",
   placeholder = "Select an editor…",
+  allowUnassigned = false,
 }: {
   value: string;
   onValueChange: (value: string) => void;
@@ -36,6 +37,8 @@ export function UserCombobox({
   triggerClassName?: string;
   chipSize?: "sm" | "xs";
   placeholder?: string;
+  /** Adds an "Unassigned" option that clears the value (onValueChange("")). */
+  allowUnassigned?: boolean;
 }) {
   const [open, setOpen] = React.useState(false);
   const selectedUser = users.find((u) => u.id === value);
@@ -63,6 +66,18 @@ export function UserCombobox({
           <CommandList>
             <CommandEmpty>No users found.</CommandEmpty>
             <CommandGroup>
+              {allowUnassigned && (
+                <CommandItem
+                  value="Unassigned"
+                  onSelect={() => {
+                    onValueChange("");
+                    setOpen(false);
+                  }}
+                >
+                  <span className="text-muted-foreground">Unassigned</span>
+                  {!value && <CheckIcon className="ml-auto size-4 shrink-0" />}
+                </CommandItem>
+              )}
               {users.map((u) => {
                 const { name } = personDisplay(u);
                 return (

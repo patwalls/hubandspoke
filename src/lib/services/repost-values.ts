@@ -32,7 +32,7 @@ export interface RepostSource {
 
 export interface RepostBuildOptions {
   utmCampaign: string;
-  editorUserId: string;
+  editorUserId: string | null;
 }
 
 export function buildRepostValues(source: RepostSource, opts: RepostBuildOptions) {

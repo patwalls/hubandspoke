@@ -1,0 +1,1 @@
+ALTER TABLE "production_items" ALTER COLUMN "editor_user_id" DROP NOT NULL;

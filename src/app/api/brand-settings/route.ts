@@ -63,7 +63,7 @@ export async function PUT(request: NextRequest) {
     }
 
     // Only overwrite fields the caller actually sent. `null` is a valid value
-    // (clears the default → global fallback); `undefined` means "leave alone".
+    // (clears the default → new items start unassigned); `undefined` means "leave alone".
     const patch: Partial<typeof brands.$inferInsert> = { updatedAt: new Date() };
 
     if (weeklyGoal !== undefined) {

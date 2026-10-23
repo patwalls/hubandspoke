@@ -446,7 +446,8 @@ export interface CreateTestProductionItemOptions {
   postType?: string | null;
   accountId?: string | null;
   platform?: string[];
-  editorUserId?: string;
+  /** null = unassigned. Omitted = the default test user. */
+  editorUserId?: string | null;
   publishedAt?: Date | null;
   /** date-only column; defaults to the calendar date of publishedAt. */
   publishedDate?: string | null;
@@ -490,7 +491,8 @@ export interface CreateTestProductionItemOptions {
 export async function createTestProductionItem(
   opts: CreateTestProductionItemOptions = {},
 ): Promise<typeof productionItems.$inferSelect> {
-  const userId = opts.editorUserId ?? (await getTestUserId());
+  const userId =
+    opts.editorUserId === undefined ? await getTestUserId() : opts.editorUserId;
   const accountId =
     opts.accountId === undefined
       ? await getTestAccountId({ brand: opts.brand ?? "starter-story" })

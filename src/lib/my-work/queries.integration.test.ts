@@ -8,7 +8,7 @@ describe("getMyWork", () => {
     const assigned = await createTestProductionItem({ status: "Assigned", publishedAt: null });
     const onHold = await createTestProductionItem({ status: "On Hold", publishedAt: null });
 
-    const { yourTurn, waitingOnOthers } = await getMyWork(idea.editorUserId);
+    const { yourTurn, waitingOnOthers } = await getMyWork(idea.editorUserId!);
     const ids = (rows: { id: string }[]) => rows.map((r) => r.id);
 
     expect(ids(yourTurn)).toContain(assigned.id);

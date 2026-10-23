@@ -2470,7 +2470,8 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
               users={assignableUsers}
               chipSize="xs"
               triggerClassName={cn(CHIP_A_BASE, "w-auto")}
-              placeholder="Select editor"
+              placeholder="Unassigned"
+              allowUnassigned
             />
 
             {/* Status chip — colored pill matching the current status

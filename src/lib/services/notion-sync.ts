@@ -602,7 +602,7 @@ export async function syncFromNotion(): Promise<{
 
         // INSERT path: seed the legacy email/name columns for display, and
         // resolve the editor FK inline — prefer an email match against users,
-        // fall through to format/brand/global via resolveEditor. The email
+        // fall through to format/brand via resolveEditor (null = unassigned). The email
         // lookup uses an in-memory cache so each unique email hits the DB once
         // per sync.
         let editorUserId = await resolveAssigneeFromEmail(editor.email);

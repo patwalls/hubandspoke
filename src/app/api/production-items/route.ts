@@ -711,22 +711,15 @@ export async function PUT(request: NextRequest) {
     }
 
     // Capture assignment diffs before the UPDATE so we can fire a notification
-    // for each new assignee after the write commits. Editor is
-    // NOT NULL at the DB level — reject explicit attempts to clear it.
+    // for each new assignee after the write commits. null clears the
+    // editor (unassigned); no notification then.
     let assignmentDiff: {
       editorChanged: boolean;
-      nextEditorUserId: string;
+      nextEditorUserId: string | null;
     } | null = null;
     let editorChangeNames: { from: string | null; to: string | null } | null =
       null;
     if (editorUserId !== undefined) {
-      if (editorUserId === null || editorUserId === "") {
-        return NextResponse.json(
-          { error: "editorUserId cannot be empty — every item needs an editor" },
-          { status: 400 }
-        );
-      }
-
       const [existing] = await db
         .select({ editorUserId: productionItems.editorUserId })
         .from(productionItems)
@@ -735,7 +728,8 @@ export async function PUT(request: NextRequest) {
       if (!existing) {
         return NextResponse.json({ error: "Item not found" }, { status: 404 });
       }
-      const nextEditor: string = editorUserId;
+      // null / "" = unassigned.
+      const nextEditor: string | null = editorUserId || null;
       updateData.editorUserId = nextEditor;
       assignmentDiff = {
         editorChanged: existing.editorUserId !== nextEditor,
@@ -743,7 +737,7 @@ export async function PUT(request: NextRequest) {
       };
 
       if (assignmentDiff.editorChanged) {
-        const ids = [existing.editorUserId, nextEditor];
+        const ids = [existing.editorUserId, nextEditor].filter((x): x is string => !!x);
         const rows = await db
           .select({ id: users.id, name: users.name, email: users.email })
           .from(users)

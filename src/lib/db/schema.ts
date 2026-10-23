@@ -102,17 +102,18 @@ export const productionItems = pgTable(
     editorEmail: text("editor_email"),
     editorNotionUserId: text("editor_notion_user_id"),
     editorName: text("editor_name"),
-    // App-owned assignment FK. Required: every production item has an editor —
-    // the single owner across the pipeline (the legacy producer role was
-    // removed 2026-05-14). Defaults come from resolveEditor (source → format →
-    // brand → global). Notion sync stops touching this on update — edits
-    // happen only in-app. Legacy email/name columns remain for historical
-    // display on archived items whose people aren't in our users directory.
-    // onDelete: "restrict" since NOT NULL would reject anything else — user
-    // deletion is blocked while they own items.
-    editorUserId: uuid("editor_user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "restrict" }),
+    // App-owned assignment FK: the single owner across the pipeline (the
+    // legacy producer role was removed 2026-05-14). Defaults come from
+    // resolveEditor (source → format → brand); NULL = unassigned. Until
+    // 2026-10-23 it was NOT NULL with Pat as the global fallback, which
+    // gave him thousands of items he never worked on. Notion sync stops
+    // touching this on update — edits happen only in-app. Legacy email/name
+    // columns remain for historical display on archived items whose people
+    // aren't in our users directory. onDelete: "restrict" so deleting a user
+    // who owns items is still blocked rather than silently unassigning them.
+    editorUserId: uuid("editor_user_id").references(() => users.id, {
+      onDelete: "restrict",
+    }),
     viewsEstimated: boolean("views_estimated").default(false),
     lastPerformanceSyncAt: timestamp("last_performance_sync_at", {
       withTimezone: true,
@@ -1772,8 +1773,7 @@ export const brandSettings = pgTable("brand_settings", {
   // 0 = Sunday .. 6 = Saturday. Controls dashboard week buckets.
   weekStartDay: integer("week_start_day").notNull().default(0),
   // Per-brand fallback used by resolveEditor when a new item can't inherit
-  // from a source item or its format. NULL → fall through to the global
-  // fallback (pat).
+  // from a source item or its format. NULL → the item starts unassigned.
   defaultEditorUserId: uuid("default_editor_user_id").references(
     () => users.id,
     { onDelete: "set null" }

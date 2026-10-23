@@ -480,11 +480,11 @@ export function SettingsPageContent({
               {editorUser ? (
                 <UserChip user={editorUser} />
               ) : (
-                <span className="text-muted-foreground">Use global fallback (Pat)</span>
+                <span className="text-muted-foreground">Unassigned</span>
               )}
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={UNASSIGNED}>Use global fallback (Pat)</SelectItem>
+              <SelectItem value={UNASSIGNED}>Unassigned</SelectItem>
               {assignableUsers.map((u) => (
                 <SelectItem key={u.id} value={u.id}>
                   <UserChip user={u} />
