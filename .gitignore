@@ -68,3 +68,8 @@ next-env.d.ts
 
 # wrangler scratch (cloudflare/*)
 .wrangler/
+
+# /build loop notebook — private on closet-cloud (~/.loops/notes/hubandspoke-build), never in this
+# public repo (S-163). Only docs/build/sql/ is tracked.
+/docs/build/scout.md
+/docs/build/projects/

@@ -77,7 +77,7 @@ jobs:
           [ "$AUTHOR" = "patwalls" ] || why="${why:-opened by $AUTHOR, not the ship broker}"
           [ "$HOLD" = "false" ] || why="${why:-labelled hold}"
           [ "$LINES" -le 600 ] || why="${why:-$LINES changed lines (cap 600)}"
-          touched="$(gh pr diff "$NUM" --name-only | grep -E '^(\.github/|Dockerfile|docker-compose|deploy/|package\.json$|package-lock\.json$|scripts/.*\.sh$|\.claude/(settings[^/]*$|hooks/|skills/|agents/|launch\.json$)|\.mcp\.json$)' || true)"
+          touched="$(gh pr diff "$NUM" --name-only | grep -E '^(\.github/|Dockerfile|docker-compose|deploy/|package\.json$|package-lock\.json$|scripts/.*\.sh$|\.claude/(settings[^/]*$|hooks/|skills/|agents/|launch\.json$)|\.mcp\.json$|docs/build/(scout\.md$|projects/))' || true)"
           [ -z "$touched" ] || why="${why:-touches $(echo "$touched" | head -3 | tr '\n' ' ')}"
           if [ -n "$why" ]; then
             echo "left for a human: $why"
