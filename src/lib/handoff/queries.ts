@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { contentEvents, productionItems, users } from "@/lib/db/schema";
 import { REVIEW, type HandoffPerson } from "./pick";
@@ -43,4 +43,28 @@ export async function getSentToReviewBy(itemId: string): Promise<HandoffPerson |
     .orderBy(desc(contentEvents.createdAt))
     .limit(1);
   return row ? { id: row.id, name: row.name ?? "Someone" } : null;
+}
+
+/** Who last moved each of these items into Review (My Work's rows, one query). */
+export async function getSentToReviewByMany(
+  itemIds: string[],
+): Promise<Map<string, HandoffPerson>> {
+  if (itemIds.length === 0) return new Map();
+  const rows = await db
+    .selectDistinctOn([contentEvents.contentItemId], {
+      itemId: contentEvents.contentItemId,
+      id: users.id,
+      name: users.name,
+    })
+    .from(contentEvents)
+    .innerJoin(users, eq(users.id, contentEvents.userId))
+    .where(
+      and(
+        inArray(contentEvents.contentItemId, itemIds),
+        eq(contentEvents.eventType, "status_change"),
+        sql`${contentEvents.payload}->>'to' = ${REVIEW}`,
+      ),
+    )
+    .orderBy(contentEvents.contentItemId, desc(contentEvents.createdAt));
+  return new Map(rows.map((r) => [r.itemId, { id: r.id, name: r.name ?? "Someone" }]));
 }

@@ -10,7 +10,9 @@ import { htmlToPlainText } from "@/lib/comments/sanitize";
 import { cn } from "@/lib/utils";
 import { statusClassWithPalette } from "@/lib/badge-colors";
 import { getAllStatusPalettes } from "@/lib/db/brand-statuses";
-import { rowActionsFor, type MyWorkSection } from "@/lib/my-work/actions";
+import { rowActionsFor, withHandoff, type MyWorkSection } from "@/lib/my-work/actions";
+import { pickHandoff, ASSIGNED, type Handoff, type HandoffPerson } from "@/lib/handoff/pick";
+import { getBrandReviewers, getSentToReviewByMany } from "@/lib/handoff/queries";
 import { RowActions } from "@/components/my-work/row-actions";
 import { MyWorkKeys } from "@/components/my-work/my-work-keys";
 
@@ -88,6 +90,31 @@ export default async function MyWorkPage() {
   // Section client so each row's chip uses the brand's configured color.
   const palettes = await getAllStatusPalettes();
 
+  // Who each row's action hands it to (same rules as the content page's
+  // handoff button): your Assigned rows → the brand's reviewer; To review
+  // rows → back to whoever sent them.
+  const actionRows = [...yourTurn.filter((r) => r.status === ASSIGNED), ...toReview];
+  const reviewBrands = [...new Set(yourTurn.filter((r) => r.status === ASSIGNED).map((r) => r.brand))];
+  const [reviewersByBrand, sentBy] = await Promise.all([
+    Promise.all(reviewBrands.map(async (b) => [b, await getBrandReviewers(b)] as const)).then(
+      (pairs) => new Map<string, HandoffPerson[]>(pairs),
+    ),
+    getSentToReviewByMany(toReview.map((r) => r.id)),
+  ]);
+  const handoffs = new Map<string, Handoff | null>(
+    actionRows.map((r) => [
+      r.id,
+      pickHandoff({
+        me: userId,
+        status: r.status,
+        editorUserId: r.editorUserId,
+        brandStatuses: new Set(palettes.get(r.brand)?.keys() ?? []),
+        reviewers: reviewersByBrand.get(r.brand) ?? [],
+        sentToReviewBy: sentBy.get(r.id) ?? null,
+      }),
+    ]),
+  );
+
   return (
     <div className="space-y-6">
       <div>
@@ -107,6 +134,7 @@ export default async function MyWorkPage() {
         userId={userId}
         palettes={palettes}
         news={news}
+        handoffs={handoffs}
       />
 
       {toReview.length > 0 && (
@@ -119,6 +147,7 @@ export default async function MyWorkPage() {
           userId={userId}
           palettes={palettes}
           news={news}
+          handoffs={handoffs}
           editorNames={editorNames}
         />
       )}
@@ -132,6 +161,7 @@ export default async function MyWorkPage() {
         userId={userId}
         palettes={palettes}
         news={news}
+        handoffs={handoffs}
       />
 
       <div className="rounded-lg border border-border bg-card">
@@ -203,6 +233,7 @@ function Section({
   userId,
   palettes,
   news,
+  handoffs,
   editorNames,
 }: {
   title: string;
@@ -213,6 +244,7 @@ function Section({
   userId: string;
   palettes: ReadonlyMap<string, ReadonlyMap<string, string>>;
   news: ReadonlyMap<string, RowNews>;
+  handoffs: ReadonlyMap<string, Handoff | null>;
   /** Set on To review: adds an Editor column. */
   editorNames?: ReadonlyMap<string, string>;
 }) {
@@ -307,7 +339,10 @@ function Section({
                         id={r.id}
                         brand={r.brand}
                         title={r.title || "(Untitled)"}
-                        actions={rowActionsFor(section, r.status, palettes.get(r.brand))}
+                        actions={withHandoff(
+                          rowActionsFor(section, r.status, palettes.get(r.brand)),
+                          handoffs.get(r.id) ?? null,
+                        )}
                       />
                     </td>
                   )}
