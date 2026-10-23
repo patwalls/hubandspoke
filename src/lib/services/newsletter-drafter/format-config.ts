@@ -39,7 +39,7 @@ export interface NewsletterSchedule {
    * queue's threshold sweep creates a production item per video (pillar = the
    * video) with its linked edition (newsletter-queue.ts). Either way the send
    * date is the next open `days` day, or — when that week's `days` are taken —
-   * the next weekday, up to `maxPerWeek` per Mon–Sun week (videoSendDate). No
+   * the next weekday, up to `maxPerWeek` per Mon–Sun week (videoSendDate; 7 = no cap). No
    * empty slots are made ahead.
    */
   trigger?: { kind: "video" | "queue"; maxPerWeek: number };
@@ -101,8 +101,9 @@ const FORMAT_CONFIG: Record<string, NewsletterFormatConfig> = {
   "futurepedia newsletter": {
     kind: "single_video",
     sources: FUTUREPEDIA_SOURCES,
-    // Usually Tue/Fri, ≤3 a week (Bryce + Sam, 2026-10-21). Group name kept so the history carries over.
-    schedule: { group: "futurepedia-howto", days: [2, 5], primary: true, trigger: { kind: "queue", maxPerWeek: 3 } },
+    // Tue/Fri when open, otherwise the next weekday. No weekly cap (Sam, 2026-10-23: every published video gets
+    // an edition and the soonest send date — 7 can't be reached on weekdays). Group name kept so the history carries over.
+    schedule: { group: "futurepedia-howto", days: [2, 5], primary: true, trigger: { kind: "queue", maxPerWeek: 7 } },
     promo: { projectGid: FUTUREPEDIA_PROMO_PROJECT, section: "Native Ad", label: "Free Resource", onMiss: "placeholder" },
   },
 };

@@ -2,7 +2,7 @@
 // schedule group per upcoming send date, created 2 weeks ahead so the
 // Newsletters tab works like a queue. Sunday Breakfast = Sundays, Daily
 // Seinfeld = Tue/Thu. The Futurepedia How-To is VIDEO-TRIGGERED instead: each
-// published video queues one edition on the next open Tue/Fri (≤3 a week; see
+// published video queues one edition on the next open Tue/Fri, else the next weekday (no weekly cap; see
 // videoSendDate and ensureVideoEditions), and no empty slots are made ahead.
 //
 // How-To slots also get a SUGGESTED source video: the newest long-form video
@@ -120,8 +120,9 @@ const mondayOf = (d: string) => addDays(d, -((weekdayOf(d) + 6) % 7));
  * The send date for a video published (Eastern) on `publishedOn`, given the
  * dates that already have an edition. Sends start the next weekday after it
  * lands (and never before tomorrow): the first open `days` day (Tue/Fri) in
- * that week; if the week's Tue/Fri are taken, that next weekday itself as the
- * week's extra send (≤ maxPerWeek); else the next open Tue/Fri after. So a
+ * that week; if the week's Tue/Fri are taken, the first open weekday from the
+ * next one on as the week's extra send (≤ maxPerWeek; Futurepedia passes 7,
+ * i.e. no cap); else the next open Tue/Fri after. So a
  * Sunday and a Monday video both go Tuesday, a Wednesday video goes Friday.
  * Pure; exported for tests.
  */
@@ -137,8 +138,10 @@ export function videoSendDate(publishedOn: string, today: string, days: number[]
   const open = (d: string) => !taken.has(d) && weekCount(d) < maxPerWeek;
   // 1) The first open Tue/Fri in the week the video lands in.
   for (let d = start; mondayOf(d) === mondayOf(start); d = addDays(d, 1)) if (days.includes(weekdayOf(d)) && open(d)) return d;
-  // 2) That week's Tue/Fri are taken: the next weekday itself, as the week's extra send.
-  if (open(start)) return start;
+  // 2) That week's Tue/Fri are taken: the first open weekday from the next one on, as an extra send.
+  for (let d = start; mondayOf(d) === mondayOf(start); d = addDays(d, 1)) {
+    if (weekdayOf(d) !== 0 && weekdayOf(d) !== 6 && open(d)) return d;
+  }
   // 3) Otherwise the next open Tue/Fri after it.
   for (let d = addDays(mondayOf(start), 7), i = 0; i < 7 * 52; d = addDays(d, 1), i++) if (days.includes(weekdayOf(d)) && open(d)) return d;
   return start;

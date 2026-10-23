@@ -104,3 +104,12 @@ describe("video-triggered How-To send dates", () => {
     expect(send("2026-10-14", "2026-10-21")).toBe("2026-10-23");
   });
 });
+
+describe("videoSendDate with no weekly cap (maxPerWeek 7, Futurepedia)", () => {
+  it("a fourth video in a week still gets the next open weekday instead of a later week", () => {
+    // Mon Oct 26 …: Tue 27 and Fri 30 are taken, plus Thu 29 as an extra send.
+    const taken = new Set(["2026-10-27", "2026-10-29", "2026-10-30"]);
+    expect(videoSendDate("2026-10-26", "2026-10-26", [2, 5], 7, taken)).toBe("2026-10-28"); // Wed Oct 28: the first open weekday
+    expect(videoSendDate("2026-10-26", "2026-10-26", [2, 5], 3, taken)).toBe("2026-11-03"); // the old cap pushed it a week out
+  });
+});

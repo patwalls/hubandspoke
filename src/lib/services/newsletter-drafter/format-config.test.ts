@@ -29,7 +29,7 @@ describe("formatConfigFor", () => {
     const fp = formatConfigFor(" Futurepedia Newsletter ");
     // No model pin: it drafts on the default (Opus 5.5).
     expect(fp.model).toBeUndefined();
-    expect(fp).toMatchObject({ kind: "single_video", schedule: { group: "futurepedia-howto", trigger: { kind: "queue", maxPerWeek: 3 } } });
+    expect(fp).toMatchObject({ kind: "single_video", schedule: { group: "futurepedia-howto", trigger: { kind: "queue", maxPerWeek: 7 } } });
     expect(fp.promo).toMatchObject({ label: "Free Resource", onMiss: "placeholder", section: "Native Ad" });
     expect(voiceForChannel("Futurepedia Newsletter", "futurepedia_io")).toEqual({ voice: "kevin", voiceName: "Kevin" });
     expect(voiceForChannel("Futurepedia Newsletter", "skillleapai")).toEqual({ voice: "saj", voiceName: "Saj" });
