@@ -122,6 +122,7 @@ export type FieldSaveState = "idle" | "saving" | "saved" | "error";
 import { TiktokDraftBanner } from "./tiktok-draft-banner";
 import { UserChip } from "./user-chip";
 import { UserCombobox } from "./user-combobox";
+import { UpNext } from "@/components/my-work/up-next";
 import { renderInstructions } from "@/lib/utils/markdown";
 import { recordVisit } from "@/lib/hooks/use-recent-items";
 import { startVisibleInterval } from "@/lib/visible-interval";
@@ -2567,6 +2568,10 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                 No date yet
               </span>
             ) : null}
+
+            {/* The next post waiting on you, after the status: work through
+             *  My Work without going back to a list. */}
+            <UpNext itemId={contentId} status={status} editorUserId={editorUserId} />
 
             {/* Author handle moved into the state row below — it's
              *  read-only source-data, belongs with the other Pattern B
