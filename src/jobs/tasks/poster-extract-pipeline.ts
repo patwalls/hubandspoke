@@ -30,6 +30,7 @@ export class PosterExtractError extends Error {
       | "no_media"
       | "download_failed"
       | "ffmpeg_failed"
+      | "no_video_stream"
       | "frame_too_large"
       | "upload_failed"
       | "unknown",
@@ -38,6 +39,16 @@ export class PosterExtractError extends Error {
     this.name = "PosterExtractError";
   }
 }
+
+/** Audio-only media (e.g. a TikTok photo slideshow whose archive is just the
+ *  soundtrack, `audio/mp4`) has no frame 0 to grab. */
+export function isAudioOnlyContentType(contentType: string | null | undefined): boolean {
+  return (contentType ?? "").toLowerCase().startsWith("audio/");
+}
+
+// ffmpeg's stderr when the input has no video stream for `-frames:v 1 -an`
+// to keep — the content type said video (or nothing), the bytes disagree.
+const NO_VIDEO_STREAM_RE = /does not contain any stream|matches no streams/i;
 
 function posterKeyFor(productionItemId: string): string {
   // Mirror the existing layout used by `enrichment/shared.ts` archives:
@@ -48,7 +59,7 @@ function posterKeyFor(productionItemId: string): string {
   return `${prefix}/${productionItemId}/${randomUUID()}-frame0-poster.jpg`;
 }
 
-function runFfmpegExtractFrame(args: {
+export function runFfmpegExtractFrame(args: {
   inputPath: string;
   outputPath: string;
   logger: { info: (msg: string) => void };
@@ -110,7 +121,7 @@ function runFfmpegExtractFrame(args: {
         reject(
           new PosterExtractError(
             `ffmpeg exited ${code}: ${stderr.slice(0, 500)}`,
-            "ffmpeg_failed",
+            NO_VIDEO_STREAM_RE.test(stderr) ? "no_video_stream" : "ffmpeg_failed",
           ),
         );
       }

@@ -1,8 +1,12 @@
 import type { Task } from "graphile-worker";
-import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, notLike, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
-import { extractPosterFromMediaS3 } from "./poster-extract-pipeline";
+import {
+  PosterExtractError,
+  extractPosterFromMediaS3,
+  isAudioOnlyContentType,
+} from "./poster-extract-pipeline";
 
 export interface ExtractPosterPayload {
   productionItemId: string;
@@ -35,6 +39,11 @@ export async function selectExtractPosterCandidates(
         isNull(productionItems.posterS3Key),
         isNotNull(productionItems.mediaS3Key),
         inArray(productionItems.postType, FRAME0_POSTER_POST_TYPES),
+        // Audio-only archives have no frame to grab (HUBANDSPOKE-3C).
+        or(
+          isNull(productionItems.mediaContentType),
+          notLike(productionItems.mediaContentType, "audio/%"),
+        ),
       ),
     )
     .orderBy(sql`${productionItems.views} DESC NULLS LAST`)
@@ -63,6 +72,7 @@ export const extractPosterTask: Task = async (rawPayload, helpers) => {
       id: productionItems.id,
       mediaS3Key: productionItems.mediaS3Key,
       mediaS3Bucket: productionItems.mediaS3Bucket,
+      mediaContentType: productionItems.mediaContentType,
       posterS3Key: productionItems.posterS3Key,
     })
     .from(productionItems)
@@ -77,6 +87,12 @@ export const extractPosterTask: Task = async (rawPayload, helpers) => {
     helpers.logger.info(`extract-poster skip item=${productionItemId} reason=no-media`);
     return;
   }
+  if (isAudioOnlyContentType(item.mediaContentType)) {
+    helpers.logger.info(
+      `extract-poster skip item=${productionItemId} reason=audio-only (${item.mediaContentType})`,
+    );
+    return;
+  }
   if (item.posterS3Key && !force) {
     helpers.logger.info(
       `extract-poster skip item=${productionItemId} reason=poster-already-set`,
@@ -84,12 +100,25 @@ export const extractPosterTask: Task = async (rawPayload, helpers) => {
     return;
   }
 
-  const result = await extractPosterFromMediaS3(
-    item.mediaS3Key,
-    productionItemId,
-    { info: (msg) => helpers.logger.info(`extract-poster ${msg}`) },
-    item.mediaS3Bucket ?? undefined,
-  );
+  let result: Awaited<ReturnType<typeof extractPosterFromMediaS3>>;
+  try {
+    result = await extractPosterFromMediaS3(
+      item.mediaS3Key,
+      productionItemId,
+      { info: (msg) => helpers.logger.info(`extract-poster ${msg}`) },
+      item.mediaS3Bucket ?? undefined,
+    );
+  } catch (err) {
+    // The content type claimed video but the bytes have no video stream —
+    // no poster is possible, and retrying 25 times won't change that.
+    if (err instanceof PosterExtractError && err.kind === "no_video_stream") {
+      helpers.logger.info(
+        `extract-poster skip item=${productionItemId} reason=no-video-stream`,
+      );
+      return;
+    }
+    throw err;
+  }
 
   await db
     .update(productionItems)

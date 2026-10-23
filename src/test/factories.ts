@@ -467,6 +467,7 @@ export interface CreateTestProductionItemOptions {
   descriptSeedCompositionId?: string | null;
   mediaS3Bucket?: string | null;
   mediaS3Key?: string | null;
+  mediaContentType?: string | null;
   contentBody?: string | null;
   /** Byline (e.g. a newsletter issue's author, "Kevin at Futurepedia"). */
   authorDisplayName?: string | null;
@@ -537,6 +538,7 @@ export async function createTestProductionItem(
       descriptSeedCompositionId: opts.descriptSeedCompositionId ?? null,
       mediaS3Bucket: opts.mediaS3Bucket ?? null,
       mediaS3Key: opts.mediaS3Key ?? null,
+      mediaContentType: opts.mediaContentType ?? null,
       contentBody: opts.contentBody ?? null,
       authorDisplayName: opts.authorDisplayName ?? null,
       description: opts.description ?? null,
