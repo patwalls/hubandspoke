@@ -19,7 +19,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { BackLink } from "@/components/dashboard/back-link";
-import { useFeatureFlags } from "@/components/clip-editor/use-feature-flags";
 import { BrandAvatar as BrandAvatarChip } from "@/components/ui/brand-avatar";
 
 // Brand shape passed down from the (server) layout — mirrors BrandListEntry
@@ -387,7 +386,6 @@ export function SectionTabs({
 }) {
   const pathname = usePathname();
   const currentBrand = getBrandFromPath(pathname, brands, defaultBrand);
-  const flags = useFeatureFlags();
   const readyCount = useReadyCount(currentBrand);
 
   // The /all view aggregates data across brands; Formats and Accounts are
@@ -410,9 +408,6 @@ export function SectionTabs({
           { href: `/${currentBrand}/publish`, label: "Publish" },
           { href: `/${currentBrand}/formats`, label: "Formats" },
           { href: `/${currentBrand}/accounts`, label: "Accounts" },
-          ...(flags?.newsletterDrafter
-            ? [{ href: `/${currentBrand}/newsletters`, label: "Newsletters" }]
-            : []),
         ];
 
   // Surface a context-aware back link to the LEFT of the tabs when we're

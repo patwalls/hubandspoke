@@ -6,7 +6,8 @@ import dynamic from "next/dynamic";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { isNotionAuthoritative } from "@/lib/platform";
-import { SelectPill } from "./filter-pills";
+import { ActionPill, SelectPill } from "./filter-pills";
+import { useFeatureFlags } from "@/components/clip-editor/use-feature-flags";
 const HistoryQueueTable = dynamic(() => import("./history-queue-table").then((m) => m.HistoryQueueTable), { ssr: false });
 const SpokeQueueTable = dynamic(() => import("./spoke-queue-table").then((m) => m.SpokeQueueTable), { ssr: false });
 const RestoredDesignEditor = dynamic(() => import("@/components/design-editor/restored-design-editor").then((m) => m.RestoredDesignEditor), { ssr: false });
@@ -168,6 +169,7 @@ export function QueueView({
   }, [initialSource]);
 
   useRememberListUrl({ brand, listKey: "queue" });
+  const flags = useFeatureFlags();
 
   const fetchQueue = useCallback(async () => {
     setLoading(true);
@@ -690,6 +692,14 @@ export function QueueView({
             </button>
           );
         })}
+        {/* Newsletters (flag `newsletterDrafter`): the upcoming-issues board lives here, not in the nav — on the Newsletters tab only. */}
+        {flags?.newsletterDrafter && brand !== "all" && selectedSource === "newsletters" && (
+          <ActionPill
+            variant="tab"
+            label="Other"
+            actions={[{ label: "See all upcoming newsletters", onSelect: () => router.push(`/${brand}/newsletters`) }]}
+          />
+        )}
       </div>
 
       {!isHistoryTab && (

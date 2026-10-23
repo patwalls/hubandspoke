@@ -421,6 +421,47 @@ export function SelectPill({
   );
 }
 
+/** A pill whose dropdown only holds actions (nothing is "selected"): e.g. Queue → Other → See all upcoming newsletters. */
+export function ActionPill({
+  label,
+  actions,
+  variant = "pill",
+}: {
+  label: string;
+  actions: { label: string; onSelect: () => void }[];
+  /** "tab": plain muted text with a chevron, styled like the queue's History tab (sits in the tab row). */
+  variant?: "pill" | "tab";
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      {variant === "tab" ? (
+        <PopoverTrigger className="inline-flex h-9 -mb-px cursor-pointer items-center gap-1 border-b-2 border-transparent px-3 text-xs text-muted-foreground/70 transition-colors hover:text-foreground">
+          {label}
+          <ChevronDownIcon className="h-3 w-3" />
+        </PopoverTrigger>
+      ) : (
+        <PopoverTrigger className={PILL_TRIGGER_CLASSES}>
+          <PillContent value={label} />
+        </PopoverTrigger>
+      )}
+      <PopoverContent align="end" className="w-64 p-1 gap-0.5">
+        {actions.map((a) => (
+          <OptionRow
+            key={a.label}
+            label={a.label}
+            active={false}
+            onClick={() => {
+              setOpen(false);
+              a.onSelect();
+            }}
+          />
+        ))}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 interface MultiOption {
   value: string;
   label: string;
