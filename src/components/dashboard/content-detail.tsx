@@ -128,6 +128,7 @@ import { startVisibleInterval } from "@/lib/visible-interval";
 import { validatePublishedLinkPlatform } from "@/lib/published-link-validation";
 import { trackUsage } from "@/lib/usage/track";
 import { HandoffButton } from "./handoff-button";
+import { CrossPostPasteLinks } from "./cross-post-paste-links";
 
 interface BrandFormat {
   id: string;
@@ -4147,33 +4148,24 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
               avatarUrl: a.avatarUrl ?? null,
               syncedFromNotion: a.syncedFromNotion,
             }));
-          // Cross-posts are born Ready To Publish: once they're posted, the
-          // Publish tab takes every live link on one screen instead of a trip
-          // to each post's page.
+          // Cross-posts are born Ready To Publish: once they're posted, each
+          // one's live link is pasted right here instead of a trip to each
+          // post's page (the Publish tab is one click away for the rest).
           const readyCrossPosts = (data.crossPosts ?? []).filter(
             (cp) => cp.status === "Ready To Publish",
           );
           return (
             <div className="space-y-3">
             {readyCrossPosts.length > 0 && (
-              <div
-                data-testid="cross-post-publish-tab"
-                className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm"
-              >
-                <span className="text-muted-foreground">
-                  {readyCrossPosts.length === 1
-                    ? "1 cross-post is ready to publish."
-                    : `${readyCrossPosts.length} cross-posts are ready to publish.`}{" "}
-                  Posted them? Paste their live links on one screen.
-                </span>
-                <Link
-                  href={`/${brand}/publish?focus=${readyCrossPosts[0].id}`}
-                  onClick={() => trackUsage("publish:way-in:cross-post-tab", brand)}
-                  className={buttonVariants({ variant: "outline", size: "sm" })}
-                >
-                  <UploadIcon className="size-3.5" /> Open Publish tab
-                </Link>
-              </div>
+              <CrossPostPasteLinks
+                brand={brand}
+                rows={readyCrossPosts.map((cp) => ({
+                  id: cp.id,
+                  title: cp.title,
+                  postType: cp.postType,
+                  accountHandle: cp.account?.handle ?? null,
+                }))}
+              />
             )}
             <div className="rounded-lg border border-border bg-card p-5">
               <CrossPostTriagePanel
