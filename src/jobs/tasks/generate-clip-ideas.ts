@@ -18,10 +18,8 @@ export interface GenerateClipIdeasPayload {
    *  existing live batch + cascade-deletes derived clip_ideas across
    *  every format, then re-detects. Implies `force`. */
   forceSections?: boolean;
-  /** The operator who triggered this run (set by the manual route). Used
-   *  for the producer/editor stamp on the resulting prod_items rows.
-   *  Cron/backfill path leaves this null and falls through to
-   *  `resolveEditor`. */
+  /** The operator who triggered this run (set by the manual route). Not
+   *  the ideas' owner: generated ideas start unassigned (2026-10-23). */
   actorUserId?: string;
 }
 

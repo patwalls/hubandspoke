@@ -10,7 +10,7 @@ import {
 import { getTranscriptForPrompt } from "@/lib/services/whisper-transcribe";
 import { topShortFormPerformers } from "@/lib/db/queries";
 import { findAccountForBrandPlatform } from "@/lib/db/accounts";
-import { resolveEditor } from "@/lib/services/assignees";
+import { clipIdeaItemValues } from "@/lib/services/clip-idea-item-values";
 import { recordItemCreated } from "@/lib/services/item-created";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 import {
@@ -123,7 +123,8 @@ export interface ClipIdeaGenerateOptions {
   /** Required (since 2026-05-21 multi-format split). The clippable format
    *  this run targets. */
   targetFormatId: string;
-  /** Caller for the resulting prod_items rows. */
+  /** Who triggered the run (stamped as killer on superseded ideas). New
+   *  ideas start unassigned regardless — see clip-idea-item-values.ts. */
   actorUserId?: string;
   /** Skip the post_type gate (manual route bypass). */
   skipPostTypeGate?: boolean;
@@ -273,14 +274,6 @@ export async function generateClipIdeasForItem(
     .map((r) => ({ hook: r.hook as string, views: r.views }));
 
   // Pass 2: per-(section, format) hook writer, parallel with concurrency cap.
-  const editorUserId =
-    options.actorUserId ??
-    (await resolveEditor({
-      brand: item.brand,
-      sourceItemId: item.id,
-      format: format.name,
-    }));
-
   const candidates = await mapWithConcurrency(
     liveSections,
     HOOK_WRITER_CONCURRENCY,
@@ -462,25 +455,20 @@ export async function generateClipIdeasForItem(
     });
     const [created] = await db
       .insert(productionItems)
-      .values({
-        title: ci.hook,
-        status: "Idea",
-        platform: targetPlatform,
-        postType: targetPostType,
-        accountId: targetAccountId,
-        format: format.name,
-        brand: item.brand,
-        contentBody: body,
-        pillarContentItemId: productionItemId,
-        sourceType: "repurposed",
-        sourceClipIdeaId: ci.id,
-        editorUserId,
-        utmCampaign: await generateUtmCampaign(ci.hook),
-        hook: ci.hook,
-        hookSource: "clip_idea",
-        hookExtractedAt: new Date(),
-        createdVia: "service:clip-idea-generate",
-      })
+      .values(
+        clipIdeaItemValues({
+          hook: ci.hook,
+          body,
+          brand: item.brand,
+          formatName: format.name,
+          pillarId: productionItemId,
+          clipIdeaId: ci.id,
+          platform: targetPlatform,
+          postType: targetPostType,
+          accountId: targetAccountId,
+          utmCampaign: await generateUtmCampaign(ci.hook),
+        }),
+      )
       .returning({ id: productionItems.id });
     if (created) {
       try {
