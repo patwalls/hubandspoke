@@ -248,8 +248,12 @@ export const thresholdMonitorSweepTask: Task = async (_payload, helpers) => {
         }
 
         try {
+          // The new item lives in the TARGET format's brand, not the
+          // pillar's: trigger sources can span a brand family (a Skill Leap
+          // video feeding a Futurepedia format), and format lookups are keyed
+          // on (brand, name).
           const editorUserId = await resolveEditor({
-            brand: item.brand,
+            brand: targetFormat.brand,
             sourceItemId: item.id,
             format: targetFormat.name,
           });
@@ -273,7 +277,7 @@ export const thresholdMonitorSweepTask: Task = async (_payload, helpers) => {
           const [created] = await db
             .insert(productionItems)
             .values({
-              brand: item.brand,
+              brand: targetFormat.brand,
               title: repurposedTitle,
               thumbnail: item.thumbnail,
               status: "Idea",
@@ -321,7 +325,7 @@ export const thresholdMonitorSweepTask: Task = async (_payload, helpers) => {
               await insertVideoEdition({
                 group: edition.group,
                 sendDate: edition.sendDate,
-                brand: item.brand,
+                brand: targetFormat.brand,
                 formatId: targetFormat.id,
                 pillarId: item.id,
                 productionItemId: created.id,

@@ -323,4 +323,53 @@ describe("thresholdMonitorSweepTask — derivative routing via parent channels",
     // Root format with trigger source and views above threshold → triggered.
     expect(triggered).toHaveLength(1);
   }, SWEEP_TIMEOUT);
+
+  it("creates the item in the target format's brand when the source account is another brand's", async () => {
+    // Brand families: a Skill Leap video can feed a Futurepedia format. The
+    // new item must carry the FORMAT's brand — format lookups key on
+    // (brand, name), so the pillar's brand would orphan it.
+    const suffix = `${Date.now()}`;
+    const testAccountId = await getTestAccountId();
+
+    const rootFormat = await createTestFormat({
+      name: `vitest-cross-brand-${suffix}`,
+      brand: "matg",
+      viewThreshold: 1000,
+    });
+    await db.insert(formatTriggerSources).values({
+      formatId: rootFormat.id,
+      sourceAccountId: testAccountId,
+    });
+
+    const pillar = await createTestProductionItem({
+      status: "Published",
+      views: 50_000,
+    });
+    expect(pillar.brand).toBe("starter-story");
+
+    preItemIds = new Set(
+      (await db.select({ id: productionItems.id }).from(productionItems)).map(
+        (r) => r.id,
+      ),
+    );
+    preTriggerIds = new Set(
+      (await db.select({ id: repurposeTriggers.id }).from(repurposeTriggers)).map(
+        (r) => r.id,
+      ),
+    );
+
+    await thresholdMonitorSweepTask({}, fakeHelpers());
+
+    const triggered = await db
+      .select({ brand: productionItems.brand })
+      .from(productionItems)
+      .where(
+        and(
+          eq(productionItems.pillarContentItemId, pillar.id),
+          eq(productionItems.format, rootFormat.name),
+        ),
+      );
+
+    expect(triggered).toEqual([{ brand: "matg" }]);
+  }, SWEEP_TIMEOUT);
 });

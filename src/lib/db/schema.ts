@@ -2194,6 +2194,14 @@ export const brands = pgTable(
     // Controls the order brands appear in the top nav and settings table.
     // Lower values appear first. Editable via drag-and-drop in settings.
     sortOrder: integer("sort_order").notNull().default(0),
+    // Brand family: a child brand (e.g. Skill Leap, Howfinity) points at its
+    // parent (Futurepedia). Each member is still a full brand — own accounts,
+    // formats, statuses, queue — but the top nav collapses the family into one
+    // pill with a dropdown. One level deep: a parent never has a parent.
+    parentBrandId: uuid("parent_brand_id").references(
+      (): AnyPgColumn => brands.id,
+      { onDelete: "set null" }
+    ),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

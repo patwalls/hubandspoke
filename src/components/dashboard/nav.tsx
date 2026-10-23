@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { signOut } from "next-auth/react";
 import { OPEN_WHATS_NEW_EVENT } from "@/components/dashboard/whats-new-dialog";
 import { READY_CHANGED_EVENT } from "@/lib/publish/events";
-import { LayoutGrid, SearchIcon } from "lucide-react";
+import { Check, ChevronDown, LayoutGrid, SearchIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NotificationBell } from "@/components/notifications/notification-bell";
 import { MyWorkButton } from "@/components/my-work/my-work-button";
@@ -31,6 +31,9 @@ type Brand = {
   avatar: string | null;
   color: string | null;
   disabled: boolean;
+  // Slug of the parent brand for a brand-family member (Skill Leap →
+  // futurepedia). Families render as one pill with a dropdown.
+  parent: string | null;
 };
 
 function getBrandFromPath(
@@ -194,8 +197,52 @@ export function DashboardNav({
               </svg>
             </span>
             <div className="flex items-center gap-1 min-w-0 overflow-x-auto">
-              {brands.map((brand) => {
+              {brands.filter((b) => !b.parent).map((brand) => {
                 const isActive = currentBrand === brand.slug;
+                const hrefFor = (slug: string) =>
+                  isOnFormats ? `/${slug}/formats` : `/${slug}`;
+                const family = brands.filter(
+                  (b) => b.parent === brand.slug && !b.disabled
+                );
+                if (family.length > 0) {
+                  const members = [brand, ...family];
+                  const active = members.find((m) => m.slug === currentBrand);
+                  const shown = active ?? brand;
+                  return (
+                    <DropdownMenu key={brand.slug}>
+                      <DropdownMenuTrigger
+                        title={`${brand.label} family`}
+                        className={cn(
+                          "group flex items-center gap-1.5 px-2 py-1 rounded-md text-sm transition-all shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                          active
+                            ? "bg-accent text-foreground font-medium ring-1 ring-border"
+                            : "text-muted-foreground hover:text-foreground hover:bg-accent"
+                        )}
+                      >
+                        <span className="inline-flex items-center leading-none transition-transform group-hover:scale-110">
+                          <BrandAvatar brand={shown} />
+                        </span>
+                        <span className="hidden md:inline">{shown.label}</span>
+                        <ChevronDown className="size-3.5 opacity-60" />
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="start" className="min-w-48">
+                        {members.map((m) => (
+                          <DropdownMenuItem
+                            key={m.slug}
+                            onClick={() => router.push(hrefFor(m.slug))}
+                            className="cursor-pointer gap-2"
+                          >
+                            <BrandAvatar brand={m} />
+                            <span className="flex-1">{m.label}</span>
+                            {m.slug === currentBrand && (
+                              <Check className="size-3.5 text-muted-foreground" />
+                            )}
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  );
+                }
                 // "all" only has a home — Formats/Accounts/etc. don't exist
                 // there, so collapse any cross-section navigation back to /all.
                 const href =

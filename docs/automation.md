@@ -171,7 +171,7 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
 - **Trigger:** cron `15 * * * *` (every hour at :15)
 - **Files:** `src/jobs/tasks/threshold-monitor-sweep.ts`
 - **Inputs:** every published `productionItems` row with `views > 0` and a non-null `account_id`; `format_trigger_sources` joined with `formats` (the account→target-format routing table); existing `repurposeTriggers` (for dedup)
-- **Outputs:** new `productionItems` rows with `sourceType='repurposed'`, `pillarContentItemId=parent.id`, `status='Idea'` (inherits brand, title, thumbnail from parent); paired `repurposeTriggers` row (targetFormatId, viewsAtTrigger; sourceFormatId=null under the new routing model)
+- **Outputs:** new `productionItems` rows with `sourceType='repurposed'`, `pillarContentItemId=parent.id`, `status='Idea'` (inherits title + thumbnail from parent; **brand comes from the target format**, not the parent — since 2026-10-23, because trigger sources can span a brand family, e.g. a Skill Leap video feeding Futurepedia's `Full Video on X`, and format lookups key on `(brand, name)`); paired `repurposeTriggers` row (targetFormatId, viewsAtTrigger; sourceFormatId=null under the new routing model)
 - **Downstream:** `draft-algorithm-run` enqueued for each created row so the editor lands on a populated form (skipped internally for unsupported post types or when the pillar has no transcript yet). Otherwise the new `Idea` row enters the normal post lifecycle and may itself be picked up by enrichment / metrics / hook sweeps once published.
 - **Two-path routing model (2026-08-18):** routing is account-based, not format-based. Two separate queries populate the same `sourceAccountId → [target formats]` map:
   1. **Root formats** (`parentFormatId IS NULL`): use `format_trigger_sources`. Any published item from a configured source account is eligible — no `post_type` constraint applied.
@@ -1103,7 +1103,8 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
   (`BRANDS` in `~/.config/hubandspoke/yt-archive.env`). The watchdog mirrors
   that list in `DEFAULT_WATCH_BRANDS`, overridable without a deploy via the
   `YT_ARCHIVE_WATCH_BRANDS` Heroku config var — **keep both in sync when
-  changing the brand set.**
+  changing the brand set.** `skill-leap` + `howfinity` were added 2026-10-23 when they split out
+  of `futurepedia` (their YouTube items used to be `futurepedia` items).
 - **Belt-and-braces:** the wrapper itself (`home-machine/yt-archive/wrapper.sh`)
   also fires a Sentry event (fingerprint `yt-archive-home-cron`) on any exit
   other than 0/2, with the log tail attached. The server-side watch is the

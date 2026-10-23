@@ -35,6 +35,9 @@ export default async function FormatsLayout({
     avatar: b.avatarUrl,
     color: b.color,
     disabled: b.disabled,
+    parent: b.parentBrandId
+      ? (brandRows.find((p) => p.id === b.parentBrandId)?.slug ?? null)
+      : null,
   }));
 
   return (

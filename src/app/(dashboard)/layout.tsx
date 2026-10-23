@@ -57,6 +57,7 @@ export default async function DashboardLayout({
     avatar: null,
     color: "from-slate-700 to-slate-900",
     disabled: false,
+    parent: null,
   };
   // What's new: the cards this user hasn't seen pop up once; the nav menu
   // reopens the full list. Links get the default brand filled in.
@@ -82,6 +83,9 @@ export default async function DashboardLayout({
       avatar: b.avatarUrl,
       color: b.color,
       disabled: b.disabled,
+      parent: b.parentBrandId
+        ? (brandRows.find((p) => p.id === b.parentBrandId)?.slug ?? null)
+        : null,
     })),
   ];
 

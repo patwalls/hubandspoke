@@ -66,6 +66,9 @@ interface QueueViewProps {
    *  Resolved server-side from the URL slug. */
   initialClipFormatFilter?: string | null;
   clippableFormats: ClippableFormatTab[];
+  /** Show the Newsletters tab — only brands with a newsletter format
+   *  (`listNewsletterFormats`) have one. Defaults to shown. */
+  showNewsletters?: boolean;
   /** Format-name → format-id lookup for every format on the brand
    *  (clippable + non-clippable). Used by the Queue table to render the
    *  Format cell as a link to the format detail page. */
@@ -80,7 +83,8 @@ const STATIC_SOURCE_TABS = [
   { value: "spoke" as const, label: "Repurposed", slug: "repurposed" },
   { value: "repurposed" as const, label: "Triggered", slug: "triggered" },
   // Per-clippable-format tabs get spliced in here at render time.
-  // Every newsletter idea (post_type newsletter) — not a clippable format; shown only when there are some.
+  // Every newsletter idea (post_type newsletter) — not a clippable format;
+  // only on brands with a newsletter format (`showNewsletters`).
   { value: "newsletters" as const, label: "Newsletters", slug: "newsletters" },
   { value: "cross_post" as const, label: "Cross-post", slug: "cross-post" },
   { value: "repost" as const, label: "Repost", slug: "repost" },
@@ -94,6 +98,7 @@ export function QueueView({
   initialClipFormatFilter = null,
   clippableFormats = [],
   formatNameToId = {},
+  showNewsletters = true,
   isAdmin: _isAdmin = false,
 }: QueueViewProps) {
   // Per-format tabs spliced into the static set at the legacy "clip_ideas"
@@ -110,8 +115,8 @@ export function QueueView({
       ...STATIC_SOURCE_TABS.slice(0, 3),
       ...formatTabs,
       ...STATIC_SOURCE_TABS.slice(3),
-    ];
-  }, [clippableFormats]);
+    ].filter((t) => showNewsletters || t.value !== "newsletters");
+  }, [clippableFormats, showNewsletters]);
 
   // Lookup table: source value → the production_items.format string that
   // rows must match to belong in that tab. Only populated for clip-format

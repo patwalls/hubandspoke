@@ -8,6 +8,7 @@ import {
 } from "@/components/dashboard/queue-view";
 import { getClippableFormats, getFormatNameToIdMap } from "@/lib/db/formats";
 import { auth } from "@/lib/auth";
+import { listNewsletterFormats } from "@/lib/services/newsletter-drafter/queries";
 
 interface BrandQueueSourcePageProps {
   params: Promise<{ brand: string; source: string }>;
@@ -57,12 +58,13 @@ export default async function BrandQueueSourcePage({
   params,
 }: BrandQueueSourcePageProps) {
   const { brand, source } = await params;
-  const [brandConfig, session, clippableFormats, formatNameToId] =
+  const [brandConfig, session, clippableFormats, formatNameToId, newsletterFormats] =
     await Promise.all([
       fetchBrandBySlug(brand),
       auth(),
       getClippableFormats(brand),
       getFormatNameToIdMap(brand),
+      brand === "all" ? Promise.resolve([]) : listNewsletterFormats(brand),
     ]);
   if (!brandConfig) notFound();
 
@@ -106,6 +108,7 @@ export default async function BrandQueueSourcePage({
           slug: f.slug,
         }))}
         formatNameToId={formatNameToId}
+        showNewsletters={brand === "all" || newsletterFormats.length > 0}
         isAdmin={session?.user?.role === "admin"}
       />
     </Suspense>

@@ -7,6 +7,7 @@ import { QueueView } from "@/components/dashboard/queue-view";
 import { getClippableFormats, getFormatNameToIdMap } from "@/lib/db/formats";
 import { getProductionReportCached } from "@/lib/services/production-report";
 import { auth } from "@/lib/auth";
+import { listNewsletterFormats } from "@/lib/services/newsletter-drafter/queries";
 
 interface BrandQueuePageProps {
   params: Promise<{ brand: string }>;
@@ -26,7 +27,7 @@ export default async function BrandQueuePage({
   params,
 }: BrandQueuePageProps) {
   const { brand } = await params;
-  const [brandConfig, session, clippableFormats, formatNameToId, report] =
+  const [brandConfig, session, clippableFormats, formatNameToId, report, newsletterFormats] =
     await Promise.all([
       fetchBrandBySlug(brand),
       auth(),
@@ -39,6 +40,7 @@ export default async function BrandQueuePage({
         Sentry.captureException(err, { tags: { surface: "queue-ssr", brand } });
         return null;
       }),
+      listNewsletterFormats(brand),
     ]);
   // JSON-roundtrip: byte-identical to the fetch path (dates -> ISO strings).
   const initialItems = report
@@ -70,6 +72,7 @@ export default async function BrandQueuePage({
           slug: f.slug,
         }))}
         formatNameToId={formatNameToId}
+        showNewsletters={newsletterFormats.length > 0}
         isAdmin={session?.user?.role === "admin"}
       />
     </Suspense>

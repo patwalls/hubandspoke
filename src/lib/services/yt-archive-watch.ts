@@ -24,9 +24,11 @@ const LOOKBACK_DAYS = 30;
 // sync when editing the env file on the home machine.
 const DEFAULT_WATCH_BRANDS = [
   "futurepedia",
+  "howfinity",
   "matg",
   "my-first-million",
   "science-of-scaling",
+  "skill-leap",
   "starter-story",
 ];
 
