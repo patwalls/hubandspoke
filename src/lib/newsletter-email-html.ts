@@ -40,6 +40,23 @@ export interface EmailScreenshots {
   urlFor: (c: ChosenScreenshot, markKey: string) => string | null;
 }
 
+/**
+ * Personalization tokens the editor can type (toolbar → First name): how the
+ * preview shows them (a sample) and what the HubSpot push sends (HubL with a
+ * fallback). Replaced AFTER Markdown rendering, so the HubL quotes survive
+ * escaping. Exported for tests.
+ */
+export const PERSONALIZATION: Record<string, { sample: string; hubspot: string }> = {
+  "{{first_name}}": { sample: "Pat", hubspot: "{{ contact.firstname|default('there') }}" },
+};
+export type Personalization = "sample" | "hubspot" | "raw";
+
+/** Swap personalization tokens in rendered HTML (or text). Pure; exported for tests. */
+export function applyPersonalization(html: string, mode: Personalization): string {
+  if (mode === "raw") return html;
+  return Object.entries(PERSONALIZATION).reduce((out, [token, v]) => out.split(token).join(mode === "hubspot" ? v.hubspot : v.sample), html);
+}
+
 export interface RenderEmailArgs {
   template: NewsletterTemplate;
   sections: NewsletterSection[];
@@ -56,6 +73,8 @@ export interface RenderEmailArgs {
    * and unpicked spots draw as a dashed box. Never set for the push.
    */
   canvas?: boolean;
+  /** Personalization tokens: "sample" (preview, default), "hubspot" (the push), "raw". */
+  personalization?: Personalization;
 }
 
 // ── Style tokens ────────────────────────────────────────────────────────
@@ -120,6 +139,8 @@ function divider(withRule: boolean): string {
 
 /** Alt-text encoding for a screenshot spot, set by the pre-pass and read by the image renderer. */
 const SHOT = "__shot__|";
+/** "[button: Watch the episode](url)" — a button wherever it's written. */
+export const BUTTON_PREFIX = /^\s*button:\s*/i;
 
 interface SectionRenderContext {
   t: ReturnType<typeof tokens>;
@@ -159,10 +180,14 @@ function markedFor(ctx: SectionRenderContext): Marked {
         return `<p style="${t.h(level)}">${this.parser.parseInline(tokens)}</p>`;
       },
       paragraph({ tokens }) {
-        const link = ctx.buttons ? soleLink(tokens) : null;
+        // A button: a line that is only a link, when the section asks for buttons — or any link written "[button: Text](url)".
+        const sole = soleLink(tokens);
+        const explicit = !!sole && BUTTON_PREFIX.test(sole.text);
+        const link = sole && (ctx.buttons || explicit) ? sole : null;
         const href = link && safeUrl(link.href);
         if (link && href) {
-          return `${TABLE("margin:4px auto 20px auto;")}<tr><td align="center" style="${t.buttonCell}"><a href="${esc(href)}" target="_blank" style="${t.buttonLink}">${this.parser.parseInline(link.tokens)}</a></td></tr></table>`;
+          const label = explicit ? esc(link.text.replace(BUTTON_PREFIX, "").trim()) : this.parser.parseInline(link.tokens);
+          return `${TABLE("margin:4px auto 20px auto;")}<tr><td align="center" style="${t.buttonCell}"><a href="${esc(href)}" target="_blank" style="${t.buttonLink}">${label}</a></td></tr></table>`;
         }
         return `<p style="${t.p}">${this.parser.parseInline(tokens)}</p>`;
       },
@@ -174,9 +199,9 @@ function markedFor(ctx: SectionRenderContext): Marked {
       listitem(item) {
         return `<li style="${t.li}">${this.parser.parse(item.tokens)}</li>`;
       },
-      link({ href, tokens }) {
+      link({ href, tokens, text }) {
         const url = safeUrl(href);
-        const inner = this.parser.parseInline(tokens);
+        const inner = BUTTON_PREFIX.test(text) ? esc(text.replace(BUTTON_PREFIX, "").trim()) : this.parser.parseInline(tokens);
         return url ? `<a href="${esc(url)}" target="_blank" style="${t.a}">${inner}</a>` : inner;
       },
       image({ href, text }) {
@@ -207,12 +232,12 @@ function markedFor(ctx: SectionRenderContext): Marked {
 export function markdownToEmailHtml(
   markdown: string,
   style: NewsletterStyle,
-  opts: { buttons?: boolean; canvas?: boolean; inline?: boolean } = {},
+  opts: { buttons?: boolean; canvas?: boolean; inline?: boolean; personalization?: Personalization } = {},
 ): string {
   const ctx: SectionRenderContext = { t: tokens(style), buttons: !!opts.buttons, canvas: !!opts.canvas, images: 0 };
   const m = markedFor(ctx);
   const out = opts.inline ? m.parseInline(markdown, { async: false }) : m.parse(markdown, { async: false });
-  return (out as string).trim();
+  return applyPersonalization((out as string).trim(), opts.personalization ?? "sample");
 }
 
 /**
@@ -265,7 +290,7 @@ export function renderEmailParts(args: RenderEmailArgs): EmailParts {
   const t = tokens(st);
   const sections: EmailSectionPart[] = template.sections.map((sec) => {
     const md = sectionMarkdown(args, sec);
-    let content = md ? markdownToEmailHtml(md, st, { buttons: sec.linkButtons, canvas: args.canvas, inline: sec.look === "label" }) : "";
+    let content = md ? markdownToEmailHtml(md, st, { buttons: sec.linkButtons, canvas: args.canvas, inline: sec.look === "label", personalization: args.personalization }) : "";
     if (!content && args.showHints) {
       const sample = (title: string, body: string) =>
         `<div style="margin:4px 0 16px 0;padding:22px 24px;border:2px dashed #c7d2dc;border-radius:10px;background:#f7fafc;text-align:center;${t.F}font-size:13px;line-height:1.5;color:#6b7280;"><strong>${title}</strong><br>${body}</div>`;

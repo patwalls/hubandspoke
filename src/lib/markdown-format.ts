@@ -58,3 +58,37 @@ export function collapseImages(markdown: string, tokens: Map<string, string>): s
 export function expandImages(text: string, tokens: Map<string, string>): string {
   return text.replace(TOKEN, (t) => tokens.get(t) ?? t);
 }
+
+/**
+ * Editor toolbar helpers (pure). Each returns the new value and where the
+ * selection should land. `wrapLink`: the selection becomes [text](url).
+ * `prefixLines`: every line in the selection gets `prefix` (or loses it when
+ * all already have it). `insertBlock`: `text` on its own lines at `pos`.
+ */
+export function wrapLink(value: string, start: number, end: number, url: string): Edited {
+  const text = value.slice(start, end) || "link";
+  const link = `[${text}](${url})`;
+  return { value: value.slice(0, start) + link + value.slice(end), start, end: start + link.length };
+}
+
+export function prefixLines(value: string, start: number, end: number, prefix: string | ((i: number) => string)): Edited {
+  const lineStart = value.lastIndexOf("\n", start - 1) + 1;
+  const lineEndIdx = value.indexOf("\n", Math.max(end, start));
+  const lineEnd = lineEndIdx < 0 ? value.length : lineEndIdx;
+  const lines = value.slice(lineStart, lineEnd).split("\n");
+  const p = (i: number) => (typeof prefix === "function" ? prefix(i) : prefix);
+  const re = typeof prefix === "function" ? /^\d+\.\s/ : new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`);
+  const allHave = lines.every((l) => re.test(l));
+  const next = lines.map((l, i) => (allHave ? l.replace(re, "") : re.test(l) ? l : p(i) + l)).join("\n");
+  return { value: value.slice(0, lineStart) + next + value.slice(lineEnd), start: lineStart, end: lineStart + next.length };
+}
+
+export function insertBlock(value: string, pos: number, text: string): Edited {
+  const before = value.slice(0, pos);
+  const after = value.slice(pos);
+  const lead = before.length === 0 ? "" : before.endsWith("\n\n") ? "" : before.endsWith("\n") ? "\n" : "\n\n";
+  const tail = after.length === 0 ? "" : after.startsWith("\n\n") ? "" : after.startsWith("\n") ? "\n" : "\n\n";
+  const block = `${lead}${text}${tail}`;
+  const start = pos + lead.length;
+  return { value: before + block + after, start, end: start + text.length };
+}

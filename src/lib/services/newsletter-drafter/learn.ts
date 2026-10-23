@@ -196,7 +196,6 @@ export async function learnTemplate(proposalId: string, opts: { signal?: AbortSi
           betas: ["server-side-fallback-2026-07-01"],
           fallbacks: "default",
           tools: [PROPOSE_TOOL],
-          tool_choice: { type: "tool", name: "propose_template" },
           messages,
         },
         { signal: opts.signal, timeout: REQUEST_TIMEOUT_MS },

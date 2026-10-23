@@ -41,3 +41,25 @@ describe("collapseImages / expandImages", () => {
     expect(collapseImages(edited, tokens)).toBe("[🖼 a 2]");
   });
 });
+
+describe("toolbar helpers", () => {
+  it("wrapLink wraps the selection (or 'link') in a Markdown link", async () => {
+    const { wrapLink } = await import("./markdown-format");
+    expect(wrapLink("see this now", 4, 8, "https://x").value).toBe("see [this](https://x) now");
+    expect(wrapLink("see  now", 4, 4, "https://x").value).toBe("see [link](https://x) now");
+  });
+  it("prefixLines toggles a prefix on every selected line, numbered lists count up", async () => {
+    const { prefixLines } = await import("./markdown-format");
+    const v = "a\nb\nc";
+    const on = prefixLines(v, 0, 3, "- ");
+    expect(on.value).toBe("- a\n- b\nc");
+    expect(prefixLines(on.value, 0, 7, "- ").value).toBe("a\nb\nc");
+    expect(prefixLines(v, 0, 5, (i) => `${i + 1}. `).value).toBe("1. a\n2. b\n3. c");
+  });
+  it("insertBlock puts the text on its own paragraph", async () => {
+    const { insertBlock } = await import("./markdown-format");
+    expect(insertBlock("a\nb", 1, "---").value).toBe("a\n\n---\n\nb");
+    expect(insertBlock("", 0, "---").value).toBe("---");
+    expect(insertBlock("a\n\n", 3, "x").value).toBe("a\n\nx");
+  });
+});

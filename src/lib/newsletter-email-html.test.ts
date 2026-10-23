@@ -148,3 +148,22 @@ describe("renderEmailParts / renderEmailBody / renderEmailHtml", () => {
     expect(part.content).not.toContain("<p");
   });
 });
+
+describe("buttons written as [button: …] and personalization tokens", () => {
+  it("a [button: Text](url) link is a button in any section; inline it's a plain link without the prefix", () => {
+    const html = markdownToEmailHtml("[button: Watch the episode](https://x.example)", style);
+    expect(html).toContain('<td align="center" style="background:#197bbd;');
+    expect(html).toContain(">Watch the episode</a>");
+    const inline = markdownToEmailHtml("See [button: this](https://x.example) now", style);
+    expect(inline).not.toContain("<table");
+    expect(inline).toContain(">this</a>");
+  });
+
+  it("{{first_name}} shows a sample in the preview and HubL with a fallback in the push", () => {
+    expect(markdownToEmailHtml("Hey {{first_name}}!", style)).toContain("Hey Pat!");
+    expect(markdownToEmailHtml("Hey {{first_name}}!", style, { personalization: "hubspot" })).toContain("Hey {{ contact.firstname|default('there') }}!");
+    expect(markdownToEmailHtml("Hey {{first_name}}!", style, { personalization: "raw" })).toContain("Hey {{first_name}}!");
+    const body = renderEmailBody({ template: sb, sections: [{ key: "intro", markdown: "Hey {{first_name}}!" }], personalization: "hubspot" });
+    expect(body).toContain("contact.firstname");
+  });
+});

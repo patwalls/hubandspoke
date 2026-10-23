@@ -14,9 +14,9 @@
 // images show as short "[🖼 …]" tokens instead of their URLs.
 
 import { useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { Bold, Italic, Loader2, Lock, Sparkles } from "lucide-react";
+import { AtSign, Bold, Camera, Heading2, Italic, Link2, List, ListOrdered, Loader2, Lock, Minus, Quote, RectangleHorizontal, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { collapseImages, expandImages, toggleInline, type InlineMark } from "@/lib/markdown-format";
+import { collapseImages, expandImages, insertBlock, prefixLines, toggleInline, wrapLink, type Edited, type InlineMark } from "@/lib/markdown-format";
 
 export interface PreviewEditing {
   /** "draft" (default): edit drafted text. "template": edit each section's instructions. */
@@ -119,13 +119,14 @@ export function formatShortcut(e: KeyboardEvent<HTMLTextAreaElement>): InlineMar
   return k === "b" ? "**" : k === "i" ? "*" : null;
 }
 
-/** Apply bold/italic to a textarea's selection; returns the new value, and puts the selection back after React re-renders. */
+/** Apply bold/italic (or any edit) to a textarea's selection; returns the new value, and puts the selection back after React re-renders. */
 export function useInlineFormat() {
   const ref = useRef<HTMLTextAreaElement | null>(null);
   const pending = useRef<[number, number] | null>(null);
   useLayoutEffect(() => {
     if (pending.current && ref.current) {
       ref.current.setSelectionRange(...pending.current);
+      ref.current.focus();
       pending.current = null;
     }
   });
@@ -136,57 +137,132 @@ export function useInlineFormat() {
     pending.current = [r.start, r.end];
     return r.value;
   };
-  return { ref, apply };
+  /** Any selection-based edit (toolbar helpers in markdown-format.ts). */
+  const edit = (value: string, fn: (value: string, start: number, end: number) => Edited): string | null => {
+    const el = ref.current;
+    if (!el) return null;
+    const r = fn(value, el.selectionStart, el.selectionEnd);
+    pending.current = [r.start, r.end];
+    return r.value;
+  };
+  return { ref, apply, edit };
 }
 
-/** A draft section open for typing: images as tokens, and a Bold / Italic toolbar on a selection. */
+/** A toolbar button: keeps the text box focused (a blur would close it). */
+function Btn({ title, onClick, children }: { title: string; onClick: () => void; children: ReactNode }) {
+  return (
+    <button type="button" title={title} onMouseDown={(e) => e.preventDefault()} onClick={onClick} className="flex size-7 items-center justify-center rounded text-[#222] hover:bg-[#eef6ff]">
+      {children}
+    </button>
+  );
+}
+const Sep = () => <span className="mx-0.5 h-4 w-px bg-[#e5e7eb]" />;
+
+/** The in-place text box's toolbar: inline marks, links, blocks, a button, an image spot, a personalization token. */
+function Toolbar({ text, onChange, edit }: { text: string; onChange: (next: string) => void; edit: ReturnType<typeof useInlineFormat>["edit"] }) {
+  const [linkUrl, setLinkUrl] = useState<string | null>(null);
+  const run = (fn: (value: string, start: number, end: number) => Edited) => {
+    const next = edit(text, fn);
+    if (next != null) onChange(next);
+  };
+  return (
+    <div className="absolute -top-9 right-0 z-20 flex items-center gap-0.5 rounded-md border bg-white p-0.5 shadow-md" onMouseDown={(e) => e.stopPropagation()}>
+      {linkUrl !== null ? (
+        <form
+          className="flex items-center gap-1 px-1"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (linkUrl.trim()) run((v, s0, e0) => wrapLink(v, s0, e0, linkUrl.trim()));
+            setLinkUrl(null);
+          }}
+        >
+          <Link2 className="size-3.5 text-[#6b7280]" />
+          <input
+            autoFocus
+            value={linkUrl}
+            onChange={(e) => setLinkUrl(e.target.value)}
+            onKeyDown={(e) => e.key === "Escape" && setLinkUrl(null)}
+            placeholder="https://…"
+            className="h-6 w-56 rounded border px-1.5 text-[12px] outline-none focus:border-[#49adff]"
+          />
+          <button type="submit" className="rounded bg-[#49adff] px-2 py-0.5 text-[11px] font-medium text-white">
+            Link
+          </button>
+        </form>
+      ) : (
+        <>
+          <Btn title="Bold (⌘B)" onClick={() => run((v, s0, e0) => toggleInline(v, s0, e0, "**"))}>
+            <Bold className="size-4" />
+          </Btn>
+          <Btn title="Italic (⌘I)" onClick={() => run((v, s0, e0) => toggleInline(v, s0, e0, "*"))}>
+            <Italic className="size-4" />
+          </Btn>
+          <Btn title="Link the selected words" onClick={() => setLinkUrl("")}>
+            <Link2 className="size-4" />
+          </Btn>
+          <Sep />
+          <Btn title="Heading" onClick={() => run((v, s0, e0) => prefixLines(v, s0, e0, "## "))}>
+            <Heading2 className="size-4" />
+          </Btn>
+          <Btn title="Bulleted list" onClick={() => run((v, s0, e0) => prefixLines(v, s0, e0, "- "))}>
+            <List className="size-4" />
+          </Btn>
+          <Btn title="Numbered list" onClick={() => run((v, s0, e0) => prefixLines(v, s0, e0, (i) => `${i + 1}. `))}>
+            <ListOrdered className="size-4" />
+          </Btn>
+          <Btn title="Quote" onClick={() => run((v, s0, e0) => prefixLines(v, s0, e0, "> "))}>
+            <Quote className="size-4" />
+          </Btn>
+          <Sep />
+          <Btn title="Button (a link drawn as a button)" onClick={() => run((v, s0, e0) => insertBlock(v, e0, `[button: ${v.slice(s0, e0) || "Read the story"}](https://)`))}>
+            <RectangleHorizontal className="size-4" />
+          </Btn>
+          <Btn title="Image spot — click it in the email to upload or pick a frame" onClick={() => run((v, _s0, e0) => insertBlock(v, e0, `*[Screenshot: Image ${(v.match(/\[Screenshot/g)?.length ?? 0) + 1}]*`))}>
+            <Camera className="size-4" />
+          </Btn>
+          <Btn title="Divider" onClick={() => run((v, _s0, e0) => insertBlock(v, e0, "---"))}>
+            <Minus className="size-4" />
+          </Btn>
+          <Sep />
+          <Btn title="First name (HubSpot fills it in; 'there' when unknown)" onClick={() => run((v, _s0, e0) => ({ value: `${v.slice(0, e0)}{{first_name}}${v.slice(e0)}`, start: e0 + 14, end: e0 + 14 }))}>
+            <AtSign className="size-4" />
+          </Btn>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** A draft section open for typing: images as tokens, and the formatting toolbar (marks, links, lists, button, image spot, first name). */
 function DraftTextBox({ markdown, onChange, onDone }: { markdown: string; onChange: (md: string) => void; onDone: () => void }) {
   // One token map per editing session (the box remounts each time it opens).
   const [tokens] = useState(() => new Map<string, string>());
   const text = collapseImages(markdown, tokens);
-  const { ref, apply } = useInlineFormat();
-  const [hasSelection, setHasSelection] = useState(false);
+  const { ref, apply, edit } = useInlineFormat();
   const format = (mark: InlineMark) => {
     const next = apply(text, mark);
     if (next != null) onChange(expandImages(next, tokens));
   };
   return (
     <div className="relative" onClick={(e) => e.stopPropagation()}>
-      {hasSelection && (
-        <div className="absolute -top-9 right-0 z-20 flex items-center gap-0.5 rounded-md border bg-white p-0.5 shadow-md">
-          {(
-            [
-              ["**", Bold, "Bold (⌘B)"],
-              ["*", Italic, "Italic (⌘I)"],
-            ] as const
-          ).map(([mark, Icon, title]) => (
-            <button
-              key={mark}
-              type="button"
-              title={title}
-              // Keep the text box focused (a blur would close it).
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => format(mark)}
-              className="flex size-7 items-center justify-center rounded text-[#222] hover:bg-[#eef6ff]"
-            >
-              <Icon className="size-4" />
-            </button>
-          ))}
-        </div>
-      )}
+      <Toolbar text={text} onChange={(next) => onChange(expandImages(next, tokens))} edit={edit} />
       <textarea
         ref={ref}
         autoFocus
         value={text}
         onChange={(e) => onChange(expandImages(e.target.value, tokens))}
-        onSelect={(e) => setHasSelection(e.currentTarget.selectionStart !== e.currentTarget.selectionEnd)}
         onKeyDown={(e) => {
           const mark = formatShortcut(e);
           if (!mark) return;
           e.preventDefault();
           format(mark);
         }}
-        onBlur={onDone}
+        // The link field in the toolbar takes focus for a moment; only a real click-away finishes.
+        onBlur={(e) => {
+          const to = e.relatedTarget as HTMLElement | null;
+          if (to && e.currentTarget.parentElement?.contains(to)) return;
+          onDone();
+        }}
         className={TEXTAREA}
       />
     </div>

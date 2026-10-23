@@ -118,16 +118,26 @@ export async function suggestSubjectLines(draftId: string, client: Anthropic = n
   const template = templateFor(row.formatName, row.formatTemplate);
   const issue = template ? composeIssue(template, row.sections, row.specialCopy ? { copy: row.specialCopy, landingUrl: row.specialSource?.landingUrl ?? null } : null) : (row.bodyMarkdown ?? "");
   const past = await pastSubjects(row.brand, row.formatName).catch(() => []);
+  const prompt = buildSubjectsPrompt({ formatName: row.formatName, subject: row.subject ?? "", options: row.subjectOptions, previewText: row.previewText ?? "", issue, past, notes: row.notes });
   let ideas: SubjectIdea[];
   try {
     const message = await client.messages.create({
       model: MODEL,
       max_tokens: 2_000,
       tools: [TOOL],
-      tool_choice: { type: "tool", name: "suggest_subjects" },
-      messages: [{ role: "user", content: buildSubjectsPrompt({ formatName: row.formatName, subject: row.subject ?? "", options: row.subjectOptions, previewText: row.previewText ?? "", issue, past, notes: row.notes }) }],
+      messages: [{ role: "user", content: prompt }],
     });
-    const use = message.content.find((b): b is Anthropic.ToolUseBlock => b.type === "tool_use");
+    let use = message.content.find((b): b is Anthropic.ToolUseBlock => b.type === "tool_use");
+    if (!use) {
+      // Answered in prose: one nudge to use the tool.
+      const again = await client.messages.create({
+        model: MODEL,
+        max_tokens: 2_000,
+        tools: [TOOL],
+        messages: [{ role: "user", content: prompt }, { role: "assistant", content: message.content }, { role: "user", content: "Call suggest_subjects with the result." }],
+      });
+      use = again.content.find((b): b is Anthropic.ToolUseBlock => b.type === "tool_use");
+    }
     const parsed = use ? Output.safeParse(use.input) : null;
     if (!parsed?.success) return { ok: false, failure: "llm-empty" };
     const known = new Set([...row.subjectOptions, ...past].map((s) => s.toLowerCase().trim()));

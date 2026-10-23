@@ -13,7 +13,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { Check, Eye, ExternalLink, FileText, History, LayoutTemplate, Lightbulb, Loader2, Monitor, MoreHorizontal, MousePointerClick, RefreshCw, Shuffle, Smartphone, Sparkles, Wand2, X } from "lucide-react";
+import { AlertTriangle, Check, CheckCircle2, CircleAlert, Eye, ExternalLink, FileText, History, LayoutTemplate, Lightbulb, ListChecks, Loader2, Mail, Monitor, MoreHorizontal, MousePointerClick, RefreshCw, Shuffle, Smartphone, SpellCheck, Sparkles, Wand2, X } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -28,6 +28,8 @@ import { formatShortcut, useInlineFormat } from "@/components/dashboard/editable
 import { ImagePanel, ScreenshotMarkPanel, ScreenshotPicker, useScreenshots } from "@/components/dashboard/newsletter-screenshot-picker";
 import { isVideoThumbnail } from "@/components/dashboard/preview-screenshots";
 import { formatTimestamp, insertStepScreenshot, parseScreenshotMarks, removeScreenshotMark, screenshotKey, stepsWithoutScreenshots, type ScreenshotMark } from "@/lib/newsletter-screenshots";
+import type { PreSendCheck } from "@/lib/services/newsletter-drafter/checks";
+import { applyFixes, type ProofreadFix } from "@/lib/services/newsletter-drafter/proofread";
 import type { NewsletterDraftSource, NewsletterReview, NewsletterReviewFinding, NewsletterSpecialSource } from "@/lib/db/schema";
 import { NEWSLETTER_START_DELAY_MS } from "@/lib/services/newsletter-drafter/format-config";
 
@@ -231,6 +233,11 @@ function Workspace({
   const [subjectAngles, setSubjectAngles] = useState<Record<string, string>>({});
   /** The review panel is open in the side panel. */
   const [reviewOpen, setReviewOpen] = useState(false);
+  /** "Before you send": the checks' results, the proofread's fixes, the panel. */
+  const [sendPanel, setSendPanel] = useState(false);
+  const [checks, setChecks] = useState<PreSendCheck[] | null>(null);
+  const [fixes, setFixes] = useState<ProofreadFix[] | null>(null);
+  const [notes, setNotes] = useState(draft.notes ?? "");
   /**
    * The side panel. Before a click removes the button it came from (+ Add
    * screenshot, a trash icon), focus moves here without scrolling: otherwise
@@ -252,6 +259,7 @@ function Workspace({
     setSections(draft.sections);
     setBody(draft.bodyMarkdown ?? "");
     setSpecialCopy(draft.specialCopy ?? "");
+    setNotes(draft.notes ?? "");
   }, [draft]);
 
   const dirty =
@@ -260,6 +268,7 @@ function Workspace({
     // Templated drafts never edit the composed body (the server rebuilds it from the sections on each save).
     (!draft.template && body !== (draft.bodyMarkdown ?? "")) ||
     specialCopy !== (draft.specialCopy ?? "") ||
+    notes !== (draft.notes ?? "") ||
     !sameSections(sections, draft.sections);
 
   // Autosave, like the design editor: a moment after the last change.
@@ -268,7 +277,7 @@ function Workspace({
     const t = setTimeout(() => void save(), AUTOSAVE_MS);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- re-arm on every edit; save() reads the latest state
-  }, [dirty, draft.status, subject, previewText, sections, body, specialCopy]);
+  }, [dirty, draft.status, subject, previewText, sections, body, specialCopy, notes]);
   flushRef.current = () => (dirty ? save() : saveChain.current);
 
   const preview = useMemo(() => {
@@ -294,6 +303,7 @@ function Workspace({
           subject,
           previewText,
           specialCopy,
+          notes: notes.trim() || null,
           revision: revisionRef.current,
           ...(draft.template ? { sections: withSections ?? sections } : { bodyMarkdown: body }),
         }),
@@ -385,6 +395,63 @@ function Workspace({
       await regenerate(f.sectionKey, f.instruction);
     }
   }
+  /** Pre-send checks (content + every link fetched); the panel shows them. */
+  async function runChecks() {
+    if (dirty && !(await save())) return;
+    setSendPanel(true);
+    deselect();
+    setBusyAction("checks");
+    setChecks(null);
+    try {
+      const res = await fetch(`/api/newsletter-drafts/${draft.id}/checks`, { method: "POST" });
+      const json = (await res.json().catch(() => ({}))) as { checks?: PreSendCheck[]; error?: string };
+      if (!res.ok || !json.checks) throw new Error(json.error ?? "Couldn't run the checks");
+      setChecks(json.checks);
+    } catch (e) {
+      setMessage((e as Error).message);
+    } finally {
+      setBusyAction(null);
+    }
+  }
+  /** Proofread: exact typo/grammar fixes, applied to the text here (then autosaved). */
+  async function proofread() {
+    if (dirty && !(await save())) return;
+    setSendPanel(true);
+    deselect();
+    setBusyAction("proofread");
+    setFixes(null);
+    try {
+      const res = await fetch(`/api/newsletter-drafts/${draft.id}/proofread`, { method: "POST" });
+      const json = (await res.json().catch(() => ({}))) as { fixes?: ProofreadFix[]; error?: string };
+      if (!res.ok || !json.fixes) throw new Error(json.error ?? "Couldn't proofread");
+      setFixes(json.fixes);
+    } catch (e) {
+      setMessage((e as Error).message);
+    } finally {
+      setBusyAction(null);
+    }
+  }
+  const applyProofreadFixes = (which: ProofreadFix[]) => {
+    setSections((cur) => applyFixes(cur, which));
+    setFixes((cur) => (cur ? cur.filter((f) => !which.includes(f)) : cur));
+  };
+  /** Send the exact email to the signed-in user (the route never takes a recipient). */
+  async function sendTest() {
+    if (dirty && !(await save())) return;
+    setBusyAction("test-email");
+    setMessage(null);
+    try {
+      const res = await fetch(`/api/newsletter-drafts/${draft.id}/test-email`, { method: "POST" });
+      const json = (await res.json().catch(() => ({}))) as { sentTo?: string; error?: string };
+      if (!res.ok || !json.sentTo) throw new Error(json.error ?? "Couldn't send");
+      setMessage(`Test sent to ${json.sentTo}`);
+    } catch (e) {
+      setMessage((e as Error).message);
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
   /** "More ideas": six more subject lines in this newsletter's own habits, appended to the options. */
   async function moreSubjects() {
     setBusyAction("subjects");
@@ -410,6 +477,7 @@ function Workspace({
   const pushUrl = draft.template?.beehiiv ? draft.beehiivPostUrl : draft.hubspotEmailUrl;
   const pushPending = draft.template?.beehiiv ? draft.beehiivStatus === "pending" : draft.hubspotStatus === "pending";
   const pushBusy = busyAction === "beehiiv" || busyAction === "hubspot" || pushPending;
+  const words = draft.status === "ready" ? (draft.template ? sections.map((x) => x.markdown).join(" ") : body).split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w)).length : 0;
   const header = (
     <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 border-b px-4 py-2.5">
       <div className="flex min-w-0 flex-col">
@@ -417,13 +485,16 @@ function Workspace({
         <span className="truncate text-xs text-muted-foreground">
           {draft.sendDate ? `Sends ${fmtDate(draft.sendDate)}` : "No send date"}
           {pushUrl ? ` · draft in ${tool}` : draft.status === "ready" ? " · draft" : ""}
+          {words > 0 && ` · ${words} words · ~${Math.max(1, Math.round(words / 200))} min read`}
         </span>
       </div>
       <div className="flex items-center justify-center">
         {draft.status === "ready" && draft.template && view === "visual" && !draft.template.beehiiv && <DeviceToggle device={device} onChange={setDevice} />}
       </div>
       <div className="flex items-center justify-end gap-1.5 pr-8">
-        <span className="hidden min-w-12 text-right text-xs text-muted-foreground sm:inline">{saving ? "Saving…" : message}</span>
+        <span className="hidden max-w-[260px] min-w-12 truncate text-right text-xs text-muted-foreground sm:inline" title={message ?? undefined}>
+          {saving ? "Saving…" : message}
+        </span>
         {draft.status === "ready" && (
           <>
             {draft.template && (
@@ -459,6 +530,25 @@ function Workspace({
                   <RefreshCw className="size-4" />
                   Redraft the whole issue
                 </DropdownMenuItem>
+                {draft.template && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={runChecks} disabled={busyAction !== null} className="cursor-pointer gap-2">
+                      <ListChecks className="size-4" />
+                      Pre-send checks
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={proofread} disabled={busyAction !== null} className="cursor-pointer gap-2">
+                      <SpellCheck className="size-4" />
+                      Proofread
+                    </DropdownMenuItem>
+                    {!draft.template.beehiiv && (
+                      <DropdownMenuItem onClick={sendTest} disabled={busyAction !== null} className="cursor-pointer gap-2">
+                        <Mail className="size-4" />
+                        Send test to me
+                      </DropdownMenuItem>
+                    )}
+                  </>
+                )}
                 {pushUrl && (
                   <>
                     <DropdownMenuSeparator />
@@ -824,6 +914,20 @@ function Workspace({
               setSelected(null);
             }}
           />
+        ) : sendPanel ? (
+          <SendPanel
+            checks={checks}
+            fixes={fixes}
+            busy={busyAction}
+            sections={draft.template?.sections ?? []}
+            canSendTest={!draft.template?.beehiiv}
+            onChecks={runChecks}
+            onProofread={proofread}
+            onSendTest={sendTest}
+            onApplyFixes={applyProofreadFixes}
+            onSelect={(key) => setSelected(key)}
+            onClose={() => setSendPanel(false)}
+          />
         ) : reviewOpen && draft.review ? (
           <ReviewPanel
             review={draft.review}
@@ -849,6 +953,31 @@ function Workspace({
                 <span className="text-muted-foreground">Open</span>
               </button>
             )}
+            {draft.template && (
+              <div className="flex flex-col gap-2 rounded-lg border p-3">
+                <span className="text-xs font-medium">Before you send</span>
+                <div className="flex flex-wrap gap-1.5">
+                  <Button size="xs" variant="outline" onClick={runChecks} disabled={busyAction !== null} title="Empty sections, placeholders, subject length, every link and image fetched">
+                    {busyAction === "checks" ? <Loader2 className="animate-spin" /> : <ListChecks />}
+                    Checks
+                  </Button>
+                  <Button size="xs" variant="outline" onClick={proofread} disabled={busyAction !== null} title="Exact typo and grammar fixes — never a rewrite">
+                    {busyAction === "proofread" ? <Loader2 className="animate-spin" /> : <SpellCheck />}
+                    Proofread
+                  </Button>
+                  {!draft.template.beehiiv && (
+                    <Button size="xs" variant="outline" onClick={sendTest} disabled={busyAction !== null} title="Emails the exact email to you (only you)">
+                      {busyAction === "test-email" ? <Loader2 className="animate-spin" /> : <Mail />}
+                      Send test to me
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
+            <label className="flex flex-col gap-1 text-xs">
+              <span className="font-medium">Notes for the drafter</span>
+              <Textarea className="min-h-16 text-xs" placeholder="An offer to pitch, an angle, a story to feature — Regenerate and Redraft read this." value={notes} onChange={(e) => setNotes(e.target.value)} />
+            </label>
             <p className="rounded-md bg-muted/60 p-3 text-xs text-muted-foreground">
               Click any part of the email to edit it. Text opens right where it is, with Regenerate{draft.kind === "roundup" ? " and Find new story" : ""} here{hasShots ? "; a screenshot opens its video scrubber, frames, Upload and Remove" : ""}. Locked parts (headings, labels, masthead, footer) come from the template.
             </p>
@@ -1325,6 +1454,134 @@ function SectionEditor({
           </Button>
         )}
       </div>
+    </div>
+  );
+}
+
+/** "Before you send": the pre-send checks, the proofread's fixes, and the test send. */
+function SendPanel({
+  checks,
+  fixes,
+  busy,
+  sections,
+  canSendTest,
+  onChecks,
+  onProofread,
+  onSendTest,
+  onApplyFixes,
+  onSelect,
+  onClose,
+}: {
+  checks: PreSendCheck[] | null;
+  fixes: ProofreadFix[] | null;
+  busy: string | null;
+  sections: { key: string; heading: string | null }[];
+  canSendTest: boolean;
+  onChecks: () => void;
+  onProofread: () => void;
+  onSendTest: () => void;
+  onApplyFixes: (fixes: ProofreadFix[]) => void;
+  onSelect: (key: string) => void;
+  onClose: () => void;
+}) {
+  const nameOf = (key: string | null | undefined) => (key ? (sections.find((s) => s.key === key)?.heading ?? key.replace(/_/g, " ")) : null);
+  const icon = (level: PreSendCheck["level"]) =>
+    level === "error" ? <CircleAlert className="size-3.5 shrink-0 text-red-600" /> : level === "warn" ? <AlertTriangle className="size-3.5 shrink-0 text-amber-600" /> : <CheckCircle2 className="size-3.5 shrink-0 text-emerald-600" />;
+  const problems = checks?.filter((c) => c.level !== "ok") ?? [];
+  const fine = checks?.filter((c) => c.level === "ok") ?? [];
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center justify-between gap-2">
+        <span className="flex items-center gap-1.5 text-sm font-medium">
+          <ListChecks className="size-4 text-primary" /> Before you send
+        </span>
+        <Button size="icon-xs" variant="ghost" onClick={onClose} aria-label="Close">
+          <X />
+        </Button>
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        <Button size="xs" variant="outline" onClick={onChecks} disabled={busy !== null}>
+          {busy === "checks" ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+          {checks ? "Check again" : "Run checks"}
+        </Button>
+        <Button size="xs" variant="outline" onClick={onProofread} disabled={busy !== null}>
+          {busy === "proofread" ? <Loader2 className="animate-spin" /> : <SpellCheck />}
+          {fixes ? "Proofread again" : "Proofread"}
+        </Button>
+        {canSendTest && (
+          <Button size="xs" variant="outline" onClick={onSendTest} disabled={busy !== null} title="Emails the exact email to you (only you)">
+            {busy === "test-email" ? <Loader2 className="animate-spin" /> : <Mail />}
+            Send test to me
+          </Button>
+        )}
+      </div>
+      {busy === "checks" && (
+        <p className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Loader2 className="size-3.5 animate-spin" /> Checking the text and fetching every link…
+        </p>
+      )}
+      {checks && (
+        <div className="flex flex-col gap-1.5">
+          <span className="text-xs font-medium">{problems.length ? `${problems.length} to look at` : "All clear"}</span>
+          {problems.map((c, i) => (
+            <button
+              key={i}
+              type="button"
+              onClick={() => c.sectionKey && onSelect(c.sectionKey)}
+              className={cn("flex items-start gap-2 rounded-md border px-2 py-1.5 text-left text-xs", c.level === "error" ? "border-red-200 bg-red-50/50 dark:border-red-900/50 dark:bg-red-900/10" : "border-amber-200 bg-amber-50/50 dark:border-amber-800/50 dark:bg-amber-900/10", c.sectionKey && "cursor-pointer hover:bg-muted/40")}
+            >
+              {icon(c.level)}
+              <span className="min-w-0 flex-1 break-words">
+                {nameOf(c.sectionKey) && <span className="font-medium">{nameOf(c.sectionKey)}: </span>}
+                {c.message}
+              </span>
+            </button>
+          ))}
+          {fine.length > 0 && (
+            <details className="text-xs text-muted-foreground">
+              <summary className="cursor-pointer">{fine.length} OK</summary>
+              <ul className="mt-1 flex flex-col gap-0.5">
+                {fine.map((c, i) => (
+                  <li key={i} className="flex items-start gap-1.5 break-all">
+                    {icon("ok")} {c.message}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </div>
+      )}
+      {busy === "proofread" && (
+        <p className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Loader2 className="size-3.5 animate-spin" /> Reading for typos and slips…
+        </p>
+      )}
+      {fixes && (
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium">{fixes.length ? `${fixes.length} fix${fixes.length === 1 ? "" : "es"}` : "No typos found"}</span>
+            {fixes.length > 1 && (
+              <Button size="xs" onClick={() => onApplyFixes(fixes)}>
+                <Check /> Apply all
+              </Button>
+            )}
+          </div>
+          {fixes.map((f, i) => (
+            <div key={i} className="flex flex-col gap-1 rounded-md border px-2 py-1.5 text-xs">
+              <span className="text-[11px] text-muted-foreground">
+                {nameOf(f.sectionKey)} · {f.why}
+              </span>
+              <span>
+                <span className="rounded bg-red-50 px-1 line-through decoration-red-400 dark:bg-red-900/20">{f.find}</span> →{" "}
+                <span className="rounded bg-emerald-50 px-1 dark:bg-emerald-900/20">{f.replace}</span>
+              </span>
+              <Button size="xs" variant="outline" className="self-start" onClick={() => onApplyFixes([f])}>
+                <Check /> Apply
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

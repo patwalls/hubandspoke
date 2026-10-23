@@ -142,7 +142,6 @@ export async function reviewDraft(draftId: string, opts: { signal?: AbortSignal;
         betas: ["server-side-fallback-2026-07-01"],
         fallbacks: "default",
         tools: [REVIEW_TOOL],
-        tool_choice: { type: "tool", name: "submit_review" },
         messages: [{ role: "user", content: prompt }],
       },
       { signal: opts.signal, timeout: REQUEST_TIMEOUT_MS },

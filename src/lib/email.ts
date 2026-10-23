@@ -491,3 +491,12 @@ export async function sendMyWorkDigestEmail(opts: {
 }) {
   return sendMail(opts);
 }
+
+/**
+ * A newsletter draft as a test send (the editor's "Send test to me"): the
+ * exact HTML the HubSpot push sends, to the signed-in editor's own address
+ * only — the route never takes a recipient. Subject is prefixed [TEST].
+ */
+export async function sendNewsletterTestEmail(opts: { to: string; subject: string; html: string; text: string }) {
+  return sendMail({ to: opts.to, subject: `[TEST] ${opts.subject}`, text: opts.text, html: opts.html });
+}
