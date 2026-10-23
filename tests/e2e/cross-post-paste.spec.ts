@@ -29,18 +29,18 @@ test("cross-post tab takes each cross-post's live link in place", async ({ page 
     };
 
     const pillarId = await create(`E2E paste pillar ${stamp}`, "youtube_long");
-    const sourceId = await create(`E2E paste x ${stamp}`, "x");
+    const sourceId = await create(`E2E paste instagram ${stamp}`, "instagram_post");
     const linkedinId = await create(`E2E paste linkedin ${stamp}`, "linkedin");
     const threadsId = await create(`E2E paste threads ${stamp}`, "threads");
 
     const [account] = await sql`
       INSERT INTO accounts (brand_id, platform, handle)
-      SELECT id, 'x', ${`e2e_${stamp}`} FROM brands WHERE slug = 'starter-story'
+      SELECT id, 'instagram', ${`e2e_${stamp}`} FROM brands WHERE slug = 'starter-story'
       RETURNING id`;
     await sql`
       UPDATE production_items SET status = 'Published', account_id = ${account.id},
-        pillar_content_item_id = ${pillarId},
-        published_link = ${`https://x.com/starter_story/status/${stamp}`}
+        pillar_content_item_id = ${pillarId}, descript_composition_id = ${`e2e-${stamp}`},
+        published_link = ${`https://www.instagram.com/p/e2e${stamp}/`}
       WHERE id = ${sourceId}`;
     await sql`
       UPDATE production_items SET status = 'Ready To Publish', source_type = 'cross_post',
