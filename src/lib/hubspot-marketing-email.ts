@@ -3,14 +3,20 @@
 // draft. It never publishes, schedules or sends — those stay manual in
 // HubSpot.
 //
-// Approach: copy the format's TEMPLATE EMAIL (a fully styled, never-sent
-// email in the account, e.g. "[TEMPLATE] Sunday Breakfast – Hub & Spoke (do
-// not send)"), then fill the rich-text blocks the format's newsletter template
-// maps its sections to (`template.hubspot.blocks`), plus the subject and the
-// preview text. Everything else in the copy — masthead, course labels,
-// dividers, footer — stays exactly as the template email has it. Confirmed
-// against account 20627419 on 2026-10-21: clone returns a DRAFT with the same
-// widget ids; PATCH accepts name / subject / content.widgets.
+// Approach: copy the format's TEMPLATE EMAIL (a never-sent email in the
+// account, e.g. "[TEMPLATE] Sunday Breakfast – Hub & Spoke (do not send)" —
+// it carries the sender, the lists, the subscription type and the footer),
+// then replace the copy's drag-and-drop layout with ONE rich-text block
+// holding the whole email as Hub & Spoke renders it (renderEmailBody:
+// masthead, headings, sections, images, buttons — table-based, inline CSS)
+// followed by the template's footer block, plus the subject and the preview
+// text. So the email is designed in Hub & Spoke end to end; HubSpot adds the
+// footer (unsubscribe, address) and sends. Confirmed against account 20627419
+// on 2026-10-21/23: clone returns a DRAFT with the same widget ids; PATCH
+// accepts name / subject / content.widgets / content.flexAreas (a GET right
+// after the PATCH reads `flexAreas` back as `{main: {}}`, but a clone of that
+// email shows the two-section layout stored as sent; the rich text's HTML
+// comes back byte-identical).
 //
 // Env:
 //   HUBSPOT_PORTAL_53_ACCESS_TOKEN   service key with ONLY the `content` scope
@@ -90,59 +96,94 @@ async function hubspotFetch<T>(path: string, init: { method: "GET" | "POST" | "P
 }
 
 interface Widget {
-  body?: { html?: string; path?: string; value?: string; label_text?: string; [k: string]: unknown };
+  body?: { html?: string; path?: string; value?: string; label_text?: string; hs_enable_module_padding?: boolean; hs_wrapper_css?: Record<string, string>; [k: string]: unknown };
+  [k: string]: unknown;
+}
+/** A drag-and-drop email's layout: sections of columns of widget ids. */
+interface FlexColumn {
+  id: string;
+  widgets: string[];
+  width: number;
+  [k: string]: unknown;
+}
+interface FlexSection {
+  id: string;
+  columns: FlexColumn[];
+  [k: string]: unknown;
+}
+interface FlexAreas {
+  main?: { sections?: FlexSection[]; [k: string]: unknown };
   [k: string]: unknown;
 }
 export interface HubspotEmail {
   id: string;
   name?: string;
   subject?: string;
-  content?: { widgets?: Record<string, Widget>; [k: string]: unknown };
+  content?: { widgets?: Record<string, Widget>; flexAreas?: FlexAreas; [k: string]: unknown };
   [k: string]: unknown;
 }
 
-/**
- * The full `content.widgets` for the copy: every widget unchanged except the
- * filled rich-text blocks and the preview text. Sends ALL widgets so a PATCH
- * can never drop one. Throws when a mapped block is missing or isn't a
- * rich-text block, so a stale mapping fails loudly instead of producing a
- * half-filled email. Pure — exported for tests.
- */
-/** Strip tags + decode the few entities markdownToEmailHtml emits (for label modules). */
-function htmlToText(html: string): string {
-  return html
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#x27;|&#39;/g, "'")
-    .replace(/\s+/g, " ")
-    .trim();
-}
+const FOOTER = "@hubspot/email_footer";
+const DIVIDER = "@hubspot/email_divider";
+const RICH_TEXT = "@hubspot/rich_text";
 
-export function buildWidgets(
+/**
+ * The copy's new `content`: its layout cut down to two sections — the first
+ * rich-text block, now holding `html` (the whole email as Hub & Spoke renders
+ * it, with no padding of HubSpot's around it), and the template's footer
+ * (with any divider that sits with it) — plus the preview text. Every other
+ * widget (the template's masthead, labels, old rich text) is dropped with its
+ * section, so nothing of the template email shows twice. Throws when the
+ * template has no rich-text block or no footer (HubSpot needs the footer's
+ * unsubscribe link), so a stale template fails loudly. Pure — exported for
+ * tests.
+ */
+export function buildHtmlEmailContent(
   email: HubspotEmail,
-  blockHtml: Record<string, string>,
+  html: string,
   previewText: string | null,
-): Record<string, Widget> {
-  const widgets: Record<string, Widget> = { ...(email.content?.widgets ?? {}) };
-  for (const [id, html] of Object.entries(blockHtml)) {
-    const w = widgets[id];
-    if (!w) throw new HubspotEmailError(422, `template email ${email.id} has no block ${id} — update the format's HubSpot mapping`);
-    if (w.body?.path === "@hubspot/rich_text") {
-      widgets[id] = { ...w, body: { ...w.body, html } };
-    } else if (typeof w.body?.label_text === "string") {
-      // A label module (Daily Seinfeld's "Read Time"): plain text only.
-      widgets[id] = { ...w, body: { ...w.body, label_text: htmlToText(html) } };
-    } else {
-      throw new HubspotEmailError(422, `block ${id} in template email ${email.id} isn't a rich-text block or a label`);
-    }
-  }
-  if (previewText !== null && widgets.preview_text) {
-    widgets.preview_text = { ...widgets.preview_text, body: { ...widgets.preview_text.body, value: previewText } };
-  }
-  return widgets;
+): { flexAreas: FlexAreas; widgets: Record<string, Widget> } {
+  const widgets = email.content?.widgets ?? {};
+  const main = email.content?.flexAreas?.main;
+  const sections = main?.sections ?? [];
+  const path = (id: string) => widgets[id]?.body?.path;
+  const sectionOf = (id: string) => sections.find((s) => s.columns.some((c) => c.widgets.includes(id)));
+  // The first rich-text block in layout order (else any), and the footer.
+  const inLayout = sections.flatMap((s) => s.columns.flatMap((c) => c.widgets));
+  const richId = inLayout.find((id) => path(id) === RICH_TEXT) ?? Object.keys(widgets).find((id) => path(id) === RICH_TEXT);
+  const footerId = inLayout.find((id) => path(id) === FOOTER) ?? Object.keys(widgets).find((id) => path(id) === FOOTER);
+  if (!richId) throw new HubspotEmailError(422, `template email ${email.id} has no rich-text block to hold the email`);
+  if (!footerId) throw new HubspotEmailError(422, `template email ${email.id} has no footer block (HubSpot needs its unsubscribe link)`);
+  const bodySec = sectionOf(richId);
+  const footSec = sectionOf(footerId);
+  if (!bodySec || !footSec) throw new HubspotEmailError(422, `template email ${email.id} has no drag-and-drop layout to fill`);
+  const footerColumn = footSec.columns.find((c) => c.widgets.includes(footerId))!;
+  const footerWidgets = footerColumn.widgets.filter((id) => id === footerId || path(id) === DIVIDER);
+  const out: Record<string, Widget> = {
+    [richId]: {
+      ...widgets[richId],
+      body: {
+        ...widgets[richId].body,
+        html,
+        // The email carries its own padding; HubSpot's module padding would double it.
+        hs_enable_module_padding: false,
+        hs_wrapper_css: { "padding-top": "0px", "padding-right": "0px", "padding-bottom": "0px", "padding-left": "0px" },
+      },
+    },
+  };
+  for (const id of footerWidgets) out[id] = widgets[id];
+  if (widgets.preview_text) out.preview_text = { ...widgets.preview_text, body: { ...widgets.preview_text.body, value: previewText ?? "" } };
+  const flexAreas: FlexAreas = {
+    ...email.content?.flexAreas,
+    main: {
+      ...main,
+      sections: [
+        { ...bodySec, columns: [{ ...bodySec.columns.find((c) => c.widgets.includes(richId))!, widgets: [richId], width: 12 }] },
+        { ...footSec, columns: [{ ...footerColumn, widgets: footerWidgets, width: 12 }] },
+      ],
+    },
+  };
+  return { flexAreas, widgets: out };
 }
 
 export async function createDraftEmailFromTemplate(args: {
@@ -150,8 +191,8 @@ export async function createDraftEmailFromTemplate(args: {
   name: string;
   subject: string;
   previewText: string | null;
-  /** HubSpot widget id → HTML for that rich-text block. */
-  blockHtml: Record<string, string>;
+  /** The whole email body (renderEmailBody): fills the copy's one rich-text block. */
+  html: string;
 }): Promise<{ id: string; editUrl: string }> {
   const clone = await hubspotFetch<HubspotEmail>("/marketing/v3/emails/clone", {
     method: "POST",
@@ -162,10 +203,10 @@ export async function createDraftEmailFromTemplate(args: {
     throw new HubspotEmailError(500, "clone returned the template's own id; refusing to edit the template");
   }
   const full = await hubspotFetch<HubspotEmail>(`/marketing/v3/emails/${clone.id}`, { method: "GET" });
-  const widgets = buildWidgets(full, args.blockHtml, args.previewText);
+  const content = buildHtmlEmailContent(full, args.html, args.previewText);
   await hubspotFetch<HubspotEmail>(`/marketing/v3/emails/${clone.id}`, {
     method: "PATCH",
-    body: { name: args.name, subject: args.subject, content: { widgets } },
+    body: { name: args.name, subject: args.subject, content },
   });
   return { id: String(clone.id), editUrl: emailEditUrl(String(clone.id)) };
 }

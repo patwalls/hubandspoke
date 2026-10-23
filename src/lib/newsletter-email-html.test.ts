@@ -1,60 +1,150 @@
 import { describe, expect, it } from "vitest";
-import { markdownToEmailHtml } from "./newsletter-email-html";
+import { markdownToEmailHtml, renderEmailBody, renderEmailHtml, renderEmailParts, sectionMarkdown } from "./newsletter-email-html";
+import { DEFAULT_TEMPLATES, styleSchema } from "./newsletter-template";
+
+const style = styleSchema.parse({});
+const sb = DEFAULT_TEMPLATES["sunday breakfast"];
 
 describe("markdownToEmailHtml", () => {
-  it("renders headings, lists and links, opening links in a new tab", () => {
-    const html = markdownToEmailHtml("## This week\n\n- [Watch](https://youtu.be/abc)\n- **Bold**");
-    expect(html).toContain("<h2>This week</h2>");
-    expect(html).toContain('<a href="https://youtu.be/abc" target="_blank">Watch</a>');
+  it("renders headings, lists and links with inline styles only, links opening in a new tab", () => {
+    const html = markdownToEmailHtml("## This week\n\n- [Watch](https://youtu.be/abc)\n- **Bold**", style);
+    expect(html).toMatch(/<p style="[^"]*font-size:21px[^"]*">This week<\/p>/);
+    expect(html).toMatch(/<a href="https:\/\/youtu.be\/abc" target="_blank" style="color:#197bbd;[^"]*">Watch<\/a>/);
     expect(html).toContain("<strong>Bold</strong>");
+    expect(html).not.toMatch(/class=|<style/);
   });
 
-  it("drops raw HTML and unsafe link schemes from the model's markdown", () => {
-    const html = markdownToEmailHtml('<script>alert(1)</script>\n\n[x](javascript:alert(1))');
+  it("shows raw HTML as text and drops unsafe link schemes", () => {
+    const html = markdownToEmailHtml('<script>alert(1)</script>\n\n[x](javascript:alert(1))\n\n![p](data:image/png;base64,AAAA)', style);
     expect(html).not.toContain("<script");
+    expect(html).toContain("&lt;script&gt;");
     expect(html).not.toContain("javascript:");
+    expect(html).not.toContain("data:image");
+    expect(html).toContain("x"); // the link's text survives
+  });
+
+  it("keeps a numbered list's start number (steps split by an image stay numbered)", () => {
+    const html = markdownToEmailHtml("4. Four\n5. Five", style);
+    expect(html).toContain('<ol start="4"');
+  });
+
+  it("turns a line that is only a link into a button when asked, else a plain link", () => {
+    const md = "Grab it:\n\n**[Check it out HERE](https://lp.example)**";
+    const plain = markdownToEmailHtml(md, style);
+    expect(plain).not.toContain("<table");
+    const button = markdownToEmailHtml(md, { ...style, buttonColor: "#6b72c4" }, { buttons: true });
+    expect(button).toContain('<td align="center" style="background:#6b72c4;');
+    expect(button).toContain('href="https://lp.example"');
+    expect(button).toContain("color:#ffffff");
+    // A link with other words around it stays inline.
+    expect(markdownToEmailHtml("See [this](https://x.example) now", style, { buttons: true })).not.toContain("<table");
+  });
+
+  it("fits images (full-size video frames) to the email's width and rounds them", () => {
+    const html = markdownToEmailHtml("![the dashboard](https://s3.example.com/f.jpg)", style);
+    expect(html).toContain('src="https://s3.example.com/f.jpg"');
+    expect(html).toContain('width="552"');
+    expect(html).toContain("max-width:552px");
+    expect(html).toContain("border-radius:10px");
+    expect(html).not.toContain("data-img");
+  });
+
+  it("on the canvas, images and screenshot spots carry the editor's handles", () => {
+    const html = markdownToEmailHtml("![a](https://x.example/a.jpg)\n\n![b](https://x.example/b.jpg)", style, { canvas: true });
+    expect(html).toContain('class="nlc-img" data-img="0"');
+    expect(html).toContain('class="nlc-img" data-img="1"');
+  });
+
+  it("single newlines break the line (what the editor shows is what sends)", () => {
+    expect(markdownToEmailHtml("Hey!\nWelcome.", style)).toContain("Hey!<br>Welcome.");
   });
 });
 
-describe("renderEmailHtml", () => {
-  // Imported lazily so the markdownToEmailHtml tests above stay independent.
-  it("renders the masthead, colored pill headings, the sponsor box with promo copy, and hints in template previews", async () => {
-    const { renderEmailHtml } = await import("./newsletter-email-html");
-    const { DEFAULT_TEMPLATES } = await import("./newsletter-template");
-    const t = DEFAULT_TEMPLATES["sunday breakfast"];
-    const html = renderEmailHtml({
-      template: t,
-      sections: [{ key: "orange_juice", markdown: "**[$50K/Month App](https://x.example)**" }],
-      sponsor: { copy: "Free CRM", landingUrl: "https://lp.example" },
-      subject: "Hi",
-      previewText: "Starter Story Sunday Breakfast",
-    });
-    expect(html).toContain(t.style.mastheadImageUrl!);
-    expect(html).toContain("background:#fed7aa"); // Orange Juice pill
-    expect(html).toContain("The Orange Juice 🍊");
-    expect(html).toContain("background:#EBECFC"); // sponsor box
-    expect(html).toContain("Free CRM");
-    expect(html).toContain('href="https://lp.example"');
-    expect(html).toContain("Starter Story Sunday Breakfast"); // hidden preheader
-    expect(html).not.toContain("The week's flagship YouTube video"); // no hints in a draft
+describe("sectionMarkdown + screenshots", () => {
+  const sec = { ...sb.sections[1], key: "steps", screenshots: true };
+  const sections = [{ key: "steps", markdown: "**1. Open it**\nClick.\n\n*[Screenshot @ 4:32: the Skills page]*\n\n**2. Next**" }];
 
-    const preview = renderEmailHtml({ template: t, sections: [], showHints: true });
-    expect(preview).toContain("flagship story"); // hint shown where content goes
+  it("swaps a picked placeholder for its image and leaves an unpicked one out of the email", () => {
+    const chosen = { "steps:the skills page": { frameId: "f1", sec: 272, bucket: "b", key: "k/1.jpg" } };
+    const withPick = sectionMarkdown({ template: sb, sections, screenshots: { chosen, urlFor: () => "https://cdn.example/1.jpg" } }, sec);
+    expect(withPick).toContain("](https://cdn.example/1.jpg)");
+    expect(withPick).not.toContain("[Screenshot");
+    const html = markdownToEmailHtml(withPick, style);
+    expect(html).toContain('alt="the Skills page"');
+    expect(html).not.toContain("__shot__");
+    const noPick = sectionMarkdown({ template: sb, sections, screenshots: null }, sec);
+    expect(noPick).not.toContain("Screenshot");
+    expect(noPick).toContain("**2. Next**");
   });
 
-  it("escapes template text and drops raw HTML from section markdown", async () => {
-    const { renderEmailHtml } = await import("./newsletter-email-html");
-    const { DEFAULT_TEMPLATES } = await import("./newsletter-template");
-    const t = { ...DEFAULT_TEMPLATES["daily seinfeld"], sections: [{ ...DEFAULT_TEMPLATES["daily seinfeld"].sections[0], heading: "<b>x</b>" }] };
-    const html = renderEmailHtml({ template: t, sections: [{ key: "story", markdown: "<script>alert(1)</script> hi" }] });
+  it("on the canvas an unpicked placeholder is a dashed spot with its handle, and steps without one get an add point", () => {
+    const parts = renderEmailParts({ template: { ...sb, sections: [sec] }, sections, canvas: true });
+    const s = parts.sections[0];
+    expect(s.content).toContain('data-shot="steps:the skills page"');
+    expect(s.content).toContain("border:2px dashed");
+    expect(s.content).toContain("@ 4:32");
+    expect(s.addPoints.map((p) => p.n)).toEqual([2]);
+  });
+});
+
+describe("renderEmailParts / renderEmailBody / renderEmailHtml", () => {
+  const args = {
+    template: sb,
+    sections: [
+      { key: "intro", markdown: "Hey!" },
+      { key: "orange_juice", markdown: "**[$50K/Month App](https://x.example)**" },
+    ],
+    sponsor: { copy: "Free CRM", landingUrl: "https://lp.example" },
+    subject: "Hi",
+    previewText: "Starter Story Sunday Breakfast",
+  };
+
+  it("renders the masthead, the colored course pills, the tinted sponsor box with a button, and skips empty sections", () => {
+    const parts = renderEmailParts(args);
+    expect(parts.masthead).toContain(sb.style.mastheadImageUrl!);
+    expect(parts.masthead).toContain("background:#EBECFC");
+    const oj = parts.sections.find((s) => s.key === "orange_juice")!;
+    expect(oj.heading).toContain("background:#fed7aa");
+    expect(oj.heading).toContain("The Orange Juice 🍊");
+    const special = parts.sections.find((s) => s.key === "special")!;
+    expect(special.content).toContain("background:#EBECFC;border-radius:12px");
+    expect(special.content).toContain("Free CRM");
+    expect(special.content).toContain('href="https://lp.example"');
+    expect(special.content).toContain("background:#6B72C4"); // the CTA is a button
+    expect(parts.sections.find((s) => s.key === "coffee")!.content).toBe("");
+    expect(parts.sections.find((s) => s.key === "coffee")!.empty).toBe(true);
+    const body = renderEmailBody(args);
+    // Empty sections leave no heading behind in the sent email.
+    expect(body).not.toContain("The Coffee ☕");
+    expect(body).toContain("The Orange Juice 🍊");
+    expect(body).not.toContain("nlc-");
+    expect(body).not.toContain("<style");
+  });
+
+  it("template previews show the instructions where content goes, and the sample boxes", () => {
+    const parts = renderEmailParts({ template: sb, sections: [], showHints: true });
+    expect(parts.sections.find((s) => s.key === "orange_juice")!.content).toContain("flagship story");
+    const how = DEFAULT_TEMPLATES["futurepedia newsletter"];
+    const steps = renderEmailParts({ template: how, sections: [], showHints: true }).sections.find((s) => s.key === "steps")!;
+    expect(steps.content).toContain("Screenshots go here");
+  });
+
+  it("escapes template text, and the document carries the preheader, the page background and the 600px frame", () => {
+    const t = { ...DEFAULT_TEMPLATES["daily seinfeld"], sections: [{ ...DEFAULT_TEMPLATES["daily seinfeld"].sections[1], heading: "<b>x</b>" }] };
+    const html = renderEmailHtml({ template: t, sections: [{ key: "hook", markdown: "<script>alert(1)</script> hi" }], previewText: "Preview!" });
     expect(html).toContain("&lt;b&gt;x&lt;/b&gt;");
     expect(html).not.toContain("<script");
+    expect(html).toContain("Preview!");
+    expect(html).toContain('width="600"');
+    expect(html).toContain("max-width:600px");
+    expect(html).toContain(`background:${t.style.pageBackground}`);
   });
 
-  it("fits images (full-size video frames) to the email's width", () => {
-    const html = markdownToEmailHtml("![the dashboard](https://s3.example.com/f.jpg)");
-    expect(html).toContain('src="https://s3.example.com/f.jpg"');
-    expect(html).toContain('width="100%"');
-    expect(html).toContain("max-width:100%");
+  it("a label section (Daily Seinfeld's Read Time) is a small inline label, not a paragraph", () => {
+    const ds = DEFAULT_TEMPLATES["daily seinfeld"];
+    const part = renderEmailParts({ template: ds, sections: [{ key: "read_time", markdown: "Read Time: 47 sec." }] }).sections[0];
+    expect(part.content).toContain("font-size:13px");
+    expect(part.content).toContain("Read Time: 47 sec.");
+    expect(part.content).not.toContain("<p");
   });
 });

@@ -1,20 +1,27 @@
 "use client";
 
-// The newsletter rendered as its email, in the browser: masthead, plain or
-// pill headings, tinted boxes, dividers — every style from emailCss(), the
-// same map renderEmailHtml uses for the sent email, so they can't drift.
-// `scale` shrinks it into a thumbnail (the format page's template card).
-// With `edit` it is the newsletter editor's canvas: click a section to edit it
-// in place (EditableSection — the same behavior for every newsletter).
+// The newsletter on screen, as the email itself: the SAME HTML the HubSpot
+// push sends (renderEmailParts in newsletter-email-html.ts), drawn section by
+// section so the editor can put click-to-edit around each piece. Nothing is
+// re-styled here — if it looks right on the canvas it looks right in the
+// inbox. `width` draws it at a desktop (600px) or phone width; `scale`
+// shrinks it into a thumbnail (the format page's template card). With `edit`
+// it is the newsletter editor's canvas: click text to edit it in place
+// (EditableSection), click a screenshot spot or an image for its panel, drop
+// an image file on either. beehiiv formats keep their own card preview.
 
-import type { CSSProperties } from "react";
-import ReactMarkdown, { type Components } from "react-markdown";
+import { useMemo, type CSSProperties, type DragEvent, type MouseEvent } from "react";
+import { Loader2, Plus } from "lucide-react";
 import { BeehiivPreview } from "@/components/dashboard/beehiiv-preview";
-import { imageFor, ImageBlock, markImages, markShots, ScreenshotSample, shotFor, ShotBlock, ThumbnailSample, type DraftImage, type PreviewScreenshots, type Shot } from "@/components/dashboard/preview-screenshots";
 import { EditableSection, emptySectionHint, FixedPart, type PreviewEditing } from "@/components/dashboard/editable-section";
-import { emailCss, sponsorBlock, type CssProps, type NewsletterSection, type NewsletterTemplate } from "@/lib/newsletter-template";
+import type { PreviewScreenshots } from "@/components/dashboard/preview-screenshots";
+import { EMAIL_WIDTH, renderEmailParts } from "@/lib/newsletter-email-html";
+import type { NewsletterSection, NewsletterTemplate } from "@/lib/newsletter-template";
 
-const asStyle = (c: CssProps) => c as CSSProperties;
+/** What stands in for the footer the email tool adds (never part of what we send). */
+export const FOOTER_NOTE = "HubSpot adds the footer here when it sends: unsubscribe link, address, social links.";
+/** A phone's width on the canvas. */
+export const MOBILE_WIDTH = 390;
 
 export function EmailPreview({
   template,
@@ -26,6 +33,7 @@ export function EmailPreview({
   className,
   edit,
   screenshots,
+  width = EMAIL_WIDTH,
 }: {
   template: NewsletterTemplate;
   sections?: NewsletterSection[];
@@ -39,94 +47,115 @@ export function EmailPreview({
   edit?: PreviewEditing;
   /** Picked images for screenshot placeholders; without it every placeholder draws as a box. */
   screenshots?: PreviewScreenshots;
+  /** The email's width on screen: 600 (desktop) or MOBILE_WIDTH. */
+  width?: number;
 }) {
   // beehiiv formats (Futurepedia): draw the card layout the push builds.
   if (template.beehiiv?.layout) {
     return <BeehiivPreview template={template} sections={sections} sponsor={sponsor} showHints={showHints} scale={scale} clipHeight={clipHeight} className={className} edit={edit} screenshots={screenshots} />;
   }
+  return <HtmlEmailPreview template={template} sections={sections} sponsor={sponsor} showHints={showHints} scale={scale} clipHeight={clipHeight} className={className} edit={edit} screenshots={screenshots} width={width} />;
+}
+
+function HtmlEmailPreview({
+  template,
+  sections,
+  sponsor,
+  showHints,
+  scale,
+  clipHeight,
+  className,
+  edit,
+  screenshots,
+  width,
+}: {
+  template: NewsletterTemplate;
+  sections: NewsletterSection[];
+  sponsor: { copy: string | null; landingUrl: string | null } | null;
+  showHints: boolean;
+  scale: number;
+  clipHeight?: number;
+  className?: string;
+  edit?: PreviewEditing;
+  screenshots?: PreviewScreenshots;
+  width: number;
+}) {
   const st = template.style;
-  const css = emailCss(st);
-  const t = css.tags;
-  const shots: Shot[] = [];
-  const images: DraftImage[] = [];
-  /** Draft canvas: images are clickable blocks. */
+  /** Draft canvas: images and screenshot spots are clickable. */
   const draftCanvas = !!edit && edit.mode !== "template";
-  const components: Components = {
-    p: (props) => <p style={asStyle(t.p)}>{props.children}</p>,
-    h1: (props) => <h1 style={asStyle(t.h1)}>{props.children}</h1>,
-    h2: (props) => <h2 style={asStyle(t.h2)}>{props.children}</h2>,
-    h3: (props) => <h3 style={asStyle(t.h3)}>{props.children}</h3>,
-    ul: (props) => <ul style={asStyle(t.ul)}>{props.children}</ul>,
-    // Keep a list's own start number (numbered steps split by images are separate lists).
-    ol: (props) => <ol start={props.start} style={asStyle(t.ol)}>{props.children}</ol>,
-    li: (props) => <li style={asStyle(t.li)}>{props.children}</li>,
-    a: (props) => (
-      <a href={props.href} target="_blank" rel="noreferrer" style={asStyle(t.a)}>
-        {props.children}
-      </a>
-    ),
-    img: (props) => {
-      const shot = shotFor(props.alt, shots);
-      if (shot) return <ShotBlock shot={shot} edit={edit} />;
-      const image = imageFor(props.alt, images);
-      if (image && edit) return <ImageBlock image={image} edit={edit} />;
-      // eslint-disable-next-line @next/next/no-img-element
-      return <img src={typeof props.src === "string" ? props.src : undefined} alt={props.alt ?? ""} style={asStyle(t.img)} />;
-    },
-    blockquote: (props) => <blockquote style={asStyle(t.blockquote)}>{props.children}</blockquote>,
-    hr: () => <hr style={asStyle(t.hr)} />,
-    code: (props) => <code style={asStyle(t.code)}>{props.children}</code>,
-  };
+  const parts = useMemo(
+    () => renderEmailParts({ template, sections, sponsor, showHints, screenshots: screenshots ?? null, canvas: draftCanvas }),
+    [template, sections, sponsor, showHints, screenshots, draftCanvas],
+  );
   const byKey = new Map(sections.map((x) => [x.key, x.markdown]));
 
-  const blocks = template.sections
-    .map((sec) => {
-      const raw = (byKey.get(sec.key) ?? "").trim();
-      let md = markShots(sec.key, draftCanvas ? markImages(sec.key, raw, images) : raw, screenshots, shots);
-      if (sec.kind === "sponsor" && sponsor?.copy?.trim()) md = sponsorBlock(sponsor.copy, sponsor.landingUrl);
-      let content = md ? <ReactMarkdown components={components}>{md}</ReactMarkdown> : null;
-      if (!content && showHints) {
-        content = (
-          <>
-            {sec.thumbnail && sec.kind !== "sponsor" && <ThumbnailSample />}
-            <p style={asStyle(css.hint)}>{sec.hint || "(content)"}</p>
-            {sec.screenshots && sec.kind !== "sponsor" && <ScreenshotSample />}
-          </>
-        );
-      }
-      // A "label" section (Daily Seinfeld's Read Time): a small rounded label sized to its text, as in the HubSpot email.
-      if (content && sec.look === "label") {
-        content = (
-          <div
-            className="[&_p]:m-0!"
-            style={{ display: "inline-block", background: sec.boxColor ?? "#e2e8f0", color: "rgb(3, 2, 18)", fontWeight: 700, lineHeight: "120%", padding: 8, borderRadius: 4 }}
-          >
-            {content}
-          </div>
-        );
-      }
+  /** A click (or drop) inside a section's HTML: on a screenshot spot or an image, or just the text. */
+  const target = (e: MouseEvent | DragEvent) => (e.target as HTMLElement).closest<HTMLElement>("[data-shot],[data-img]");
+  const onClick = (sectionKey: string) => (e: MouseEvent<HTMLDivElement>) => {
+    if (!draftCanvas) return;
+    const el = target(e);
+    if (!el) return;
+    e.stopPropagation();
+    if (el.dataset.shot) edit!.onSelectShot(sectionKey, el.dataset.shot);
+    else if (el.dataset.img) edit!.onSelectImage?.(sectionKey, Number(el.dataset.img));
+  };
+  const onDrop = (sectionKey: string) => (e: DragEvent<HTMLDivElement>) => {
+    if (!draftCanvas) return;
+    const el = target(e);
+    if (!el) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const f = e.dataTransfer.files?.[0];
+    if (!f?.type.startsWith("image/")) return;
+    if (el.dataset.shot) edit!.onDropShot(sectionKey, el.dataset.shot, f);
+    else if (el.dataset.img) edit!.onDropImage?.(sectionKey, Number(el.dataset.img), f);
+  };
+
+  const blocks = parts.sections
+    .map((part) => {
+      const sec = template.sections.find((s) => s.key === part.key)!;
+      let content: React.ReactNode = part.content ? (
+        <div
+          className="nlc-section"
+          onClick={onClick(sec.key)}
+          onDragOver={draftCanvas ? (e) => target(e) && e.preventDefault() : undefined}
+          onDrop={onDrop(sec.key)}
+          dangerouslySetInnerHTML={{ __html: part.content }}
+        />
+      ) : null;
       if (edit) {
         content = (
           <EditableSection sectionKey={sec.key} markdown={edit.mode === "template" ? sec.hint : (byKey.get(sec.key) ?? "")} isSponsor={sec.kind === "sponsor"} edit={edit}>
             {content ?? emptySectionHint(sec.hint)}
+            {part.addPoints.length > 0 && (
+              <span className="mb-3 flex flex-wrap items-center justify-center gap-1.5">
+                {part.addPoints.map((p) => {
+                  const busy = edit.addingShot === `${sec.key}:${p.n}`;
+                  return (
+                    <button
+                      key={p.n}
+                      type="button"
+                      disabled={!!edit.addingShot}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        edit.onAddShot?.(sec.key, p.n);
+                      }}
+                      title={`Add a screenshot of step ${p.n}, picked from the video`}
+                      className="inline-flex items-center gap-1 rounded-full border border-dashed border-[#c7d2dc] px-2.5 py-0.5 text-[12px] font-medium leading-normal text-[#6b7280] hover:border-[#49adff] hover:text-[#49adff] disabled:opacity-50"
+                    >
+                      {busy ? <Loader2 className="size-3 animate-spin" /> : <Plus className="size-3" />}
+                      {busy ? "Finding the moment…" : `Screenshot for step ${p.n}`}
+                    </button>
+                  );
+                })}
+              </span>
+            )}
           </EditableSection>
         );
       }
-      if (content && sec.boxColor && sec.look !== "label") content = <div style={asStyle(css.box(sec.boxColor))}>{content}</div>;
-      const heading = sec.heading ? (
-        <FixedPart
-          edit={edit}
-          reason={template.hubspot?.blocks[sec.key] ? "Heading: from the HubSpot template email" : "Heading: set in the template"}
-          onSelect={edit ? () => edit.onSelectSection(sec.key) : undefined}
-          lockedInTemplate={template.hubspot?.blocks[sec.key] ? "Set in the HubSpot template email: change it there" : null}
-        >
-          {sec.pillColor ? (
-            <div style={asStyle(css.pillWrap)}>
-              <span style={asStyle(css.pill(sec.pillColor))}>{sec.heading}</span>
-            </div>
-          ) : (
-            <div style={asStyle(css.plainHeading(sec.headingLevel))}>{sec.heading}</div>
-          )}
+      const heading = part.heading ? (
+        <FixedPart edit={edit} reason="Heading: set in the template" onSelect={edit ? () => edit.onSelectSection(sec.key) : undefined}>
+          <div dangerouslySetInnerHTML={{ __html: part.heading }} />
         </FixedPart>
       ) : null;
       if (!heading && !content) return null;
@@ -139,27 +168,39 @@ export function EmailPreview({
     })
     .filter(Boolean);
 
-  const img = st.mastheadImageUrl ? (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img src={st.mastheadImageUrl} alt="" style={asStyle(css.mastheadImg)} />
-  ) : null;
-
+  const selectedShot = edit?.selected?.startsWith("shot:") ? edit.selected.slice(5) : null;
+  const selectedImg = edit?.selected?.startsWith("img:") ? edit.selected.slice(4) : null;
   const email = (
-    <div style={asStyle(css.outer)}>
-      <div style={asStyle(css.card)}>
-        <div style={asStyle(css.inner)}>
-          {img && (
-            <FixedPart edit={edit} reason={template.hubspot ? "Masthead: from the HubSpot template email" : "Masthead: set in the template"}>
-              <div style={asStyle(css.mastheadWrap)}>{st.mastheadLinkUrl ? <a href={st.mastheadLinkUrl} target="_blank" rel="noreferrer">{img}</a> : img}</div>
+    <div style={{ background: st.pageBackground, padding: scale === 1 ? "24px 12px 20px" : 0 }}>
+      {draftCanvas && (
+        <style>{`
+          .nlc-canvas .nlc-shot, .nlc-canvas .nlc-img { cursor: pointer; }
+          .nlc-canvas .nlc-shot:hover, .nlc-canvas .nlc-img:hover { outline: 2px solid rgba(73,173,255,.6); outline-offset: 2px; }
+          ${selectedShot ? `.nlc-canvas [data-shot=${JSON.stringify(selectedShot)}] { outline: 2px solid #49adff; outline-offset: 2px; }` : ""}
+          ${selectedImg ? `.nlc-canvas [data-img=${JSON.stringify(selectedImg.split(":")[1])}] { outline: 2px solid #49adff; outline-offset: 2px; }` : ""}
+        `}</style>
+      )}
+      <div
+        style={{ width, maxWidth: "100%", margin: "0 auto", background: parts.background, border: "1px solid #eaf0f6", borderRadius: 12, overflow: "hidden", transition: "width .2s ease" }}
+      >
+        <div className="nlc-canvas" style={parts.bodyStyle as CSSProperties}>
+          {parts.masthead && (
+            <FixedPart edit={edit} reason="Masthead: set in the template's Look" onSelect={edit?.onSelectLook}>
+              <div dangerouslySetInnerHTML={{ __html: parts.masthead }} />
             </FixedPart>
           )}
           {blocks.map((b, i) => (
             <div key={i}>
-              {i > 0 && (st.dividers ? <hr style={asStyle(css.divider)} /> : <div style={asStyle(css.gap)} />)}
+              {i > 0 && <div dangerouslySetInnerHTML={{ __html: parts.divider }} />}
               {b}
             </div>
           ))}
         </div>
+        {template.hubspot && (
+          <FixedPart edit={edit} reason="Footer: HubSpot adds it from the template email (unsubscribe link, address)">
+            <div style={{ borderTop: "1px solid #eaf0f6", padding: "14px 24px", fontFamily: st.fontFamily, fontSize: 12, lineHeight: 1.5, color: "#9ca3af", textAlign: "center" }}>{FOOTER_NOTE}</div>
+          </FixedPart>
+        )}
       </div>
     </div>
   );

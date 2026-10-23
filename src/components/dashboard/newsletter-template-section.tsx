@@ -20,11 +20,11 @@ import { useFeatureFlags } from "@/components/clip-editor/use-feature-flags";
 import { EmailPreview } from "@/components/dashboard/email-preview";
 import { cn } from "@/lib/utils";
 import {
-  hubspotOwnedSection,
   STORY_KIND_LABELS,
   STORY_KINDS,
   type BeehiivCard,
   type BeehiivLayout,
+  type NewsletterStyle,
   type NewsletterTemplate,
   type NewsletterTemplateSection,
   type StoryKind,
@@ -41,8 +41,6 @@ interface StoryContext {
 const LOCKED_NOTE = "This template is locked: changes to its structure can break how the email is built. Need an adjustment? Contact Sam.";
 /** Hover text on a field a locked template doesn't let you change. */
 const FROZEN_WHY = "Locked template: changing this can break how the email builds in beehiiv. Contact Sam if it needs to change.";
-/** Hover text on a field the HubSpot template email owns. */
-const HUBSPOT_WHY = "Set in the HubSpot template email, so every issue matches. To change it, edit that email in HubSpot (link at the top of this panel) or contact Sam.";
 
 /** A field label with a lock (and why, on hover) when the field can't be changed here. */
 function FieldLabel({ text, lock }: { text: string; lock?: string | null }) {
@@ -61,19 +59,18 @@ function FieldLabel({ text, lock }: { text: string; lock?: string | null }) {
   );
 }
 
-/** Where the HubSpot-owned parts of the email are changed. */
+/** What the HubSpot template email still supplies (everything else is designed here). */
 function HubspotTemplateNote({ url }: { url: string | null }) {
   return (
     <p className="rounded-md bg-muted/60 p-3 text-xs text-muted-foreground">
       <Lock className="mr-1 inline size-3 align-[-1px]" />
-      The masthead, section names and labels, their colors and the footer come from the HubSpot template email, so they&apos;re locked here.
-      To change them for every issue, edit that email in HubSpot{url ? " " : ""}
+      The email is designed here, end to end, and sent to HubSpot as one block. The HubSpot template email{url ? " " : ""}
       {url && (
         <a href={url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 text-primary underline">
           (open it <ExternalLink className="size-3" />)
         </a>
       )}{" "}
-      or contact Sam. Here you set what AI writes in each section.
+      only supplies the sender, the lists and the footer (unsubscribe link, address).
     </p>
   );
 }
@@ -212,9 +209,6 @@ function TemplateEditorDialog({
   const dirty = JSON.stringify(t) !== JSON.stringify(initial);
   /** Structure can't change: only section instructions can. */
   const frozen = t.locked && !unlocked;
-  /** HubSpot-owned section names/colors: admins can change them after unlocking (to match the HubSpot email). */
-  const hubspotFrozen = !(canUnlock && unlocked);
-
   const sectionIndex = (key: string) => t.sections.findIndex((s) => s.key === key);
   const setSec = (i: number, patch: Partial<NewsletterTemplateSection>) => setT({ ...t, sections: t.sections.map((s, j) => (j === i ? { ...s, ...patch } : s)) });
   const setHint = (key: string, hint: string) => setT((cur) => ({ ...cur, sections: cur.sections.map((s) => (s.key === key ? { ...s, hint } : s)) }));
@@ -261,7 +255,7 @@ function TemplateEditorDialog({
           </div>
           <div className="flex items-center gap-2 pr-8">
             {error && <span className="max-w-md text-xs text-destructive">{error}</span>}
-            {(t.locked || t.hubspot) && canUnlock && (
+            {t.locked && canUnlock && (
               <Button size="sm" variant="ghost" onClick={() => setUnlocked((u) => !u)} title="Template admins can change a locked template's structure">
                 {frozen ? <LockOpen /> : <Lock />}
                 {frozen ? "Unlock to edit" : "Lock again"}
@@ -307,7 +301,7 @@ function TemplateEditorDialog({
             />
             <p className="flex items-center justify-center gap-1.5 pb-6 text-center text-xs text-muted-foreground">
               <MousePointerClick className="size-3.5" /> Click a section to edit what the drafter writes there
-              {t.beehiiv?.layout ? " · click a card's label or edge for its settings · click the masthead for the look" : ""}
+              {t.beehiiv?.layout ? " · click a card's label or edge for its settings" : ""} · click the masthead for the look
             </p>
           </div>
 
@@ -332,7 +326,6 @@ function TemplateEditorDialog({
                 index={sectionIndex(selSection.key)}
                 storyCtx={storyCtx}
                 frozen={frozen}
-                hubspotFrozen={hubspotFrozen}
                 onChange={(patch) => {
                   const i = sectionIndex(selSection.key);
                   setSec(i, patch);
@@ -368,7 +361,7 @@ function TemplateEditorDialog({
                 frozen={frozen}
                 onAddSection={() => {
                   const key = `section_${t.sections.length + 1}`;
-                  setT({ ...t, sections: [...t.sections, { key, heading: "New section", headingLevel: 2, kind: "text", hint: "", pillColor: null, boxColor: null, screenshots: false, look: "text", thumbnail: false, bullets: "list" }] });
+                  setT({ ...t, sections: [...t.sections, { key, heading: "New section", headingLevel: 2, kind: "text", hint: "", pillColor: null, boxColor: null, screenshots: false, look: "text", thumbnail: false, bullets: "list", linkButtons: false }] });
                   setSelected(key);
                 }}
                 onAddCard={() => {
@@ -411,7 +404,7 @@ function OverviewPanel({
       <PanelTitle>Whole template</PanelTitle>
       <p className="rounded-md bg-muted/60 p-3 text-xs text-muted-foreground">
         Click any section in the email to edit its instructions right there: what AI writes in it every draft. Its settings show here.
-        {t.hubspot ? " The look (masthead, colors, labels, footer) comes from the HubSpot template email; only each section's text is sent to it." : ""}
+        {t.hubspot ? " The look (masthead, colors, headings, buttons) is set here — click the masthead or “Look” — and the whole email is sent to HubSpot as one block; HubSpot adds the footer." : ""}
         {t.beehiiv?.layout ? " Fonts and the footer come from the “Hub & Spoke” template in beehiiv." : ""}
       </p>
       <p className="rounded-md bg-muted/60 p-3 text-xs text-muted-foreground">
@@ -423,15 +416,13 @@ function OverviewPanel({
           <Plus /> Add section
         </Button>
         {t.beehiiv?.layout && (
-          <>
-            <Button size="sm" variant="outline" onClick={onAddCard} disabled={frozen}>
-              <Plus /> Add card
-            </Button>
-            <Button size="sm" variant="ghost" onClick={onLook}>
-              Look (masthead, colors, poll)
-            </Button>
-          </>
+          <Button size="sm" variant="outline" onClick={onAddCard} disabled={frozen}>
+            <Plus /> Add card
+          </Button>
         )}
+        <Button size="sm" variant="ghost" onClick={onLook}>
+          {t.beehiiv?.layout ? "Look (masthead, colors, poll)" : "Look (masthead, colors, font)"}
+        </Button>
       </div>
     </div>
   );
@@ -444,7 +435,6 @@ function SectionPanel({
   index,
   storyCtx,
   frozen,
-  hubspotFrozen,
   onChange,
   onMove,
   onDelete,
@@ -454,16 +444,12 @@ function SectionPanel({
   index: number;
   storyCtx: StoryContext;
   frozen: boolean;
-  hubspotFrozen: boolean;
   onChange: (patch: Partial<NewsletterTemplateSection>) => void;
   onMove: (d: -1 | 1) => void;
   onDelete: () => void;
 }) {
-  /** The section fills a block in the HubSpot template email (its key is that link; its name and colors live there). */
-  const mapped = hubspotOwnedSection(t, sec.key);
-  const ownedLock = mapped && hubspotFrozen ? HUBSPOT_WHY : null;
   /** Why a structural field can't change (null: it can). */
-  const lock = (owned = false) => (owned && ownedLock) || (frozen ? FROZEN_WHY : null);
+  const lock = () => (frozen ? FROZEN_WHY : null);
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-2">
@@ -481,13 +467,28 @@ function SectionPanel({
         <Textarea className="min-h-28 text-xs" value={sec.hint} onChange={(e) => onChange({ hint: e.target.value })} />
       </label>
       <label className="flex flex-col gap-1 text-xs">
-        <FieldLabel text="Section name (empty = the section writes its own headline)" lock={lock(true)} />
-        <Input className="h-8 text-xs" value={sec.heading ?? ""} disabled={!!lock(true)} onChange={(e) => onChange({ heading: e.target.value || null })} />
+        <FieldLabel text="Section name (empty = the section writes its own headline)" lock={lock()} />
+        <Input className="h-8 text-xs" value={sec.heading ?? ""} disabled={!!lock()} onChange={(e) => onChange({ heading: e.target.value || null })} />
       </label>
+      {!t.beehiiv && sec.look !== "label" && (
+        <div className="flex flex-wrap items-center gap-3">
+          <ColorToggle label="Name as a colored pill" value={sec.pillColor} fallback="#fed7aa" disabled={frozen} onChange={(v) => onChange({ pillColor: v })} />
+          <ColorToggle label="Tinted box behind the text" value={sec.boxColor} fallback="#EBECFC" disabled={frozen} onChange={(v) => onChange({ boxColor: v })} />
+        </div>
+      )}
+      {!t.beehiiv && (
+        <label className={cn("flex items-center gap-2 text-xs", frozen && "opacity-60")}>
+          <input type="checkbox" checked={sec.linkButtons} disabled={frozen} onChange={(e) => onChange({ linkButtons: e.target.checked })} />
+          <span>
+            Links on their own line become buttons
+            <span className="block text-muted-foreground">A CTA like “Grab the free guide” draws as a button in the brand color.</span>
+          </span>
+        </label>
+      )}
       <div className="flex flex-wrap gap-2">
         <label className="flex flex-col gap-1 text-xs">
-          <FieldLabel text="Key" lock={mapped ? "Links this section to its block in the HubSpot template email, so it can't be renamed." : lock()} />
-          <Input className="h-8 w-36 font-mono text-xs" value={sec.key} disabled={mapped || frozen} onChange={(e) => onChange({ key: e.target.value })} />
+          <FieldLabel text="Key" lock={lock()} />
+          <Input className="h-8 w-36 font-mono text-xs" value={sec.key} disabled={frozen} onChange={(e) => onChange({ key: e.target.value })} />
         </label>
         <label className="flex flex-col gap-1 text-xs">
           <FieldLabel text="Type" lock={lock()} />
@@ -544,25 +545,30 @@ function SectionPanel({
           </span>
         </label>
       )}
-      {t.hubspot && !mapped && (
-        <p className="rounded-md bg-amber-50 p-2 text-xs text-amber-900 dark:bg-amber-900/30 dark:text-amber-200">
-          Not linked to a block in the HubSpot template email yet, so this section is drafted here but won&apos;t appear in the HubSpot draft. Ask to have it
-          linked.
-        </p>
-      )}
       <div className="flex items-center gap-1">
-        <Button size="icon-xs" variant="ghost" onClick={() => onMove(-1)} disabled={!!lock(true) || index === 0} aria-label="Move up">
+        <Button size="icon-xs" variant="ghost" onClick={() => onMove(-1)} disabled={frozen || index === 0} aria-label="Move up">
           <ArrowUp />
         </Button>
-        <Button size="icon-xs" variant="ghost" onClick={() => onMove(1)} disabled={!!lock(true) || index === t.sections.length - 1} aria-label="Move down">
+        <Button size="icon-xs" variant="ghost" onClick={() => onMove(1)} disabled={frozen || index === t.sections.length - 1} aria-label="Move down">
           <ArrowDown />
         </Button>
-        <Button size="icon-xs" variant="ghost" onClick={onDelete} disabled={!!lock(true) || t.sections.length === 1} aria-label="Remove section">
+        <Button size="icon-xs" variant="ghost" onClick={onDelete} disabled={frozen || t.sections.length === 1} aria-label="Remove section">
           <Trash2 />
         </Button>
-        {lock(true) && <FieldLabel text="" lock={`Order and removal: ${lock(true)}`} />}
+        {lock() && <FieldLabel text="" lock={`Order and removal: ${lock()}`} />}
       </div>
     </div>
+  );
+}
+
+/** An optional color (a section's pill or box): off, or a swatch + text field. */
+function ColorToggle({ label, value, fallback, disabled, onChange }: { label: string; value: string | null; fallback: string; disabled?: boolean; onChange: (v: string | null) => void }) {
+  return (
+    <label className={cn("flex items-center gap-2 text-xs", disabled && "opacity-60")}>
+      <input type="checkbox" checked={value !== null} disabled={disabled} onChange={(e) => onChange(e.target.checked ? fallback : null)} />
+      <span className="text-muted-foreground">{label}</span>
+      {value !== null && <input type="color" className="h-6 w-8 cursor-pointer rounded border" value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)} />}
+    </label>
   );
 }
 
@@ -577,13 +583,42 @@ function HexField({ label, value, disabled, onChange }: { label: string; value: 
   );
 }
 
-/** The email's look: beehiiv masthead/outro images, colors, the poll; the lock (admins). */
+/** The email's look: the HTML email's style (masthead, colors, font) or beehiiv's masthead/outro images, colors and poll; the lock (admins). */
 function LookPanel({ template: t, frozen, canLock, onChange }: { template: NewsletterTemplate; frozen: boolean; canLock: boolean; onChange: (t: NewsletterTemplate) => void }) {
   const layout = t.beehiiv?.layout;
   const set = (patch: Partial<BeehiivLayout>) => layout && onChange({ ...t, beehiiv: { ...t.beehiiv!, layout: { ...layout, ...patch } } });
+  const st = t.style;
+  const setStyle = (patch: Partial<NewsletterStyle>) => onChange({ ...t, style: { ...st, ...patch } });
   return (
     <div className="flex flex-col gap-3">
       <PanelTitle>Look</PanelTitle>
+      {!layout ? (
+        <>
+          <p className="text-xs text-muted-foreground">The whole email is drawn from these settings, in the preview and in the inbox alike.</p>
+          <label className="flex flex-col gap-1 text-xs">
+            <span className="text-muted-foreground">Masthead image URL</span>
+            <Input className="h-8 text-xs" value={st.mastheadImageUrl ?? ""} disabled={frozen} placeholder="https://… (empty = none)" onChange={(e) => setStyle({ mastheadImageUrl: e.target.value || null })} />
+          </label>
+          <label className="flex flex-col gap-1 text-xs">
+            <span className="text-muted-foreground">Masthead links to</span>
+            <Input className="h-8 text-xs" value={st.mastheadLinkUrl ?? ""} disabled={frozen} placeholder="https://… (empty = no link)" onChange={(e) => setStyle({ mastheadLinkUrl: e.target.value || null })} />
+          </label>
+          <HexField label="Masthead bg" value={st.mastheadBackground ?? "#ffffff"} disabled={frozen} onChange={(v) => setStyle({ mastheadBackground: v })} />
+          <HexField label="Text" value={st.textColor} disabled={frozen} onChange={(v) => setStyle({ textColor: v })} />
+          <HexField label="Headings" value={st.headingColor} disabled={frozen} onChange={(v) => setStyle({ headingColor: v })} />
+          <HexField label="Links" value={st.linkColor} disabled={frozen} onChange={(v) => setStyle({ linkColor: v })} />
+          <HexField label="Buttons" value={st.buttonColor ?? st.linkColor} disabled={frozen} onChange={(v) => setStyle({ buttonColor: v })} />
+          <HexField label="Email bg" value={st.contentBackground} disabled={frozen} onChange={(v) => setStyle({ contentBackground: v })} />
+          <label className="flex flex-col gap-1 text-xs">
+            <span className="text-muted-foreground">Font (a system stack every mail client has)</span>
+            <Input className="h-8 text-xs" value={st.fontFamily} disabled={frozen} onChange={(e) => setStyle({ fontFamily: e.target.value })} />
+          </label>
+          <label className={cn("flex items-center gap-2 text-xs", frozen && "opacity-60")}>
+            <input type="checkbox" checked={st.dividers} disabled={frozen} onChange={(e) => setStyle({ dividers: e.target.checked })} />
+            <span>Faint rule between sections</span>
+          </label>
+        </>
+      ) : null}
       {layout ? (
         <>
           <label className="flex flex-col gap-1 text-xs">
@@ -601,11 +636,7 @@ function LookPanel({ template: t, frozen, canLock, onChange }: { template: Newsl
             <span>&ldquo;How was Futurepedia today?&rdquo; poll after the cards</span>
           </label>
         </>
-      ) : (
-        <p className="rounded-md bg-muted/60 p-3 text-xs text-muted-foreground">
-          The masthead, colors, labels and footer come from the HubSpot template email, so they&apos;re changed there, not here.
-        </p>
-      )}
+      ) : null}
       {canLock && (
         <label className="flex items-start gap-2 text-xs">
           <input type="checkbox" className="mt-0.5" checked={t.locked} onChange={(e) => onChange({ ...t, locked: e.target.checked })} />

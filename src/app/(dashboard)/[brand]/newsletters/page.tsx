@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { Suspense } from "react";
 import type { Metadata } from "next";
 import { auth } from "@/lib/auth";
 import { fetchBrandBySlug } from "@/lib/db/brands";
@@ -22,5 +23,10 @@ export default async function BrandNewslettersPage({ params }: NewslettersPagePr
   const { brand } = await params;
   const brandConfig = await fetchBrandBySlug(brand);
   if (!brandConfig) notFound();
-  return <NewsletterDrafterPage brand={brand} />;
+  // Suspense: the board reads `?open=<draft id>` (the nav's New → Newsletter lands here with the editor open).
+  return (
+    <Suspense>
+      <NewsletterDrafterPage brand={brand} />
+    </Suspense>
+  );
 }

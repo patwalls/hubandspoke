@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import { NotificationBell } from "@/components/notifications/notification-bell";
 import { MyWorkButton } from "@/components/my-work/my-work-button";
 import { GlobalSearch } from "@/components/dashboard/global-search";
+import { NewContentMenu } from "@/components/dashboard/new-content-menu";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -301,6 +302,7 @@ export function DashboardNav({
             </div>
           </div>
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+            <NewContentMenu brands={brands} currentBrand={currentBrand} />
             <button
               type="button"
               onClick={() => setSearchOpen(true)}

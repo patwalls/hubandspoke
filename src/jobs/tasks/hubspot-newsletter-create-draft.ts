@@ -1,19 +1,20 @@
 // Worker-only: push a ready newsletter draft into HubSpot portal 53 as an
 // UNSENT draft marketing email (feature flag `newsletterDrafter`). Enqueued by
-// `POST /api/newsletter-drafts/[id]/hubspot`. Idempotent: a draft that already
-// has `hubspot_email_id` is skipped, so a retry never makes a second email.
-// Never publishes, schedules or sends. See docs/automation.md →
-// hubspot-newsletter-create-draft.
+// `POST /api/newsletter-drafts/[id]/hubspot`. The email is rendered here, in
+// full (renderEmailBody — the same HTML the editor's canvas shows), and fills
+// the copy's one rich-text block; HubSpot adds the footer. Idempotent: a
+// draft that already has `hubspot_email_id` is skipped, so a retry never
+// makes a second email. Never publishes, schedules or sends. See
+// docs/automation.md → hubspot-newsletter-create-draft.
 import type { Task } from "graphile-worker";
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { brands, formats, newsletterDrafts } from "@/lib/db/schema";
 import { createDraftEmailFromTemplate } from "@/lib/hubspot-marketing-email";
-import { markdownToEmailHtml } from "@/lib/newsletter-email-html";
-import { applyScreenshots } from "@/lib/newsletter-screenshots";
+import { renderEmailBody } from "@/lib/newsletter-email-html";
 import { resolvePendingScreenshots, screenshotUrlsByKey } from "@/lib/services/newsletter-drafter/screenshots";
 import { advanceNewsletterItem } from "@/lib/services/newsletter-drafter/queue-status";
-import { blockMarkdown, hubspotEmailName, templateFor } from "@/lib/newsletter-template";
+import { hubspotEmailName, templateFor } from "@/lib/newsletter-template";
 
 export interface HubspotNewsletterCreateDraftPayload {
   newsletterDraftId: string;
@@ -30,11 +31,9 @@ export const hubspotNewsletterCreateDraftTask: Task = async (rawPayload, helpers
       sendDate: newsletterDrafts.sendDate,
       sections: newsletterDrafts.sections,
       screenshots: newsletterDrafts.screenshots,
-      bodyMarkdown: newsletterDrafts.bodyMarkdown,
       specialCopy: newsletterDrafts.specialCopy,
       specialSource: newsletterDrafts.specialSource,
       hubspotEmailId: newsletterDrafts.hubspotEmailId,
-      createdAt: newsletterDrafts.createdAt,
       formatName: formats.name,
       formatTemplate: formats.newsletterTemplate,
       brand: newsletterDrafts.brand,
@@ -60,13 +59,11 @@ export const hubspotNewsletterCreateDraftTask: Task = async (rawPayload, helpers
   const template = templateFor(row.formatName, row.formatTemplate);
   if (!template?.hubspot) return fail(`"${row.formatName}" has no HubSpot template email set up yet`);
   const sponsor = row.specialCopy ? { copy: row.specialCopy, landingUrl: row.specialSource?.landingUrl ?? null } : null;
-  // Picked screenshots replace their placeholders (unpicked ones stay as italic text, like beehiiv).
-  const screenshots = await resolvePendingScreenshots(row.id, row.screenshots);
-  const shotUrls = await screenshotUrlsByKey(screenshots);
-  const sections = row.sections.map((s) => ({ ...s, markdown: applyScreenshots(s.key, s.markdown, screenshots, (c) => shotUrls[c.key] ?? null) }));
-  const blocks = blockMarkdown(template, sections, sponsor);
-  if (Object.keys(blocks).length === 0) return fail("this draft has no sections to send (redraft it with the template)");
-  const blockHtml = Object.fromEntries(Object.entries(blocks).map(([id, md]) => [id, markdownToEmailHtml(md)]));
+  // Picked screenshots go in as public links; a placeholder with no pick is left out of the email.
+  const chosen = await resolvePendingScreenshots(row.id, row.screenshots);
+  const shotUrls = await screenshotUrlsByKey(chosen);
+  const html = renderEmailBody({ template, sections: row.sections, sponsor, screenshots: { chosen, urlFor: (c) => shotUrls[c.key] ?? null } });
+  if (!row.sections.some((s) => s.markdown.trim()) && !sponsor) return fail("this draft has no sections to send (redraft it with the template)");
 
   try {
     const email = await createDraftEmailFromTemplate({
@@ -74,7 +71,7 @@ export const hubspotNewsletterCreateDraftTask: Task = async (rawPayload, helpers
       name: hubspotEmailName(template.hubspot.emailName, row.brandLabel ?? row.brand, row.sendDate),
       subject: row.subject,
       previewText: row.previewText,
-      blockHtml,
+      html,
     });
     await db
       .update(newsletterDrafts)

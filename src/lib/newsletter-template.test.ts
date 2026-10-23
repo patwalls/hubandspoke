@@ -13,6 +13,7 @@ const sec = (key: string, heading: string | null, extra: Partial<NewsletterTempl
   look: "text" as const,
   thumbnail: false,
   bullets: "list" as const,
+  linkButtons: false,
   ...extra,
 });
 const T: NewsletterTemplate = {
@@ -55,24 +56,7 @@ describe("newsletter templates", () => {
   });
 });
 
-describe("blockMarkdown", () => {
-  it("fills each mapped email-tool block in template order, stacking sections that share a block, sponsor copy first", async () => {
-    const { blockMarkdown, DEFAULT_TEMPLATES } = await import("./newsletter-template");
-    const t = DEFAULT_TEMPLATES["sunday breakfast"];
-    const out = blockMarkdown(
-      t,
-      [
-        { key: "pancakes", markdown: "Pancakes teaser" },
-        { key: "signoff", markdown: "That's it!" },
-        { key: "special", markdown: "agent fallback" },
-      ],
-      { copy: "Free CRM", landingUrl: null },
-    );
-    expect(out[t.hubspot!.blocks.pancakes]).toBe("Pancakes teaser\n\nThat's it!");
-    expect(out[t.hubspot!.blocks.special]).toBe("Free CRM");
-    expect(Object.keys(out)).toHaveLength(2);
-  });
-
+describe("templateChangeProblem", () => {
   it("on a locked template allows only instruction changes (anything structural needs a template admin)", () => {
     const locked = { ...T, locked: true };
     const hintsOnly = { ...locked, sections: locked.sections.map((x) => ({ ...x, hint: `${x.hint} (shorter)` })) };
@@ -90,17 +74,16 @@ describe("blockMarkdown", () => {
     expect(templateChangeProblem(T, { ...T, sections: T.sections.slice(1) })).toBeNull();
   });
 
-  it("keeps HubSpot-owned course names and colors as they are in the HubSpot email (instructions still editable)", () => {
+  it("HubSpot formats: the look is Hub & Spoke's now — names, colors and order change freely; only which HubSpot email the drafts are made from is fixed", () => {
     const sb = DEFAULT_TEMPLATES["sunday breakfast"];
-    const oj = sb.sections.find((x) => sb.hubspot!.blocks[x.key] && x.heading)!;
+    const oj = sb.sections.find((x) => x.heading)!;
     const edit = (patch: object) => ({ ...sb, sections: sb.sections.map((x) => (x.key === oj.key ? { ...x, ...patch } : x)) });
     expect(sb.locked).toBe(false);
     expect(templateChangeProblem(sb, edit({ hint: "New instructions" }))).toBeNull();
-    expect(templateChangeProblem(sb, edit({ story: "any" }))).toBeNull();
-    expect(templateChangeProblem(sb, edit({ heading: "The Smoothie" }))).toMatch(/HubSpot template email/);
-    expect(templateChangeProblem(sb, edit({ pillColor: "#000000" }))).toMatch(/HubSpot template email/);
-    expect(templateChangeProblem(sb, { ...sb, sections: sb.sections.filter((x) => x.key !== oj.key) })).toMatch(/can't be removed/);
-    expect(templateChangeProblem(sb, { ...sb, sections: [...sb.sections].reverse() })).toMatch(/order/);
+    expect(templateChangeProblem(sb, edit({ heading: "The Smoothie", pillColor: "#000000" }))).toBeNull();
+    expect(templateChangeProblem(sb, { ...sb, sections: sb.sections.filter((x) => x.key !== oj.key) })).toBeNull();
+    expect(templateChangeProblem(sb, { ...sb, style: { ...sb.style, linkColor: "#ff0000" } })).toBeNull();
+    expect(templateChangeProblem(sb, { ...sb, hubspot: { ...sb.hubspot!, templateEmailId: "1" } })).toMatch(/HubSpot template link/);
   });
 });
 

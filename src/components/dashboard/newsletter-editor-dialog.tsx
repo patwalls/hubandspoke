@@ -13,15 +13,17 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { ExternalLink, FileText, LayoutTemplate, Loader2, MousePointerClick, RefreshCw, Shuffle, Sparkles, X } from "lucide-react";
+import { Eye, ExternalLink, FileText, LayoutTemplate, Loader2, Monitor, MoreHorizontal, MousePointerClick, RefreshCw, Shuffle, Smartphone, Sparkles, X } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { startVisibleInterval } from "@/lib/visible-interval";
 import { composeIssue, type NewsletterSection, type NewsletterTemplate } from "@/lib/newsletter-template";
-import { EmailPreview } from "@/components/dashboard/email-preview";
+import { EmailPreview, FOOTER_NOTE, MOBILE_WIDTH } from "@/components/dashboard/email-preview";
+import { EMAIL_WIDTH, renderEmailHtml } from "@/lib/newsletter-email-html";
 import { formatShortcut, useInlineFormat } from "@/components/dashboard/editable-section";
 import { ImagePanel, ScreenshotMarkPanel, ScreenshotPicker, useScreenshots } from "@/components/dashboard/newsletter-screenshot-picker";
 import { isVideoThumbnail } from "@/components/dashboard/preview-screenshots";
@@ -213,6 +215,10 @@ function Workspace({
   const saveChain = useRef<Promise<boolean>>(Promise.resolve(true));
   // Visual view (every templated newsletter): what's selected on the canvas, and the section open for typing.
   const [view, setView] = useState<"visual" | "text">(draft.template ? "visual" : "text");
+  /** The canvas's width: a desktop client or a phone. */
+  const [device, setDevice] = useState<Device>("desktop");
+  /** The exact email (the HTML that is sent), full screen. */
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [addingShot, setAddingShot] = useState<string | null>(null);
   /**
@@ -346,67 +352,75 @@ function Workspace({
     await post(`/api/newsletter-drafts/${draft.id}/hubspot`, {}, "hubspot");
   }
 
+  const sponsorArg = specialCopy.trim() ? { copy: specialCopy, landingUrl: draft.specialSource?.landingUrl ?? null } : null;
+  const tool = draft.template?.beehiiv ? "beehiiv" : "HubSpot";
+  const pushUrl = draft.template?.beehiiv ? draft.beehiivPostUrl : draft.hubspotEmailUrl;
+  const pushPending = draft.template?.beehiiv ? draft.beehiivStatus === "pending" : draft.hubspotStatus === "pending";
+  const pushBusy = busyAction === "beehiiv" || busyAction === "hubspot" || pushPending;
   const header = (
-    <div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-3">
-      <div className="flex flex-col">
-        <span className="text-base font-semibold">{draft.formatName}</span>
-        <span className="text-xs text-muted-foreground">
+    <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 border-b px-4 py-2.5">
+      <div className="flex min-w-0 flex-col">
+        <span className="truncate text-sm font-semibold">{draft.formatName}</span>
+        <span className="truncate text-xs text-muted-foreground">
           {draft.sendDate ? `Sends ${fmtDate(draft.sendDate)}` : "No send date"}
-          {draft.model && ` · ${draft.model}`}
+          {pushUrl ? ` · draft in ${tool}` : draft.status === "ready" ? " · draft" : ""}
         </span>
       </div>
-      <div className="flex flex-wrap items-center gap-2 pr-8">
-        {saving ? <span className="text-xs text-muted-foreground">Saving…</span> : message && <span className="text-xs text-muted-foreground">{message}</span>}
+      <div className="flex items-center justify-center">
+        {draft.status === "ready" && draft.template && view === "visual" && !draft.template.beehiiv && <DeviceToggle device={device} onChange={setDevice} />}
+      </div>
+      <div className="flex items-center justify-end gap-1.5 pr-8">
+        <span className="hidden min-w-12 text-right text-xs text-muted-foreground sm:inline">{saving ? "Saving…" : message}</span>
         {draft.status === "ready" && (
           <>
-            {draft.template && (
-              <Button variant="ghost" size="sm" onClick={() => setView((v) => (v === "visual" ? "text" : "visual"))}>
-                {view === "visual" ? <FileText /> : <LayoutTemplate />}
-                {view === "visual" ? "Text view" : "Visual view"}
+            {draft.template && !draft.template.beehiiv && (
+              <Button variant="ghost" size="sm" onClick={() => setPreviewOpen(true)} title="The exact email that is sent, on desktop and on a phone">
+                <Eye />
+                Preview
               </Button>
             )}
-            <Button variant="ghost" size="sm" onClick={redraft} disabled={busyAction !== null}>
-              {busyAction === "redraft" && <Loader2 className="animate-spin" />}
-              Redraft
+            <DropdownMenu>
+              <DropdownMenuTrigger aria-label="More" className={buttonVariants({ size: "icon-sm", variant: "ghost" })}>
+                <MoreHorizontal />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-56">
+                {draft.template && (
+                  <DropdownMenuItem onClick={() => setView((v) => (v === "visual" ? "text" : "visual"))} className="cursor-pointer gap-2">
+                    {view === "visual" ? <FileText className="size-4" /> : <LayoutTemplate className="size-4" />}
+                    {view === "visual" ? "Text view" : "Visual view"}
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem onClick={redraft} disabled={busyAction !== null} className="cursor-pointer gap-2">
+                  <RefreshCw className="size-4" />
+                  Redraft the whole issue
+                </DropdownMenuItem>
+                {pushUrl && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => window.open(pushUrl, "_blank", "noreferrer")} className="cursor-pointer gap-2">
+                      <ExternalLink className="size-4" />
+                      Open in {tool}
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Button variant="outline" size="sm" onClick={onClose} disabled={saving} title="Saves your edits and closes. The newsletter stays in the queue as a Draft until you create the email draft.">
+              Save &amp; close
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={onClose}
-              disabled={saving}
-              title="Saves your edits and closes. The newsletter stays in the queue as a Draft until you create the email draft."
-            >
-              Save draft &amp; close
-            </Button>
-            {draft.template?.beehiiv ? (
-              draft.beehiivPostUrl ? (
-                <a href={draft.beehiivPostUrl} target="_blank" rel="noreferrer" className={buttonVariants({ size: "sm", variant: "secondary" })}>
-                  Open in beehiiv <ExternalLink />
-                </a>
-              ) : (
-                <Button
-                  size="sm"
-                  onClick={pushToBeehiiv}
-                  disabled={busyAction !== null || draft.beehiivStatus === "pending"}
-                  title="Creates an unsent DRAFT post in beehiiv and moves this newsletter out of the queue into production. Never publishes or schedules."
-                >
-                  {(busyAction === "beehiiv" || draft.beehiivStatus === "pending") && <Loader2 className="animate-spin" />}
-                  Create email draft in beehiiv
-                </Button>
-              )
-            ) : draft.hubspotEmailUrl ? (
-              <a href={draft.hubspotEmailUrl} target="_blank" rel="noreferrer" className={buttonVariants({ size: "sm", variant: "secondary" })}>
-                Open in HubSpot <ExternalLink />
+            {pushUrl ? (
+              <a href={pushUrl} target="_blank" rel="noreferrer" className={buttonVariants({ size: "sm" })}>
+                Open in {tool} <ExternalLink />
               </a>
             ) : (
               <Button
                 size="sm"
-                onClick={pushToHubspot}
-                disabled={busyAction !== null || draft.hubspotStatus === "pending"}
-                title="Creates an unsent DRAFT email in HubSpot and moves this newsletter out of the queue into production. Never sends or schedules."
+                onClick={draft.template?.beehiiv ? pushToBeehiiv : pushToHubspot}
+                disabled={busyAction !== null || pushPending}
+                title={`Creates an unsent DRAFT in ${tool} — the whole email, exactly as shown here — and moves this newsletter out of the queue into production. Never sends or schedules.`}
               >
-                {(busyAction === "hubspot" || draft.hubspotStatus === "pending") && <Loader2 className="animate-spin" />}
-                Create email draft in HubSpot
+                {pushBusy && <Loader2 className="animate-spin" />}
+                Create draft in {tool}
               </Button>
             )}
           </>
@@ -563,71 +577,90 @@ function Workspace({
     </>
   );
 
+  const exactHtml = useMemo(
+    () => (draft.template && !draft.template.beehiiv ? renderEmailHtml({ template: draft.template, sections, sponsor: sponsorArg, subject, previewText, screenshots: previewShots, footerNote: FOOTER_NOTE }) : ""),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- previewShots is rebuilt each render; its parts are what matters
+    [draft.template, sections, sponsorArg, subject, previewText, shots.chosen, shots.urlFor],
+  );
+  const canvasWidth = device === "mobile" && !draft.template?.beehiiv ? MOBILE_WIDTH : EMAIL_WIDTH;
   const visual = draft.template ? (
     <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_400px]">
       <div className="min-h-0 overflow-y-auto bg-muted/40">
-        <div className="mx-auto max-w-[640px] px-5 pt-5">
+        <div className="mx-auto px-5 pt-5" style={{ maxWidth: canvasWidth + 40 }}>
           <button
             type="button"
             onClick={deselect}
             title="Edit the subject and preview text"
-            className={cn("block w-full rounded-t-lg border border-b-0 bg-background px-4 py-2 text-left hover:bg-muted/60", !selected && "ring-2 ring-[#49adff]")}
+            className={cn(
+              "flex w-full items-start gap-3 rounded-xl border bg-background px-4 py-3 text-left shadow-sm transition-shadow hover:shadow-md",
+              !selected && "ring-2 ring-[#49adff]",
+            )}
           >
-            <div className="text-sm font-semibold">{subject || "(no subject)"}</div>
-            <div className="text-xs text-muted-foreground">{previewText || "(no preview text)"}</div>
+            <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
+              {draft.formatName.slice(0, 1).toUpperCase()}
+            </span>
+            <span className="flex min-w-0 flex-col">
+              <span className="truncate text-sm font-semibold">{subject || "(no subject)"}</span>
+              <span className="truncate text-xs text-muted-foreground">{previewText || "(no preview text)"}</span>
+            </span>
           </button>
         </div>
-        <EmailPreview
-          template={draft.template}
-          sections={sections}
-          sponsor={specialCopy.trim() ? { copy: specialCopy, landingUrl: draft.specialSource?.landingUrl ?? null } : null}
-          screenshots={previewShots}
-          edit={{
-            selected,
-            editingSection,
-            regenerating: draft.regenerating,
-            onSelectSection: (key) => {
-              setSelected(key);
-              if (draft.template?.sections.find((s) => s.key === key)?.kind !== "sponsor") setEditingSection(key);
-            },
-            onChangeSection: setSectionMd,
-            onDoneEditing: () => {
-              setEditingSection(null);
-              if (dirty) void save();
-            },
-            onSelectShot: (_sectionKey, markKey) => {
-              setEditingSection(null);
-              setSelected(`shot:${markKey}`);
-            },
-            onDropShot: (_sectionKey, markKey, file) => {
-              setEditingSection(null);
-              setSelected(`shot:${markKey}`);
-              void shots.upload(markKey, file);
-            },
-            onSelectImage: (key, index) => {
-              setEditingSection(null);
-              setSelected(`img:${key}:${index}`);
-            },
-            onDeleteShot: (key, markKey) => void deleteShot(key, markKey),
-            onRemoveImage: (key, index) => {
-              keepPlace();
-              setSelected(null);
-              setEditingSection(null);
-              void commitSection(key, replaceImage(key, index, "").replace(/\n{3,}/g, "\n\n"));
-            },
-            onAddShot: (key, n) => void addShot(key, n),
-            addingShot,
-            onDropImage: (key, index, file) => {
-              setEditingSection(null);
-              void imageToPlaceholder(key, index).then((markKey) => {
-                if (markKey) void shots.upload(markKey, file);
-              });
-            },
-          }}
-        />
-        <p className="flex items-center justify-center gap-1.5 pb-6 text-center text-xs text-muted-foreground">
-          <MousePointerClick className="size-3.5" /> Click any text to edit it (select words for Bold / Italic) · click an image or screenshot to swap it, or
-          drop an image file on it
+        <div className={cn(device === "mobile" && !draft.template.beehiiv && "flex justify-center px-5 py-5")}>
+          <div className={cn(device === "mobile" && !draft.template.beehiiv && "overflow-hidden rounded-[32px] border-[10px] border-[#1f2937] bg-[#1f2937] shadow-xl")} style={device === "mobile" && !draft.template.beehiiv ? { width: MOBILE_WIDTH + 20 } : undefined}>
+            <EmailPreview
+              template={draft.template}
+              sections={sections}
+              sponsor={sponsorArg}
+              screenshots={previewShots}
+              width={canvasWidth}
+              edit={{
+                selected,
+                editingSection,
+                regenerating: draft.regenerating,
+                onSelectSection: (key) => {
+                  setSelected(key);
+                  if (draft.template?.sections.find((s) => s.key === key)?.kind !== "sponsor") setEditingSection(key);
+                },
+                onChangeSection: setSectionMd,
+                onDoneEditing: () => {
+                  setEditingSection(null);
+                  if (dirty) void save();
+                },
+                onSelectShot: (_sectionKey, markKey) => {
+                  setEditingSection(null);
+                  setSelected(`shot:${markKey}`);
+                },
+                onDropShot: (_sectionKey, markKey, file) => {
+                  setEditingSection(null);
+                  setSelected(`shot:${markKey}`);
+                  void shots.upload(markKey, file);
+                },
+                onSelectImage: (key, index) => {
+                  setEditingSection(null);
+                  setSelected(`img:${key}:${index}`);
+                },
+                onDeleteShot: (key, markKey) => void deleteShot(key, markKey),
+                onRemoveImage: (key, index) => {
+                  keepPlace();
+                  setSelected(null);
+                  setEditingSection(null);
+                  void commitSection(key, replaceImage(key, index, "").replace(/\n{3,}/g, "\n\n"));
+                },
+                onAddShot: (key, n) => void addShot(key, n),
+                addingShot,
+                onDropImage: (key, index, file) => {
+                  setEditingSection(null);
+                  void imageToPlaceholder(key, index).then((markKey) => {
+                    if (markKey) void shots.upload(markKey, file);
+                  });
+                },
+              }}
+            />
+          </div>
+        </div>
+        <p className="flex items-center justify-center gap-1.5 px-5 pb-6 text-center text-xs text-muted-foreground">
+          <MousePointerClick className="size-3.5" /> Click any text to edit it in place · click an image or screenshot to swap it, or drop a file on it
+          {!draft.template.beehiiv ? " · this is the email itself, exactly as it sends" : ""}
         </p>
       </div>
 
@@ -731,8 +764,9 @@ function Workspace({
   ) : null;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="relative flex min-h-0 flex-1 flex-col">
       {header}
+      {previewOpen && exactHtml && <ExactPreview html={exactHtml} device={device} onDevice={setDevice} onClose={() => setPreviewOpen(false)} />}
       {draft.kind === "single_video" && <VideoBar draft={draft} disabled={draft.status === "drafting" || busyAction !== null} onPick={(itemId) => post(`/api/newsletter-drafts/${draft.id}/video`, { itemId }, "video")} />}
       {draft.hubspotStatus === "failed" && draft.hubspotError && (
         <p className="mx-5 mt-3 rounded-md bg-red-50 p-2 text-xs text-red-800 dark:bg-red-900/30 dark:text-red-200">Email push: {draft.hubspotError}</p>
@@ -850,12 +884,7 @@ function Workspace({
                     <div className="text-xs text-muted-foreground">{previewText}</div>
                   </div>
                 </div>
-                <EmailPreview
-                  template={draft.template}
-                  sections={sections}
-                  screenshots={previewShots}
-                  sponsor={specialCopy.trim() ? { copy: specialCopy, landingUrl: draft.specialSource?.landingUrl ?? null } : null}
-                  />
+                <EmailPreview template={draft.template} sections={sections} screenshots={previewShots} sponsor={sponsorArg} />
               </>
             ) : (
               <div className="mx-auto max-w-[640px] p-5">
@@ -867,6 +896,68 @@ function Workspace({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+type Device = "desktop" | "mobile";
+
+/** Desktop / phone, for the canvas and the exact preview. */
+function DeviceToggle({ device, onChange }: { device: Device; onChange: (d: Device) => void }) {
+  return (
+    <div className="flex items-center rounded-lg border bg-muted/50 p-0.5 text-xs" role="radiogroup" aria-label="Preview width">
+      {(
+        [
+          ["desktop", Monitor, "Desktop"],
+          ["mobile", Smartphone, "Phone"],
+        ] as const
+      ).map(([d, Icon, label]) => (
+        <button
+          key={d}
+          type="button"
+          role="radio"
+          aria-checked={device === d}
+          onClick={() => onChange(d)}
+          className={cn(
+            "flex items-center gap-1.5 rounded-md px-2.5 py-1 font-medium transition-colors",
+            device === d ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          <Icon className="size-3.5" />
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** The exact email — the HTML that is sent — in a sandboxed frame, at desktop or phone width. */
+function ExactPreview({ html, device, onDevice, onClose }: { html: string; device: Device; onDevice: (d: Device) => void; onClose: () => void }) {
+  const mobile = device === "mobile";
+  return (
+    <div className="absolute inset-0 z-20 flex flex-col bg-background">
+      <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 border-b px-4 py-2.5">
+        <div className="flex min-w-0 flex-col">
+          <span className="flex items-center gap-1.5 text-sm font-semibold">
+            <Eye className="size-4" /> Exactly what lands in the inbox
+          </span>
+          <span className="truncate text-xs text-muted-foreground">The HTML that goes to HubSpot, rendered as-is. HubSpot adds the footer.</span>
+        </div>
+        <DeviceToggle device={device} onChange={onDevice} />
+        <div className="flex justify-end pr-8">
+          <Button variant="ghost" size="sm" onClick={onClose} data-testid="exact-preview-close">
+            <X /> Close
+          </Button>
+        </div>
+      </div>
+      <div className="flex min-h-0 flex-1 justify-center overflow-auto bg-muted/40 p-5">
+        <div
+          className={cn("h-full", mobile && "overflow-hidden rounded-[32px] border-[10px] border-[#1f2937] bg-[#1f2937] shadow-xl")}
+          style={{ width: mobile ? MOBILE_WIDTH + 20 : Math.min(EMAIL_WIDTH + 160, 900), maxWidth: "100%", maxHeight: mobile ? 820 : undefined }}
+        >
+          <iframe title="Email preview" srcDoc={html} sandbox="" className={cn("block h-full w-full bg-white", !mobile && "rounded-xl border shadow-sm")} />
+        </div>
+      </div>
     </div>
   );
 }

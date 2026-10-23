@@ -16,15 +16,24 @@ import { z } from "zod";
 
 const color = z.string().regex(/^#[0-9a-fA-F]{3,8}$/, "a hex color like #fed7aa");
 
-/** The email's look: rendered by renderEmailHtml (newsletter-email-html.ts). */
+/**
+ * The email's look: rendered by renderEmailHtml (newsletter-email-html.ts)
+ * — the one renderer behind the editor's canvas, the format page's thumbnail
+ * and the HubSpot push, so what you see is what lands in the inbox. Edited on
+ * the format page (Look panel).
+ */
 export const styleSchema = z.object({
   mastheadImageUrl: z.string().url().nullable().default(null),
   mastheadLinkUrl: z.string().url().nullable().default(null),
   mastheadBackground: color.nullable().default(null),
-  fontFamily: z.string().max(200).default("Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif"),
-  textColor: color.default("#616161"),
-  headingColor: color.default("#030212"),
+  /** A system stack: what every mail client has, no web-font gamble. */
+  fontFamily: z.string().max(200).default("-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"),
+  textColor: color.default("#222222"),
+  headingColor: color.default("#111111"),
   linkColor: color.default("#197bbd"),
+  /** Buttons (a link alone on its line in a section with "links become buttons"). Empty = the link color. */
+  buttonColor: color.nullable().default(null),
+  /** Behind the email (preview only: in HubSpot the email tool's own page shows around it). */
   pageBackground: color.default("#f4f4f5"),
   contentBackground: color.default("#ffffff"),
   /** Faint rule between sections. */
@@ -88,19 +97,22 @@ export const sectionSchema = z.object({
    * Cases and Bonus Tips).
    */
   bullets: z.enum(["list", "lines", "paragraphs"]).default("list"),
+  /** A line that is only a link becomes a button (the sponsor's CTA, "Watch the full video"). HubSpot-style templates; beehiiv cards have their own setting. */
+  linkButtons: z.boolean().default(false),
 });
 
 /**
- * Where each section goes in the email tool's own template email (HubSpot
- * today): the push copies `templateEmailId` and fills each mapped rich-text
- * block. Several sections may share a block (Sunday Breakfast's sign-off goes
- * at the end of the Pancakes block). Unmapped blocks (masthead, labels,
- * dividers, the fixed footer) are left exactly as they are in the template.
+ * Which HubSpot email a draft is made from: the push copies `templateEmailId`
+ * (for its sender, lists, subscription type and footer), replaces the copy's
+ * layout with ONE rich-text block holding the whole email as Hub & Spoke
+ * renders it (renderEmailHtml) plus that footer, and names it `emailName`.
+ * The look (masthead, headings, colors, buttons) is this template's `style`
+ * and sections, not the HubSpot email's. `blocks` is the retired per-section
+ * mapping (before 2026-10-23), kept so saved templates still parse.
  */
 export const hubspotMappingSchema = z.object({
   templateEmailId: z.string().regex(/^\d+$/, "the HubSpot email id (digits)"),
-  /** section key → HubSpot widget id of the block it fills (a rich-text block, or a label module like Daily Seinfeld's "Read Time"). */
-  blocks: z.record(z.string(), z.string().min(1)),
+  blocks: z.record(z.string(), z.string().min(1)).optional(),
   /**
    * The draft email's name in HubSpot. Tokens: {brand}, {Month} (October),
    * {Mon} (Oct), {D} (25) — from the send date.
@@ -238,7 +250,7 @@ const s = (
   key: string,
   heading: string | null,
   hint: string,
-  extra: Partial<Pick<NewsletterTemplateSection, "headingLevel" | "kind" | "pillColor" | "boxColor" | "story" | "screenshots" | "look" | "thumbnail" | "bullets">> = {},
+  extra: Partial<Pick<NewsletterTemplateSection, "headingLevel" | "kind" | "pillColor" | "boxColor" | "story" | "screenshots" | "look" | "thumbnail" | "bullets" | "linkButtons">> = {},
 ): NewsletterTemplateSection => ({
   key,
   heading,
@@ -252,13 +264,16 @@ const s = (
   look: extra.look ?? "text",
   thumbnail: extra.thumbnail ?? false,
   bullets: extra.bullets ?? "list",
+  linkButtons: extra.linkButtons ?? false,
 });
 
-/** Starter Story's email look, read off past issues (Klaviyo/HubSpot HTML). */
+/** Starter Story's email look, read off past issues (Klaviyo/HubSpot HTML): the lavender masthead, #6B72C4 links and buttons. */
 const STARTER_STORY_STYLE: NewsletterStyle = styleSchema.parse({
   mastheadImageUrl: "https://d3k81ch9hvuctc.cloudfront.net/company/Jchkiv/images/405af84f-b9e5-445e-86a4-68c2211e6876.png",
   mastheadLinkUrl: "https://www.starterstory.com/join",
   mastheadBackground: "#EBECFC",
+  linkColor: "#6B72C4",
+  buttonColor: "#6B72C4",
 });
 const NEUTRAL_STYLE: NewsletterStyle = styleSchema.parse({});
 
@@ -269,19 +284,9 @@ export const DEFAULT_TEMPLATES: Record<string, NewsletterTemplate> = {
     locked: false,
     style: STARTER_STORY_STYLE,
     // HubSpot account 20627419: "[TEMPLATE] Sunday Breakfast – Hub & Spoke (do
-    // not send)", a copy of the Oct 11 2026 issue. Block ids read off that email.
+    // not send)", a copy of the Oct 11 2026 issue: sender, lists and footer.
     hubspot: {
       templateEmailId: "225070550319",
-      blocks: {
-        intro: "module_17900293533527",
-        orange_juice: "module_17900290499731",
-        coffee: "module_17900291783105",
-        special: "module_17900294859938",
-        eggs: "module_17900291707464",
-        toast: "module_17900290992183",
-        pancakes: "module_17900290904092",
-        signoff: "module_17900290904092",
-      },
       emailName: "{brand} | Newsletter | {Month} {D}",
     },
     beehiiv: null,
@@ -301,7 +306,7 @@ export const DEFAULT_TEMPLATES: Record<string, NewsletterTemplate> = {
         "special",
         "The Special 🍽️",
         "When no sponsor is booked: a free resource from list_lead_magnets that fits the week's theme, pitched like an ad: the problem, the resource, 2 to 3 dash bullets of what's inside, then a link line ('Grab the FREE guide here') to its real landing page.",
-        { kind: "sponsor", pillColor: "#fae8ff", boxColor: "#EBECFC" },
+        { kind: "sponsor", pillColor: "#fae8ff", boxColor: "#EBECFC", linkButtons: true },
       ),
       s("eggs", "The Eggs 🍳", "", { pillColor: "#fef9c3", story: "case_study" }),
       s("toast", "The Toast 🍞", "", { pillColor: "#dcfce7", story: "case_study" }),
@@ -319,15 +324,9 @@ export const DEFAULT_TEMPLATES: Record<string, NewsletterTemplate> = {
     locked: false,
     style: { ...STARTER_STORY_STYLE, dividers: false },
     // HubSpot account 20627419: "[TEMPLATE] Daily Seinfeld – Hub & Spoke (do
-    // not send)", a copy of the Oct 15 2026 issue. Block ids read off that email.
+    // not send)", a copy of the Oct 15 2026 issue: sender, lists and footer.
     hubspot: {
       templateEmailId: "225078360688",
-      blocks: {
-        read_time: "module_17873409641891",
-        hook: "module_17913969457581",
-        story: "module_17919070040741",
-        pitch: "module_17872589671611",
-      },
       emailName: "{brand} | Daily | {Mon}. {D}",
     },
     beehiiv: null,
@@ -442,110 +441,14 @@ export function composeIssue(
     .join("\n\n");
 }
 
-// ── Shared email styles ─────────────────────────────────────────────────
-// One style map for both renderers: renderEmailHtml (inline-CSS HTML for the
-// email push; worker-side) and <EmailPreview> (React, in the browser). Keep
-// every visual decision here so the preview and the sent email can't drift.
-
-export type CssProps = Record<string, string | number>;
-
-/** React-style CSS object → inline `style=""` text. Pure; exported for tests. */
-export function cssText(css: CssProps): string {
-  return Object.entries(css)
-    .map(([k, v]) => `${k.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}:${typeof v === "number" && k !== "fontWeight" && k !== "lineHeight" ? `${v}px` : v}`)
-    .join(";");
-}
-
-export function emailCss(st: NewsletterStyle) {
-  return {
-    page: { margin: 0, padding: 0, background: st.pageBackground } as CssProps,
-    outer: { padding: "24px 12px", background: st.pageBackground } as CssProps,
-    card: { width: "100%", maxWidth: 600, margin: "0 auto", background: st.contentBackground, borderRadius: 8 } as CssProps,
-    inner: { padding: "28px 32px", fontFamily: st.fontFamily, color: st.textColor } as CssProps,
-    mastheadWrap: { background: st.mastheadBackground ?? "transparent", borderRadius: 4, textAlign: "center", marginBottom: 20 } as CssProps,
-    mastheadImg: { display: "block", width: "100%", maxWidth: "100%", height: "auto", border: 0 } as CssProps,
-    pillWrap: { margin: "0 0 14px" } as CssProps,
-    pill: (color: string): CssProps => ({ display: "inline-block", background: color, padding: 8, borderRadius: 4, fontSize: 20, fontWeight: "bold", lineHeight: 1.2, color: st.headingColor }),
-    plainHeading: (level: 2 | 3): CssProps => ({ margin: "0 0 10px", fontSize: level === 2 ? 21 : 18, fontWeight: "bold", lineHeight: 1.3, color: st.headingColor }),
-    box: (color: string): CssProps => ({ background: color, padding: "16px 18px", borderRadius: 6 }),
-    divider: { border: "none", borderTop: "1px solid #e5e7eb", margin: "22px 0" } as CssProps,
-    gap: { height: 8 } as CssProps,
-    hint: { margin: "0 0 14px", fontSize: 15, lineHeight: 1.5, color: "#9ca3af", fontStyle: "italic" } as CssProps,
-    tags: {
-      p: { margin: "0 0 14px", fontSize: 16, lineHeight: 1.55, color: st.textColor },
-      h1: { margin: "20px 0 10px", fontSize: 24, lineHeight: 1.3, color: st.headingColor },
-      h2: { margin: "18px 0 10px", fontSize: 21, lineHeight: 1.3, color: st.headingColor },
-      h3: { margin: "16px 0 8px", fontSize: 18, lineHeight: 1.3, color: st.headingColor },
-      ul: { margin: "0 0 14px", paddingLeft: 22, color: st.textColor, listStyleType: "disc" },
-      ol: { margin: "0 0 14px", paddingLeft: 22, color: st.textColor, listStyleType: "decimal" },
-      li: { margin: "0 0 6px", fontSize: 16, lineHeight: 1.5 },
-      a: { color: st.linkColor, textDecoration: "underline" },
-      img: { display: "block", width: "100%", maxWidth: "100%", height: "auto", border: 0, borderRadius: 6, margin: "6px 0 14px" },
-      blockquote: { margin: "0 0 14px", paddingLeft: 12, borderLeft: "3px solid #e5e7eb", color: st.textColor },
-      hr: { border: "none", borderTop: "1px solid #e5e7eb", margin: "20px 0" },
-      code: { fontFamily: "Menlo, monospace", fontSize: 14, background: "#f4f4f5", padding: "1px 4px", borderRadius: 3 },
-    } satisfies Record<string, CssProps>,
-  };
-}
-
-/**
- * The Markdown for each mapped email-tool block: every section mapped to the
- * block, in template order, joined by a blank line (the sponsor section uses
- * the promo copy when there is one). Headings are not included — the email
- * tool's template carries them (Sunday Breakfast's course labels). Pure.
- */
-export function blockMarkdown(
-  template: NewsletterTemplate,
-  sections: NewsletterSection[],
-  sponsor: ComposeSponsor | null,
-): Record<string, string> {
-  if (!template.hubspot) return {};
-  const byKey = new Map(sections.map((x) => [x.key, x.markdown]));
-  const out: Record<string, string> = {};
-  for (const sec of template.sections) {
-    const block = template.hubspot.blocks[sec.key];
-    if (!block) continue;
-    const md =
-      sec.kind === "sponsor" && sponsor?.copy?.trim()
-        ? sponsorBlock(sponsor.copy, sponsor.landingUrl)
-        : (byKey.get(sec.key) ?? "").trim();
-    if (!md) continue;
-    out[block] = out[block] ? `${out[block]}\n\n${md}` : md;
-  }
-  return out;
-}
-
-/**
- * The section's look is owned by the HubSpot template email: its heading
- * (a course name like "The Orange Juice 🍊"), pill and box are part of that
- * email, and Hub & Spoke only fills the block under it. Pure.
- */
-export function hubspotOwnedSection(template: NewsletterTemplate, key: string): boolean {
-  return !!template.hubspot?.blocks[key];
-}
-
 /**
  * Why a template change isn't allowed for a non-admin, or null when it's
  * fine. A locked template: only section instructions (hints) may change.
- * Any template: a section linked to a HubSpot block keeps its key, heading,
- * pill and box (they live in the HubSpot email), and the HubSpot mapping
- * itself doesn't change. Pure; exported for tests.
+ * Any template: which HubSpot email the drafts are made from (sender, lists,
+ * footer) doesn't change here. Pure; exported for tests.
  */
 export function templateChangeProblem(current: NewsletterTemplate, next: NewsletterTemplate): string | null {
-  if (current.hubspot) {
-    if (JSON.stringify(current.hubspot) !== JSON.stringify(next.hubspot)) return "The HubSpot template link can't be changed here. Contact Sam.";
-    for (const sec of current.sections) {
-      if (!hubspotOwnedSection(current, sec.key)) continue;
-      const n = next.sections.find((x) => x.key === sec.key);
-      const label = sec.heading ?? sec.key;
-      if (!n) return `"${label}" fills a block in the HubSpot template email, so it can't be removed here. Contact Sam.`;
-      if (n.heading !== sec.heading || n.headingLevel !== sec.headingLevel || n.pillColor !== sec.pillColor || n.boxColor !== sec.boxColor || n.look !== sec.look) {
-        return `"${label}" (its name and colors) comes from the HubSpot template email: change it there so every issue matches. Contact Sam.`;
-      }
-    }
-    const order = (x: NewsletterTemplate) => x.sections.filter((s) => hubspotOwnedSection(current, s.key)).map((s) => s.key).join(",");
-    if (order(current) !== order(next)) return "The sections linked to the HubSpot template email stay in that email's order. Contact Sam.";
-  }
+  if (current.hubspot && JSON.stringify(current.hubspot) !== JSON.stringify(next.hubspot)) return "The HubSpot template link can't be changed here. Contact Sam.";
   if (!current.locked) return null;
   // Compare both as the schema shapes them (field order and defaults), so only real differences count.
   const norm = (x: NewsletterTemplate) => JSON.stringify(newsletterTemplateSchema.parse(x));

@@ -8,6 +8,7 @@
 // tab (and out of production_items) while the pilot is being tuned.
 
 import { useCallback, useEffect, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -168,9 +169,20 @@ function IssueTable({ rows, onOpen, groupByDate }: { rows: BoardRow[]; onOpen: (
 }
 
 export function NewsletterDrafterPage({ brand }: { brand: string }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [upcoming, setUpcoming] = useState<BoardRow[] | null>(null);
   const [past, setPast] = useState<BoardRow[]>([]);
-  const [openId, setOpenId] = useState<string | null>(null);
+  // `?open=<id>` opens the editor straight away (the nav's New → Newsletter lands here); closing it clears the param.
+  const [openId, setOpenIdState] = useState<string | null>(() => searchParams.get("open"));
+  const setOpenId = useCallback(
+    (id: string | null) => {
+      setOpenIdState(id);
+      if (!id && searchParams.get("open")) router.replace(pathname);
+    },
+    [pathname, router, searchParams],
+  );
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
