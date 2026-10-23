@@ -4,6 +4,40 @@ The `/build` loop's notebook: what people actually do, candidates considered (bu
 why), and what other tools ship. Newest first. Never re-propose something listed here without
 new evidence.
 
+## 2026-10-23 — lap 11 (project lap: my-day, milestone 5)
+
+**Learned** (3 days of usage, 30 days of actions)
+- Publishing is still most of the curator's clicks: 160 posts in 14 days, each a status + link +
+  date on its own item page. They haven't been in since the Cross-post paste boxes shipped (07:22),
+  so that one can't be read yet.
+- John's edits are titles (47 on 20 posts) and his own publishes (31). Andrew is all handoffs
+  (42 editor + 42 status changes). Noman, Kate and Nuriel still only move statuses.
+- My Work: Pat and Sam only (20 views, 24 header clicks). Its row buttons moved the status but not
+  the editor, unlike the content page's handoff button that the curator did use.
+- Sentry: nothing new that people hit. "Large HTTP payload" on /content (9 users, info level) and
+  the /queue p95 cold starts belong to the ops loop. No failed renders. The week is on pace (411
+  items, 42 clips, 13 designs).
+
+**Did the last features land?** `cross-post-paste`: the curator hasn't had a session since it
+shipped. `handoff-button`: 2 uses by the curator. `my-work-*`: Pat and Sam only. My Work's way in
+(the header button) works for admins, and the status-only people never open it. M4's morning
+email (PR #67, waiting on Pat's merge) is the way to reach them.
+
+**Outward**
+- Workfront users ask for "approve with changes" to route the proof back to its creator, and the
+  product can't do it. It only moves forward.
+  https://experienceleaguecommunities.adobe.com/adobe-workfront-general-23/enable-approve-with-changes-to-route-proofs-back-to-creator-in-workfront-proofing-139220
+- Base Request: approvers can "return" a request to its creator, but only while it's pending.
+  https://help.base.vn/support/solutions/articles/63000284950-base-request-return-a-request
+- Lesson: sending it back should go to the person by name, and our history knows who that is.
+
+**Candidates**
+- → building: **My Work row actions hand the post over** (my-day M5): Send to review → reviewer,
+  Approve / Send back → whoever sent it. source: usage (open since lap 7)
+- Re-export of an unchanged clip ("Up to date" in place of a new render). source: usage (John).
+  Still open. The e2e box has no S3, so it needs a way to verify first.
+- Once #67 lands: does the morning email bring the status-only people into `/my-work`?
+
 ## 2026-10-23 — lap 10 (polish lap)
 
 **Learned** (3 days of usage, 30 days of actions)
@@ -304,6 +338,8 @@ week of Oct 12). Cross-posts steady at 60–80/week.
   source: usage
 
 ## Built
+- 2026-10-23 My Work row actions hand the post to the next person (project my-day milestone 5).
+  Card `2026-10-23-my-work-handoff`.
 - 2026-10-23 Paste cross-post live links on the Cross-post tab (polish). Card
   `2026-10-23-cross-post-paste`.
 - 2026-10-22 New comments + send-backs on My Work rows (project my-day milestone 3). Card

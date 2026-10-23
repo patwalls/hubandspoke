@@ -45,9 +45,17 @@ comments in the app ask for this directly.
 3. **What changed since you last looked** (2026-10-22, lap 8 — shipped, card `2026-10-22-my-work-news`; "last looked" = your last event or comment on the item, since usage_events doesn't record item ids; at ship time 8 people had 38 rows with a comment from someone else, 21 of them new): per-row "new comment" / "sent back" dots, and the
    comment preview on the row. Replaces the ignored inbox for the people who never open it.
 4. **Morning email digest** (opt-out): one email a day with your count and the top 5, instead
-   of one email per assignment.
+   of one email per assignment. Built in PR #67 (lap 9). Waiting on Pat's merge, because it's over the 600-line auto-merge limit.
+
+5. **Row actions hand the post over** (2026-10-23, lap 11 — card `2026-10-23-my-work-handoff`):
+   Send to review → the brand's reviewer, Approve / Send back → whoever sent it, same rules as the
+   content page's handoff button (which the curator used; ~200 two-click handoffs a month). Added
+   because M2's row actions moved only the status, so My Work and the content page disagreed.
 
 ## Watch next
+
+- After M5: `my-work:*` marks followed by an editor_change in the same second (row handoffs) vs.
+  `handoff:*` from the content page.
 
 - After M3: do people with a dotted row open that item (content-page views) or act from the row sooner?
 
