@@ -13,7 +13,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { Eye, ExternalLink, FileText, LayoutTemplate, Loader2, Monitor, MoreHorizontal, MousePointerClick, RefreshCw, Shuffle, Smartphone, Sparkles, X } from "lucide-react";
+import { Check, Eye, ExternalLink, FileText, History, LayoutTemplate, Lightbulb, Loader2, Monitor, MoreHorizontal, MousePointerClick, RefreshCw, Shuffle, Smartphone, Sparkles, Wand2, X } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -28,7 +28,7 @@ import { formatShortcut, useInlineFormat } from "@/components/dashboard/editable
 import { ImagePanel, ScreenshotMarkPanel, ScreenshotPicker, useScreenshots } from "@/components/dashboard/newsletter-screenshot-picker";
 import { isVideoThumbnail } from "@/components/dashboard/preview-screenshots";
 import { formatTimestamp, insertStepScreenshot, parseScreenshotMarks, removeScreenshotMark, screenshotKey, stepsWithoutScreenshots, type ScreenshotMark } from "@/lib/newsletter-screenshots";
-import type { NewsletterDraftSource, NewsletterSpecialSource } from "@/lib/db/schema";
+import type { NewsletterDraftSource, NewsletterReview, NewsletterReviewFinding, NewsletterSpecialSource } from "@/lib/db/schema";
 import { NEWSLETTER_START_DELAY_MS } from "@/lib/services/newsletter-drafter/format-config";
 
 export interface EditorDraft {
@@ -65,6 +65,8 @@ export interface EditorDraft {
   beehiivPostUrl: string | null;
   beehiivStatus: string | null;
   beehiivError: string | null;
+  /** The editor's AI review (POST …/review), when asked for. */
+  review?: NewsletterReview | null;
   updatedAt: string;
   /** Per section with a story: how often this newsletter ran it before. */
   sectionUsage?: Record<string, { count: number; lastDate: string | null; label: string; published?: string | null }>;
@@ -145,12 +147,16 @@ export function NewsletterEditorDialog({
   };
 
   const busy =
-    draft?.status === "drafting" || (draft?.regenerating.length ?? 0) > 0 || draft?.hubspotStatus === "pending" || draft?.beehiivStatus === "pending";
+    draft?.status === "drafting" ||
+    (draft?.regenerating.length ?? 0) > 0 ||
+    draft?.hubspotStatus === "pending" ||
+    draft?.beehiivStatus === "pending" ||
+    draft?.review?.status === "running";
   useEffect(() => {
     if (!open || !busy) return;
     return startVisibleInterval(() => {
       void load().then((d) => {
-        if (d && d.status !== "drafting" && d.regenerating.length === 0 && d.hubspotStatus !== "pending" && d.beehiivStatus !== "pending") onChanged();
+        if (d && d.status !== "drafting" && d.regenerating.length === 0 && d.hubspotStatus !== "pending" && d.beehiivStatus !== "pending" && d.review?.status !== "running") onChanged();
       });
     }, POLL_MS);
   }, [open, busy, load, onChanged]);
@@ -221,6 +227,10 @@ function Workspace({
   const [previewOpen, setPreviewOpen] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [addingShot, setAddingShot] = useState<string | null>(null);
+  /** "More ideas": the angle behind each suggested subject line (shown on hover). */
+  const [subjectAngles, setSubjectAngles] = useState<Record<string, string>>({});
+  /** The review panel is open in the side panel. */
+  const [reviewOpen, setReviewOpen] = useState(false);
   /**
    * The side panel. Before a click removes the button it came from (+ Add
    * screenshot, a trash icon), focus moves here without scrolling: otherwise
@@ -352,6 +362,49 @@ function Workspace({
     await post(`/api/newsletter-drafts/${draft.id}/hubspot`, {}, "hubspot");
   }
 
+  /** The AI review: saves first (it reads the saved issue), then runs on the worker; the panel shows the findings. */
+  async function startReview() {
+    if (dirty && !(await save())) return;
+    setReviewOpen(true);
+    deselect();
+    await post(`/api/newsletter-drafts/${draft.id}/review`, {}, "review");
+  }
+  async function markFinding(findingId: string, state: "applied" | "dismissed") {
+    const res = await fetch(`/api/newsletter-drafts/${draft.id}/review`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ findingId, state }) });
+    const json = (await res.json().catch(() => ({}))) as { draft?: EditorDraft };
+    if (json.draft) {
+      // Our own change: keep local edits (the revision is unchanged).
+      setDraft({ ...draft, review: json.draft.review, subjectOptions: draft.subjectOptions });
+    }
+  }
+  /** Apply a finding: regenerate its section with the suggested instruction (or just select the section). */
+  async function applyFinding(f: NewsletterReviewFinding) {
+    if (f.sectionKey) setSelected(f.sectionKey);
+    if (f.sectionKey && f.instruction) {
+      await markFinding(f.id, "applied");
+      await regenerate(f.sectionKey, f.instruction);
+    }
+  }
+  /** "More ideas": six more subject lines in this newsletter's own habits, appended to the options. */
+  async function moreSubjects() {
+    setBusyAction("subjects");
+    setMessage(null);
+    try {
+      const res = await fetch(`/api/newsletter-drafts/${draft.id}/subjects`, { method: "POST" });
+      const json = (await res.json().catch(() => ({}))) as { ideas?: { subject: string; previewText: string; angle: string }[]; draft?: EditorDraft; error?: string };
+      if (!res.ok || !json.ideas || !json.draft) throw new Error(json.error ?? "Couldn't get ideas");
+      setSubjectAngles((cur) => ({ ...cur, ...Object.fromEntries(json.ideas!.map((i) => [i.subject, `${i.angle} · preview: ${i.previewText}`])) }));
+      // The options grew on the server (revision bumped); keep our local edits and adopt the new list.
+      revisionRef.current = json.draft.revision;
+      seenRevision.current = json.draft.revision;
+      setDraft({ ...draft, revision: json.draft.revision, subjectOptions: json.draft.subjectOptions });
+    } catch (e) {
+      setMessage((e as Error).message);
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
   const sponsorArg = specialCopy.trim() ? { copy: specialCopy, landingUrl: draft.specialSource?.landingUrl ?? null } : null;
   const tool = draft.template?.beehiiv ? "beehiiv" : "HubSpot";
   const pushUrl = draft.template?.beehiiv ? draft.beehiivPostUrl : draft.hubspotEmailUrl;
@@ -373,6 +426,18 @@ function Workspace({
         <span className="hidden min-w-12 text-right text-xs text-muted-foreground sm:inline">{saving ? "Saving…" : message}</span>
         {draft.status === "ready" && (
           <>
+            {draft.template && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={startReview}
+                disabled={busyAction !== null || draft.review?.status === "running"}
+                title="A senior-editor read of the whole issue: voice, structure, facts, links, subject line — with one-click fixes"
+              >
+                {draft.review?.status === "running" ? <Loader2 className="animate-spin" /> : <Wand2 />}
+                AI review
+              </Button>
+            )}
             {draft.template && !draft.template.beehiiv && (
               <Button variant="ghost" size="sm" onClick={() => setPreviewOpen(true)} title="The exact email that is sent, on desktop and on a phone">
                 <Eye />
@@ -553,7 +618,13 @@ function Workspace({
   const subjectFields = (
     <>
       <div className="flex flex-col gap-2">
-        <span className="text-sm font-medium">Subject</span>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-sm font-medium">Subject</span>
+          <Button size="xs" variant="ghost" onClick={moreSubjects} disabled={busyAction !== null} title="Six more subject lines in this newsletter's own habits, each from a different angle">
+            {busyAction === "subjects" ? <Loader2 className="animate-spin" /> : <Lightbulb />}
+            More ideas
+          </Button>
+        </div>
         {draft.subjectOptions.length > 0 && (
           <div className="flex flex-wrap gap-2">
             {draft.subjectOptions.map((opt) => (
@@ -561,7 +632,8 @@ function Workspace({
                 key={opt}
                 type="button"
                 onClick={() => setSubject(opt)}
-                className={cn("rounded-full border px-3 py-1 text-left text-xs hover:bg-muted", subject === opt && "border-primary bg-muted")}
+                title={subjectAngles[opt]}
+                className={cn("rounded-full border px-3 py-1 text-left text-xs hover:bg-muted", subject === opt && "border-primary bg-muted", subjectAngles[opt] && subject !== opt && "border-dashed")}
               >
                 {opt}
               </button>
@@ -686,6 +758,8 @@ function Workspace({
             <>
               <SectionEditor
                 key={selSection.key}
+                draftId={draft.id}
+                sectionKey={selSection.key}
                 label={selSection.heading ?? selSection.key.replace(/_/g, " ")}
                 hint={selSection.hint}
                 value={sectionMd(selSection.key)}
@@ -750,9 +824,31 @@ function Workspace({
               setSelected(null);
             }}
           />
+        ) : reviewOpen && draft.review ? (
+          <ReviewPanel
+            review={draft.review}
+            sections={draft.template?.sections ?? []}
+            busy={busyAction !== null}
+            regenerating={draft.regenerating}
+            onApply={(f) => void applyFinding(f)}
+            onDismiss={(f) => void markFinding(f.id, "dismissed")}
+            onSelect={(key) => setSelected(key)}
+            onClose={() => setReviewOpen(false)}
+            onAgain={startReview}
+          />
         ) : (
           <>
             {subjectFields}
+            {draft.review && draft.review.status !== "running" && (
+              <button type="button" onClick={() => setReviewOpen(true)} className="flex items-center gap-2 rounded-md border px-3 py-2 text-left text-xs hover:bg-muted/60">
+                <Wand2 className="size-3.5 text-primary" />
+                <span className="flex-1">
+                  AI review: {draft.review.findings.filter((f) => !f.state).length} open finding{draft.review.findings.filter((f) => !f.state).length === 1 ? "" : "s"}
+                  {draft.review.revision !== draft.revision ? " (from an earlier version)" : ""}
+                </span>
+                <span className="text-muted-foreground">Open</span>
+              </button>
+            )}
             <p className="rounded-md bg-muted/60 p-3 text-xs text-muted-foreground">
               Click any part of the email to edit it. Text opens right where it is, with Regenerate{draft.kind === "roundup" ? " and Find new story" : ""} here{hasShots ? "; a screenshot opens its video scrubber, frames, Upload and Remove" : ""}. Locked parts (headings, labels, masthead, footer) come from the template.
             </p>
@@ -845,6 +941,8 @@ function Workspace({
                 ) : (
                   <SectionEditor
                     key={sec.key}
+                    draftId={draft.id}
+                    sectionKey={sec.key}
                     label={sec.heading ?? sec.key.replace(/_/g, " ")}
                     hint={sec.hint}
                     value={sections.find((x) => x.key === sec.key)?.markdown ?? ""}
@@ -1023,7 +1121,18 @@ function DraftingPanel({ draft, cancelling, onCancel }: { draft: EditorDraft; ca
   );
 }
 
+/** One-click rewrite steers (each is just an instruction to Regenerate). */
+const REWRITE_PRESETS: { label: string; instruction: string }[] = [
+  { label: "Shorter", instruction: "Cut it to about half the length. Keep the strongest specific detail and the link; drop warm-up sentences." },
+  { label: "Punchier", instruction: "Make it punchier: shorter sentences, a sharper first line, one concrete number or detail up front, no filler." },
+  { label: "More personal", instruction: "Make it more personal and first-person, the way Pat talks to a friend: a specific reaction or aside, less summary." },
+  { label: "Add a number", instruction: "Lead with the most striking specific number or result from the source (revenue, time, customers). Never invent one — if the source has none, lead with its most concrete detail." },
+  { label: "Simpler", instruction: "Simplify the language: plain words, no jargon, one idea per sentence, same facts." },
+];
+
 function SectionEditor({
+  draftId,
+  sectionKey,
   label,
   hint,
   value,
@@ -1038,6 +1147,8 @@ function SectionEditor({
   hideText = false,
   children,
 }: {
+  draftId: string;
+  sectionKey: string;
   label: string;
   hint: string;
   value: string;
@@ -1056,6 +1167,16 @@ function SectionEditor({
 }) {
   const [instruction, setInstruction] = useState("");
   const { ref: formatRef, apply: applyFormat } = useInlineFormat();
+  // "Write it like a past issue": how this section read before, loaded when opened.
+  const [examples, setExamples] = useState<{ subject: string | null; publishedAt: string | null; text: string }[] | null>(null);
+  const [examplesOpen, setExamplesOpen] = useState(false);
+  const loadExamples = () => {
+    setExamplesOpen((o) => !o);
+    if (examples) return;
+    void fetch(`/api/newsletter-drafts/${draftId}/examples?section=${encodeURIComponent(sectionKey)}`)
+      .then((r) => (r.ok ? r.json() : { examples: [] }))
+      .then((j: { examples: { subject: string | null; publishedAt: string | null; text: string }[] }) => setExamples(j.examples));
+  };
   return (
     <div className="flex flex-col gap-2 rounded-lg border p-3">
       <div className="flex items-center justify-between gap-2">
@@ -1114,6 +1235,60 @@ function SectionEditor({
         />
       )}
       {children}
+      <div className="flex flex-wrap items-center gap-1">
+        {REWRITE_PRESETS.map((p) => (
+          <button
+            key={p.label}
+            type="button"
+            disabled={disabled || regenerating}
+            onClick={() => onRegenerate(p.instruction)}
+            title={p.instruction}
+            className="rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground hover:border-primary hover:text-foreground disabled:opacity-50"
+          >
+            {p.label}
+          </button>
+        ))}
+        <button
+          type="button"
+          disabled={disabled || regenerating}
+          onClick={loadExamples}
+          title="Rewrite it the way a past issue did this section"
+          className={cn("inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground hover:border-primary hover:text-foreground disabled:opacity-50", examplesOpen && "border-primary text-foreground")}
+        >
+          <History className="size-3" /> Like a past issue
+        </button>
+      </div>
+      {examplesOpen && (
+        <div className="flex max-h-56 flex-col gap-1 overflow-y-auto rounded-md border bg-muted/30 p-1.5">
+          {examples === null ? (
+            <span className="flex items-center gap-1.5 p-1 text-xs text-muted-foreground">
+              <Loader2 className="size-3 animate-spin" /> Reading past issues…
+            </span>
+          ) : examples.length === 0 ? (
+            <span className="p-1 text-xs text-muted-foreground">No past issue has this section on record yet.</span>
+          ) : (
+            examples.map((ex, i) => (
+              <button
+                key={i}
+                type="button"
+                disabled={disabled || regenerating}
+                onClick={() => {
+                  setExamplesOpen(false);
+                  onRegenerate(`Write it the way this past issue did this section — same shape, length and voice, with THIS issue's story and facts (never its content):\n"""\n${ex.text}\n"""`);
+                }}
+                className="rounded-md px-2 py-1.5 text-left hover:bg-background"
+                title={ex.text}
+              >
+                <span className="block truncate text-xs font-medium">{ex.subject ?? "Untitled issue"}</span>
+                <span className="block truncate text-[11px] text-muted-foreground">
+                  {ex.publishedAt ? `${ex.publishedAt.slice(0, 10)} · ` : ""}
+                  {ex.text.replace(/\s+/g, " ").slice(0, 90)}
+                </span>
+              </button>
+            ))
+          )}
+        </div>
+      )}
       <div className={cn("flex items-center gap-2", hideText && "flex-wrap")}>
         <Input
           className={cn("h-7 text-xs", hideText && "basis-full")}
@@ -1150,6 +1325,101 @@ function SectionEditor({
           </Button>
         )}
       </div>
+    </div>
+  );
+}
+
+/** The AI review's findings: apply (regenerate the section with the fix) or dismiss, one by one. */
+function ReviewPanel({
+  review,
+  sections,
+  busy,
+  regenerating,
+  onApply,
+  onDismiss,
+  onSelect,
+  onClose,
+  onAgain,
+}: {
+  review: NewsletterReview;
+  sections: { key: string; heading: string | null }[];
+  busy: boolean;
+  regenerating: string[];
+  onApply: (f: NewsletterReviewFinding) => void;
+  onDismiss: (f: NewsletterReviewFinding) => void;
+  onSelect: (key: string) => void;
+  onClose: () => void;
+  onAgain: () => void;
+}) {
+  const nameOf = (key: string | null) => (key ? (sections.find((s) => s.key === key)?.heading ?? key.replace(/_/g, " ")) : "Whole issue");
+  const open = review.findings.filter((f) => !f.state);
+  const done = review.findings.filter((f) => f.state);
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center justify-between gap-2">
+        <span className="flex items-center gap-1.5 text-sm font-medium">
+          <Wand2 className="size-4 text-primary" /> AI review
+        </span>
+        <div className="flex items-center gap-1">
+          {review.status !== "running" && (
+            <Button size="xs" variant="ghost" onClick={onAgain} disabled={busy} title="Review the issue as it stands now">
+              <RefreshCw /> Again
+            </Button>
+          )}
+          <Button size="icon-xs" variant="ghost" onClick={onClose} aria-label="Close the review">
+            <X />
+          </Button>
+        </div>
+      </div>
+      {review.status === "running" ? (
+        <p className="flex items-center gap-2 rounded-md bg-muted/60 p-3 text-xs text-muted-foreground">
+          <Loader2 className="size-3.5 animate-spin" /> Reading the whole issue against the Skill, the style notes and past issues… usually under a minute.
+        </p>
+      ) : review.status === "failed" ? (
+        <p className="rounded-md bg-red-50 p-3 text-xs text-red-800 dark:bg-red-900/30 dark:text-red-200">The review failed: {review.error}</p>
+      ) : (
+        <>
+          {review.summary && <p className="rounded-md bg-muted/60 p-3 text-xs leading-relaxed">{review.summary}</p>}
+          {open.length === 0 && <p className="text-xs text-muted-foreground">Nothing left to fix{done.length ? " — every finding is applied or dismissed" : ""}.</p>}
+          {open.map((f) => (
+            <div key={f.id} className={cn("flex flex-col gap-2 rounded-lg border p-3", f.severity === "fix" ? "border-amber-300/70 bg-amber-50/40 dark:border-amber-700/50 dark:bg-amber-900/10" : "")}>
+              <div className="flex items-center gap-2">
+                <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide", f.severity === "fix" ? "bg-amber-200 text-amber-900" : "bg-muted text-muted-foreground")}>
+                  {f.severity === "fix" ? "Fix" : "Consider"}
+                </span>
+                <button type="button" onClick={() => f.sectionKey && onSelect(f.sectionKey)} className={cn("truncate text-xs font-medium", f.sectionKey && "hover:underline")}>
+                  {nameOf(f.sectionKey)}
+                </button>
+              </div>
+              <p className="text-xs leading-relaxed">{f.note}</p>
+              {f.instruction && <p className="text-[11px] italic text-muted-foreground">Fix: {f.instruction}</p>}
+              <div className="flex items-center gap-1">
+                {f.sectionKey && f.instruction && (
+                  <Button size="xs" onClick={() => onApply(f)} disabled={busy || regenerating.includes(f.sectionKey)} title="Regenerate the section with this fix">
+                    {regenerating.includes(f.sectionKey) ? <Loader2 className="animate-spin" /> : <Check />}
+                    Apply
+                  </Button>
+                )}
+                <Button size="xs" variant="ghost" onClick={() => onDismiss(f)} disabled={busy}>
+                  Dismiss
+                </Button>
+              </div>
+            </div>
+          ))}
+          {done.length > 0 && (
+            <details className="text-xs text-muted-foreground">
+              <summary className="cursor-pointer">{done.length} applied or dismissed</summary>
+              <ul className="mt-1 flex flex-col gap-1">
+                {done.map((f) => (
+                  <li key={f.id} className="line-through">
+                    {nameOf(f.sectionKey)}: {f.note}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </>
+      )}
     </div>
   );
 }

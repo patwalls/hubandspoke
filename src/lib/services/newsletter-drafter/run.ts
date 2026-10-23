@@ -16,6 +16,7 @@ import { SINGLE_VIDEO_TRANSCRIPT_BUDGET, getPastIssues, getSingleVideo, getTimes
 import type { SourceVideo } from "./agent";
 import { syncNewsletterItemTitle } from "./queue-status";
 import { autoPickScreenshotsSafely } from "./screenshots";
+import { sectionExamples } from "./exemplars";
 
 export type NewsletterDraftRunResult =
   | { ok: true; turns: number; sources: number }
@@ -167,6 +168,8 @@ export async function runNewsletterDraft(
       blocked,
       storyPlan,
       recentEditions,
+      // How each section read in the past issues: examples next to the instructions (exemplars.ts).
+      sectionExamples: template ? sectionExamples(pastIssues, template) : null,
       model: config.model,
       log: opts.log,
       shouldStop,

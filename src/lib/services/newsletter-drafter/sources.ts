@@ -201,7 +201,15 @@ export function usesCurrentTemplate(body: string, templateHeadings: string[]): b
  * that leaves fewer than 2. `templateHeadings`: only issues in the current
  * template count (usesCurrentTemplate), so a retired layout never becomes an example.
  */
-export async function getPastIssues(brand: string, formatName: string, voice?: string | null, templateHeadings: string[] = []): Promise<PastIssue[]> {
+export async function getPastIssues(
+  brand: string,
+  formatName: string,
+  voice?: string | null,
+  templateHeadings: string[] = [],
+  opts: { limit?: number; charBudget?: number } = {},
+): Promise<PastIssue[]> {
+  const max = opts.limit ?? MAX_EXEMPLARS;
+  const budget = opts.charBudget ?? EXEMPLAR_CHAR_BUDGET;
   const fetched = await db
     .select({
       author: productionItems.authorDisplayName,
@@ -227,19 +235,19 @@ export async function getPastIssues(brand: string, formatName: string, voice?: s
       ),
     )
     .orderBy(desc(productionItems.publishedAt))
-    .limit(templateHeadings.length ? 200 : voice ? MAX_EXEMPLARS * 4 : MAX_EXEMPLARS);
+    .limit(templateHeadings.length ? 200 : voice ? max * 4 : max);
   const bodyOf = (r: { html: string | null; contentBody: string | null }) => (r.html?.trim() ? htmlToPlainText(r.html) : (r.contentBody ?? "").trim());
   const all = fetched.filter((r) => usesCurrentTemplate(bodyOf(r), templateHeadings));
   const mine = (r: (typeof all)[number]) => (r.author ?? "").toLowerCase().includes(voice!.toLowerCase());
   const ok = voice ? [...all.filter(mine), ...all.filter((r) => !r.author?.trim())] : all;
-  const rows = (ok.length >= 2 ? ok : all).slice(0, MAX_EXEMPLARS);
+  const rows = (ok.length >= 2 ? ok : all).slice(0, max);
 
   return rows.map((r) => {
     const body = bodyOf(r);
     return {
       subject: r.title,
       previewText: r.previewText,
-      body: body.slice(0, EXEMPLAR_CHAR_BUDGET),
+      body: body.slice(0, budget),
       publishedAt: r.publishedAt ? r.publishedAt.toISOString() : null,
       views: r.views,
     };

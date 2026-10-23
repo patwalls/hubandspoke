@@ -23,6 +23,7 @@ import { z } from "zod";
 import type { NewsletterSection, NewsletterTemplate } from "@/lib/newsletter-template";
 import { listLeadMagnets } from "@/lib/services/starter-story-content";
 import { describeStoryPlan, newStoryGuidance, type StoryPlan } from "./story-plan";
+import { describeSectionExamples } from "./exemplars";
 import { brandHasCaseStudies } from "./format-config";
 import { getTimestampedTranscript, getVideoTranscript, listOlderVideos, listRecentCaseStudies, listRecentVideos, searchCaseStudies, TRANSCRIPT_CHAR_BUDGET, type PastIssue } from "./sources";
 import { caseStudyKey, EVERGREEN_MIN_DAYS, isEvergreenOk, RECENT_BLOCK_DAYS, type StoryUsage } from "./usage";
@@ -263,6 +264,8 @@ export interface NewsletterAgentArgs {
   storyPlan?: StoryPlan | null;
   /** single_video: this newsletter's recent editions (newest first), so the drafter picks a fresh task. */
   recentEditions?: { date: string | null; subject: string }[];
+  /** How each template section has read in past issues (exemplars.ts), by section key: examples next to the instructions. */
+  sectionExamples?: Record<string, string[]> | null;
   /** Checked before every model call; true = the editor cancelled, stop (throws NewsletterCancelledError). */
   shouldStop?: () => Promise<boolean>;
   /** Worker logger, e.g. helpers.logger.info: one line per turn with the tools called. */
@@ -324,6 +327,10 @@ function buildSystem(args: NewsletterAgentArgs): Anthropic.Beta.BetaTextBlockPar
   context.push(
     `## FORMAT SKILL — ${args.formatName}\n${args.formatInstructions?.trim() || "(No Skill written yet — follow the past issues closely.)"}`,
   );
+  if (args.template?.styleNotes?.trim()) {
+    const learned = args.template.learnedFrom ? ` (learned from ${args.template.learnedFrom} past issues${args.template.learnedAt ? `, ${args.template.learnedAt.slice(0, 10)}` : ""})` : "";
+    context.push(`## HOW THIS NEWSLETTER READS${learned}\n${args.template.styleNotes.trim()}`);
+  }
   if (args.pastIssues.length > 0) {
     const issues = args.pastIssues
       .map(
@@ -420,18 +427,29 @@ export const SCREENSHOT_RULE = `SCREENSHOT RULE (sections marked "SCREENSHOTS" b
 /** Sections marked THUMBNAIL show their video's thumbnail (any newsletter, set per section). Exported for tests. */
 export const THUMBNAIL_RULE = `THUMBNAIL RULE (sections marked "THUMBNAIL" below): put the section's video thumbnail on its own line as a Markdown image ![<the video's title>](<thumbnail URL>), where the section's instructions place it. The URL is this issue's video's THUMBNAIL URL, or in a roundup the section's story video's thumbnail_url from the video tools. Never invent a URL: no video (a case study) means no thumbnail.`;
 
+/**
+ * How the template is framed for the drafter: the instructions say WHAT goes
+ * in a section; the examples (past issues, exemplars.ts) show HOW it reads.
+ * Variation is wanted — a newsletter, not a form. Exported for tests.
+ */
+export const TEMPLATE_FRAMING =
+  "Each section's instructions say what goes there; its EXAMPLES (how that section read in past issues) show the voice, rhythm and shape — learn from the examples first, and let the instructions fill in what the examples don't show. Vary length, structure and rhythm the way the past issues do: a section can be one punchy paragraph in one issue and a short list in the next; never force every section into the same beat or the same length, and never copy an example's content. A section marked OPTIONAL may be submitted as an empty string when there's nothing worth saying in it this issue.";
+
 /** The template block of the first user turn. Exported for tests. */
-export function describeTemplate(template: NewsletterTemplate, sponsorSupplied: boolean): string {
+export function describeTemplate(template: NewsletterTemplate, sponsorSupplied: boolean, examples?: Record<string, string[]> | null): string {
   const lines = template.sections.map((sec, i) => {
     const heading = sec.heading ? `fixed heading "${sec.heading}" (added for you; don't repeat it)` : "no fixed heading (write your own if the section needs one)";
     const sponsor =
       sec.kind === "sponsor" && sponsorSupplied ? " — SUPPLIED BY THE PROMO CALENDAR: submit an empty string for this key" : "";
+    const optional = sec.optional && sec.kind !== "sponsor" ? " — OPTIONAL" : "";
     const shots = sec.kind !== "sponsor" && sec.screenshots ? "\n   SCREENSHOTS: add screenshot placeholders here (SCREENSHOT RULE)." : "";
     const thumb = sec.kind !== "sponsor" && sec.thumbnail ? "\n   THUMBNAIL: include the video thumbnail here (THUMBNAIL RULE)." : "";
-    return `${i + 1}. key "${sec.key}" — ${heading}${sponsor}\n   ${sec.hint}${shots}${thumb}`;
+    const ex = sec.kind === "sponsor" && sponsorSupplied ? null : describeSectionExamples(examples?.[sec.key]);
+    return `${i + 1}. key "${sec.key}" — ${heading}${sponsor}${optional}\n   ${sec.hint}${shots}${thumb}${ex ? `\n${ex}` : ""}`;
   });
   const rules = [wantsScreenshots(template) ? SCREENSHOT_RULE : null, template.sections.some((s) => s.kind !== "sponsor" && s.thumbnail) ? THUMBNAIL_RULE : null].filter(Boolean);
-  return `${rules.map((r) => `${r}\n\n`).join("")}ISSUE TEMPLATE — submit exactly these sections, every key, in this order (sections[].key / sections[].markdown):\n${lines.join("\n")}`;
+  const framing = examples && Object.keys(examples).length ? `${TEMPLATE_FRAMING}\n\n` : template.sections.some((s) => s.optional) ? "A section marked OPTIONAL may be submitted as an empty string when there's nothing worth saying in it this issue.\n\n" : "";
+  return `${rules.map((r) => `${r}\n\n`).join("")}${framing}ISSUE TEMPLATE — submit exactly these sections, every key, in this order (sections[].key / sections[].markdown):\n${lines.join("\n")}`;
 }
 
 /** The first user turn. Exported for tests. */
@@ -473,7 +491,7 @@ export function buildUserTurn(args: NewsletterAgentArgs): string {
       `Draft the next "${args.formatName}" issue. Today is ${today}.${sendLine} The draft's default window is ${args.window.start.toISOString().slice(0, 10)} to ${today}.${brandHasCaseStudies(args.brand) ? ` Case studies are listed at ${CASE_STUDY_SITE}.` : ""}`,
     );
   }
-  if (args.template) parts.push(describeTemplate(args.template, sponsorSupplied));
+  if (args.template) parts.push(describeTemplate(args.template, sponsorSupplied, args.sectionExamples));
   if (!args.video && args.usage) parts.push(STORY_RULES);
   if (!args.video && args.storyPlan) parts.push(describeStoryPlan(args.storyPlan));
   if (sponsorSupplied) {
@@ -518,6 +536,7 @@ export function submissionProblem(
   if (unknown.length) return `Unknown section keys: ${unknown.join(", ")}. Use exactly: ${expected.join(", ")}.`;
   const missing = template.sections.filter((sec) => {
     if (sec.kind === "sponsor" && sponsorSupplied) return false;
+    if (sec.optional) return false;
     return !got.get(sec.key)?.trim();
   });
   if (missing.length) return `These sections are missing or empty: ${missing.map((sec) => sec.key).join(", ")}.`;
@@ -674,11 +693,13 @@ export async function regenerateSection(
   const current = args.sections.find((x) => x.key === sec.key)?.markdown ?? "";
   const base = buildUserTurn({ ...args, template: null, sponsoredCopy: null, sponsoredPlaceholder: false, storyPlan: null });
   const where = args.newStoryExclude && args.storyPlan ? newStoryGuidance(args.storyPlan, sec.key, args.newStoryExclude) : null;
+  const examples = describeSectionExamples(args.sectionExamples?.[sec.key], 3);
   const turn = [
     base,
     `THE ISSUE AS IT STANDS:\n${args.currentIssue}`,
     args.sourcesNote ? `SOURCES THIS ISSUE USES:\n${args.sourcesNote}` : null,
     `Rewrite ONLY the section "${sec.key}"${sec.heading ? ` (heading "${sec.heading}", added for you)` : ""}. What it should contain: ${sec.hint}`,
+    examples ? `HOW THIS SECTION HAS READ IN PAST ISSUES (match the voice and shape, vary the rhythm, never the content):\n${examples}` : null,
     sec.kind !== "sponsor" && sec.screenshots ? `${SCREENSHOT_RULE}\nThis section is marked SCREENSHOTS.` : null,
     sec.kind !== "sponsor" && sec.thumbnail ? `${THUMBNAIL_RULE}\nThis section is marked THUMBNAIL: keep its thumbnail image.` : null,
     `Its current content:\n${current || "(empty)"}`,

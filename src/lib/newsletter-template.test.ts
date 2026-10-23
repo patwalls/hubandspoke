@@ -14,11 +14,15 @@ const sec = (key: string, heading: string | null, extra: Partial<NewsletterTempl
   thumbnail: false,
   bullets: "list" as const,
   linkButtons: false,
+  optional: false,
   ...extra,
 });
 const T: NewsletterTemplate = {
   version: 1,
   locked: false,
+  styleNotes: null,
+  learnedAt: null,
+  learnedFrom: null,
   style: styleSchema.parse({}),
   hubspot: null,
       beehiiv: null,

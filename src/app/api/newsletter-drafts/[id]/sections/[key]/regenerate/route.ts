@@ -21,7 +21,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
   const guard = await requireFeature("newsletterDrafter");
   if (guard.response) return guard.response;
   const { id, key } = await context.params;
-  const parsed = z.object({ instruction: z.string().max(1000).nullable().optional(), newStory: z.boolean().optional() }).safeParse(await request.json().catch(() => ({})));
+  const parsed = z.object({ instruction: z.string().max(8000).nullable().optional(), newStory: z.boolean().optional() }).safeParse(await request.json().catch(() => ({})));
   if (!parsed.success) return NextResponse.json({ error: "Invalid body" }, { status: 400 });
   const draft = await getNewsletterDraft(id);
   if (!draft) return NextResponse.json({ error: "Not found" }, { status: 404 });

@@ -23,7 +23,7 @@
 import { and, eq, inArray, isNotNull, lte, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { formatChannels, formats, newsletterDrafts, newsletterIssueHistory, productionItems } from "@/lib/db/schema";
-import { emailRichTextHtml, listEmailsCreatedAfter } from "@/lib/hubspot-marketing-email";
+import { emailRichTextHtml, getHubspotEmail, listEmailsCreatedAfter, type HubspotEmail } from "@/lib/hubspot-marketing-email";
 import { getFuturepediaPost, listFuturepediaPosts } from "@/lib/beehiiv";
 import { extractStoryRefs, usageGroupFor, videoKeysForYoutubeIds } from "./usage";
 import { resolveEditor } from "@/lib/services/assignees";
@@ -216,11 +216,123 @@ export async function importBeehiivHowToIssues(now: Date = new Date()): Promise<
   return n;
 }
 
-export async function syncNewsletterHistory(opts: { since: Date }): Promise<{ hubspot: number; items: number; beehiiv: number; beehiivImported: number }> {
+/**
+ * A HubSpot drag-and-drop email read in its layout order (flexAreas → columns
+ * → widgets; else the widgets' own `order`): label modules (Sunday Breakfast's
+ * course names) become headings, rich-text blocks their text. `html` keeps the
+ * HTML (headings as <h2>) for `newsletter_body_html`; `text` is the plain-text
+ * exemplar the drafter reads. Pure; exported for tests.
+ */
+export function emailContent(email: HubspotEmail): { html: string; text: string } {
+  const widgets = email.content?.widgets ?? {};
+  const inLayout = (email.content?.flexAreas?.main?.sections ?? []).flatMap((s) => s.columns.flatMap((c) => c.widgets));
+  const ordered = inLayout.length
+    ? inLayout
+    : Object.keys(widgets).sort((a, b) => (Number((widgets[a] as { order?: number }).order ?? 0) || 0) - (Number((widgets[b] as { order?: number }).order ?? 0) || 0));
+  const parts: string[] = [];
+  for (const id of ordered) {
+    const b = widgets[id]?.body;
+    if (!b) continue;
+    if (typeof b.label_text === "string" && b.label_text.trim()) parts.push(`<h2>${b.label_text.trim()}</h2>`);
+    else if (b.path === "@hubspot/rich_text" && typeof b.html === "string" && b.html.trim()) parts.push(b.html);
+  }
+  const html = parts.join("\n");
+  return { html, text: htmlToPlainText(html) };
+}
+
+/**
+ * Published Starter Story HubSpot issues (Sunday Breakfast / Daily Seinfeld by
+ * the team's email naming) → published `newsletter` content items in the
+ * group's format, with the email's content (`emailContent`), so the drafter's
+ * past-issue examples are the issues actually sent — not the Klaviyo era. One
+ * read-only GET per email not imported yet (`platform_content_id` = the email
+ * id). An email our own push created fills in its draft's queue item instead
+ * of making a second one. Idempotent.
+ */
+export async function importHubspotIssues(since: Date): Promise<number> {
+  if (!process.env.HUBSPOT_PORTAL_53_ACCESS_TOKEN) return 0;
+  const groupFormat = new Map(scheduledPrimaries().map((p) => [p.schedule.group, p.formatName]));
+  const formatRows = await db
+    .select({ id: formats.id, name: formats.name })
+    .from(formats)
+    .where(and(eq(formats.brand, "starter-story"), inArray(sql`lower(${formats.name})`, [...groupFormat.values()].map((n) => n.toLowerCase()))));
+  const byGroup = new Map<string, { id: string; name: string; accountId: string | null }>();
+  for (const [group, name] of groupFormat) {
+    const f = formatRows.find((r) => r.name.toLowerCase() === name.toLowerCase());
+    if (!f) continue;
+    const [channel] = await db
+      .select({ accountId: formatChannels.accountId })
+      .from(formatChannels)
+      .where(and(eq(formatChannels.formatId, f.id), eq(formatChannels.postType, "newsletter")))
+      .limit(1);
+    byGroup.set(group, { id: f.id, name: f.name, accountId: channel?.accountId ?? null });
+  }
+  if (!byGroup.size) return 0;
+  const imported = new Set(
+    (
+      await db
+        .select({ id: productionItems.platformContentId })
+        .from(productionItems)
+        .where(and(eq(productionItems.brand, "starter-story"), eq(productionItems.postType, "newsletter"), isNotNull(productionItems.platformContentId)))
+    ).map((r) => r.id!),
+  );
+  // Emails our push created: their draft's queue item gets the content (no second item).
+  const ours = new Map(
+    (
+      await db
+        .select({ emailId: newsletterDrafts.hubspotEmailId, itemId: newsletterDrafts.productionItemId })
+        .from(newsletterDrafts)
+        .where(isNotNull(newsletterDrafts.hubspotEmailId))
+    ).map((r) => [r.emailId!, r.itemId]),
+  );
+  let n = 0;
+  for await (const e of listEmailsCreatedAfter(since.toISOString())) {
+    if (e.state !== "PUBLISHED" || imported.has(String(e.id))) continue;
+    if (e.businessUnitId != null && String(e.businessUnitId) !== STARTER_STORY_BUSINESS_UNIT) continue;
+    const group = groupFromEmailName(e.name);
+    const format = group ? byGroup.get(group) : undefined;
+    if (!format) continue;
+    const full = await getHubspotEmail(String(e.id));
+    const { html, text } = emailContent(full);
+    if (!text.trim()) continue;
+    const sentAt = e.publishDate ?? e.publishedAt ?? null;
+    const values = {
+      title: e.subject ?? e.name ?? null,
+      platformContentId: String(e.id),
+      publishedAt: sentAt ? new Date(sentAt) : null,
+      publishedDate: sentAt ? sentAt.slice(0, 10) : null,
+      newsletterPreviewText: (full.content?.widgets?.preview_text?.body?.value as string | undefined) ?? null,
+      newsletterBodyHtml: html,
+      contentBody: text,
+    };
+    const ownItem = ours.get(String(e.id));
+    if (ownItem) {
+      await db.update(productionItems).set(values).where(eq(productionItems.id, ownItem));
+    } else {
+      await db.insert(productionItems).values({
+        brand: "starter-story",
+        postType: "newsletter",
+        status: "Published",
+        format: format.name,
+        accountId: format.accountId,
+        sourceType: "original",
+        editorUserId: await resolveEditor({ brand: "starter-story", format: format.name }),
+        createdVia: "sync:hubspot",
+        ...values,
+      });
+    }
+    imported.add(String(e.id));
+    n++;
+  }
+  return n;
+}
+
+export async function syncNewsletterHistory(opts: { since: Date }): Promise<{ hubspot: number; items: number; beehiiv: number; beehiivImported: number; hubspotImported: number }> {
   let hubspot = 0;
   let items = 0;
   const beehiiv = await syncBeehiivHistory(opts.since);
   const beehiivImported = await importBeehiivHowToIssues();
+  const hubspotImported = await importHubspotIssues(opts.since).catch(() => 0);
 
   const pushed = await db
     .select({ id: newsletterDrafts.hubspotEmailId })
@@ -278,5 +390,5 @@ export async function syncNewsletterHistory(opts: { since: Date }): Promise<{ hu
     });
     items++;
   }
-  return { hubspot, items, beehiiv, beehiivImported };
+  return { hubspot, items, beehiiv, beehiivImported, hubspotImported };
 }

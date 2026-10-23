@@ -15,6 +15,9 @@ import { formatConfigFor } from "./format-config";
 import { loadSourceVideo } from "./run";
 import { buildStoryPlan, withPlanDates } from "./story-plan";
 import { autoPickScreenshotsSafely, dropSectionScreenshots } from "./screenshots";
+import { sectionExamples } from "./exemplars";
+import { getPastIssues } from "./sources";
+import { voiceForChannel } from "./format-config";
 
 /** Replace one section (or append it), keeping its other fields. Pure; exported for tests. */
 export function spliceSection(sections: NewsletterSection[], key: string, markdown: string, patch: Partial<NewsletterSection> = {}): NewsletterSection[] {
@@ -113,6 +116,13 @@ export async function regenerateDraftSection(
             () => null,
           )
         : null;
+    // How this section has read before (same voice for two-voice formats): examples for the rewrite.
+    const pastIssues = await getPastIssues(
+      row.brand,
+      row.formatName,
+      video ? (voiceForChannel(row.formatName, video.channelHandle)?.voiceName ?? null) : null,
+      template.sections.map((s) => s.heading ?? "").filter(Boolean),
+    ).catch(() => []);
     const result = await regenerateSection({
       brand: row.brand,
       brandLabel: brand?.label ?? row.brand,
@@ -120,6 +130,7 @@ export async function regenerateDraftSection(
       formatName: row.formatName,
       formatInstructions: row.formatInstructions,
       pastIssues: [],
+      sectionExamples: sectionExamples(pastIssues, template),
       window: { start: row.windowStart, end: row.windowEnd },
       sendDate: row.sendDate,
       notes: row.notes,

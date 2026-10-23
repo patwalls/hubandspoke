@@ -97,6 +97,7 @@ export async function getNewsletterDraft(id: string) {
       beehiivPostUrl: newsletterDrafts.beehiivPostUrl,
       beehiivStatus: newsletterDrafts.beehiivStatus,
       beehiivError: newsletterDrafts.beehiivError,
+      review: newsletterDrafts.review,
       updatedAt: newsletterDrafts.updatedAt,
       slotKey: newsletterDrafts.slotKey,
       sections: newsletterDrafts.sections,

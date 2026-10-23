@@ -11,7 +11,8 @@
 // enforces the same rule. Flag `newsletterDrafter`.
 
 import { useEffect, useState } from "react";
-import { ArrowDown, ArrowUp, ExternalLink, LayoutTemplate, Loader2, Lock, LockOpen, MousePointerClick, Pencil, Plus, RotateCcw, Sparkles, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, ExternalLink, GraduationCap, LayoutTemplate, Loader2, Lock, LockOpen, MousePointerClick, Pencil, Plus, RotateCcw, Sparkles, Trash2 } from "lucide-react";
+import { startVisibleInterval } from "@/lib/visible-interval";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -29,6 +30,17 @@ import {
   type NewsletterTemplateSection,
   type StoryKind,
 } from "@/lib/newsletter-template";
+
+/** The latest template proposal learned from past issues (GET …/newsletter-template/learn). */
+interface Proposal {
+  id: string;
+  status: "pending" | "done" | "failed";
+  proposal: NewsletterTemplate | null;
+  rationale: string | null;
+  issueCount: number;
+  error: string | null;
+  createdAt: string;
+}
 
 /** Story settings context from the template API. */
 interface StoryContext {
@@ -85,6 +97,30 @@ export function NewsletterTemplateSection({ formatId }: { formatId: string }) {
   const [storyCtx, setStoryCtx] = useState<StoryContext>({ singleVideoNote: null, caseStudies: false });
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
+  /** The learner's latest proposal, and whether the editor is open on it. */
+  const [proposal, setProposal] = useState<Proposal | null>(null);
+  const [reviewing, setReviewing] = useState(false);
+  const [learnError, setLearnError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!enabled) return;
+    let cancelled = false;
+    void fetch(`/api/formats/${formatId}/newsletter-template/learn`)
+      .then((r) => (r.ok ? (r.json() as Promise<{ proposal: Proposal | null }>) : null))
+      .then((j) => !cancelled && j && setProposal(j.proposal));
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled, formatId]);
+  // A pending proposal: poll until the worker is done.
+  useEffect(() => {
+    if (proposal?.status !== "pending") return;
+    return startVisibleInterval(() => {
+      void fetch(`/api/formats/${formatId}/newsletter-template/learn`)
+        .then((r) => (r.ok ? (r.json() as Promise<{ proposal: Proposal | null }>) : null))
+        .then((j) => j && setProposal(j.proposal));
+    }, 4000);
+  }, [proposal?.status, formatId]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -105,6 +141,19 @@ export function NewsletterTemplateSection({ formatId }: { formatId: string }) {
   }, [enabled, formatId]);
 
   if (!enabled || !template) return null;
+
+  async function learn() {
+    setLearnError(null);
+    const r = await fetch(`/api/formats/${formatId}/newsletter-template/learn`, { method: "POST" });
+    const j = (await r.json().catch(() => ({}))) as { proposal?: Proposal; error?: string };
+    if (!r.ok) return setLearnError(j.error ?? "Couldn't start");
+    setProposal(j.proposal ?? null);
+  }
+  async function discardProposal() {
+    await fetch(`/api/formats/${formatId}/newsletter-template/learn`, { method: "DELETE" });
+    setProposal(null);
+    setReviewing(false);
+  }
 
   async function reset() {
     if (!window.confirm("Reset this format's newsletter template to the built-in default?")) return;
@@ -151,17 +200,48 @@ export function NewsletterTemplateSection({ formatId }: { formatId: string }) {
       </button>
       <p className="text-xs text-muted-foreground">
         {template.sections.length} sections · {isDefault ? "built-in default" : "custom"}
+        {template.learnedFrom ? ` · learned from ${template.learnedFrom} past issues${template.learnedAt ? ` on ${template.learnedAt.slice(0, 10)}` : ""}` : ""}
       </p>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <Button size="sm" onClick={() => setEditing(true)}>
           <Pencil /> {template.locked && !canUnlock ? "Edit instructions" : "Edit template"}
         </Button>
+        {(!template.locked || canUnlock) &&
+          (proposal?.status === "pending" ? (
+            <Button size="sm" variant="outline" disabled>
+              <Loader2 className="animate-spin" /> Reading {proposal.issueCount || "past"} issues…
+            </Button>
+          ) : proposal?.status === "done" && proposal.proposal ? (
+            <>
+              <Button size="sm" variant="outline" onClick={() => setReviewing(true)} title="A template learned from the past issues — review it, then save or discard">
+                <GraduationCap /> Review learned template
+              </Button>
+              <Button size="sm" variant="ghost" onClick={discardProposal}>
+                Discard
+              </Button>
+            </>
+          ) : (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={learn}
+              title="Read this newsletter's past issues (the sent ones, pulled from HubSpot / beehiiv) and propose the template that fits them: sections, instructions, how it reads"
+            >
+              <GraduationCap /> Learn from past issues
+            </Button>
+          ))}
         {!isDefault && (!template.locked || canUnlock) && (
           <Button size="sm" variant="ghost" onClick={reset} disabled={busy}>
             <RotateCcw /> Reset to default
           </Button>
         )}
       </div>
+      {proposal?.status === "failed" && (
+        <p className="rounded-md bg-red-50 p-2 text-xs text-red-800 dark:bg-red-900/30 dark:text-red-200">
+          Learning failed: {proposal.error} <button type="button" className="underline" onClick={discardProposal}>Dismiss</button>
+        </p>
+      )}
+      {learnError && <p className="text-xs text-destructive">{learnError}</p>}
       {editing && (
         <TemplateEditorDialog
           formatId={formatId}
@@ -177,6 +257,23 @@ export function NewsletterTemplateSection({ formatId }: { formatId: string }) {
           }}
         />
       )}
+      {reviewing && proposal?.proposal && (
+        <TemplateEditorDialog
+          formatId={formatId}
+          initial={proposal.proposal}
+          proposalNote={`Learned from ${proposal.issueCount} past issues. ${proposal.rationale ?? ""}`.trim()}
+          storyCtx={storyCtx}
+          canUnlock={canUnlock}
+          hubspotUrl={hubspotUrl}
+          onClose={() => setReviewing(false)}
+          onSaved={(t) => {
+            setTemplate(t);
+            setIsDefault(false);
+            setReviewing(false);
+            void discardProposal();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -184,6 +281,7 @@ export function NewsletterTemplateSection({ formatId }: { formatId: string }) {
 function TemplateEditorDialog({
   formatId,
   initial,
+  proposalNote,
   storyCtx,
   canUnlock,
   hubspotUrl,
@@ -192,6 +290,8 @@ function TemplateEditorDialog({
 }: {
   formatId: string;
   initial: NewsletterTemplate;
+  /** Reviewing a learned proposal: the banner's text; Save template applies it. */
+  proposalNote?: string | null;
   storyCtx: StoryContext;
   canUnlock: boolean;
   hubspotUrl: string | null;
@@ -206,7 +306,7 @@ function TemplateEditorDialog({
   const [unlocked, setUnlocked] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const dirty = JSON.stringify(t) !== JSON.stringify(initial);
+  const dirty = !!proposalNote || JSON.stringify(t) !== JSON.stringify(initial);
   /** Structure can't change: only section instructions can. */
   const frozen = t.locked && !unlocked;
   const sectionIndex = (key: string) => t.sections.findIndex((s) => s.key === key);
@@ -245,7 +345,7 @@ function TemplateEditorDialog({
       <DialogContent className="flex h-[94vh] w-[97vw] max-w-[97vw] flex-col gap-0 overflow-hidden p-0 sm:max-w-[min(1500px,97vw)]">
         <div className="flex items-center justify-between gap-3 border-b px-5 py-3">
           <div className="flex items-center gap-2">
-            <DialogTitle className="text-base font-semibold">Edit newsletter template</DialogTitle>
+            <DialogTitle className="text-base font-semibold">{proposalNote ? "Review the learned template" : "Edit newsletter template"}</DialogTitle>
             {t.locked && (
               <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
                 {frozen ? <Lock className="size-3" /> : <LockOpen className="size-3" />}
@@ -266,7 +366,7 @@ function TemplateEditorDialog({
             </Button>
             <Button size="sm" onClick={save} disabled={!dirty || saving}>
               {saving && <Loader2 className="animate-spin" />}
-              Save template
+              {proposalNote ? "Save as the template" : "Save template"}
             </Button>
           </div>
         </div>
@@ -306,6 +406,14 @@ function TemplateEditorDialog({
           </div>
 
           <div className="flex min-h-0 flex-col gap-4 overflow-y-auto border-l p-4">
+            {proposalNote && (
+              <p className="flex items-start gap-2 rounded-md bg-[#eef6ff] p-3 text-xs leading-relaxed text-[#1e40af] dark:bg-blue-900/20 dark:text-blue-200">
+                <GraduationCap className="mt-0.5 size-3.5 shrink-0" />
+                <span>
+                  <span className="font-medium">Proposed from the past issues.</span> {proposalNote} Edit anything, then save to make it the template; the drafter then follows it and reads the style notes.
+                </span>
+              </p>
+            )}
             {t.locked && (
               <p className="flex items-start gap-2 rounded-md bg-amber-50 p-2 text-xs text-amber-900 dark:bg-amber-900/30 dark:text-amber-200">
                 <Lock className="mt-0.5 size-3.5 shrink-0" />
@@ -361,7 +469,7 @@ function TemplateEditorDialog({
                 frozen={frozen}
                 onAddSection={() => {
                   const key = `section_${t.sections.length + 1}`;
-                  setT({ ...t, sections: [...t.sections, { key, heading: "New section", headingLevel: 2, kind: "text", hint: "", pillColor: null, boxColor: null, screenshots: false, look: "text", thumbnail: false, bullets: "list", linkButtons: false }] });
+                  setT({ ...t, sections: [...t.sections, { key, heading: "New section", headingLevel: 2, kind: "text", hint: "", pillColor: null, boxColor: null, screenshots: false, look: "text", thumbnail: false, bullets: "list", linkButtons: false, optional: false }] });
                   setSelected(key);
                 }}
                 onAddCard={() => {
@@ -370,6 +478,7 @@ function TemplateEditorDialog({
                   setSelected(`card:${layout.cards.length}`);
                 }}
                 onLook={() => setSelected("look")}
+                onStyleNotes={(styleNotes) => setT({ ...t, styleNotes })}
               />
             )}
           </div>
@@ -391,6 +500,7 @@ function OverviewPanel({
   onAddSection,
   onAddCard,
   onLook,
+  onStyleNotes,
 }: {
   template: NewsletterTemplate;
   storyCtx: StoryContext;
@@ -398,10 +508,23 @@ function OverviewPanel({
   onAddSection: () => void;
   onAddCard: () => void;
   onLook: () => void;
+  onStyleNotes: (notes: string | null) => void;
 }) {
   return (
     <div className="flex flex-col gap-3">
       <PanelTitle>Whole template</PanelTitle>
+      <label className="flex flex-col gap-1 text-xs">
+        <span className="flex items-center gap-1.5 text-muted-foreground">
+          <Sparkles className="size-3 text-[#2563eb]" /> How this newsletter reads
+          {t.learnedFrom ? <span className="text-[10px]">· learned from {t.learnedFrom} issues</span> : null}
+        </span>
+        <Textarea
+          className="min-h-28 text-xs"
+          placeholder="Voice, rhythm, how issues open and close, subject-line habits, what varies issue to issue. The drafter reads this with the Skill. “Learn from past issues” on the format page writes it from the sent issues."
+          value={t.styleNotes ?? ""}
+          onChange={(e) => onStyleNotes(e.target.value || null)}
+        />
+      </label>
       <p className="rounded-md bg-muted/60 p-3 text-xs text-muted-foreground">
         Click any section in the email to edit its instructions right there: what AI writes in it every draft. Its settings show here.
         {t.hubspot ? " The look (masthead, colors, headings, buttons) is set here — click the masthead or “Look” — and the whole email is sent to HubSpot as one block; HubSpot adds the footer." : ""}
@@ -482,6 +605,15 @@ function SectionPanel({
           <span>
             Links on their own line become buttons
             <span className="block text-muted-foreground">A CTA like “Grab the free guide” draws as a button in the brand color.</span>
+          </span>
+        </label>
+      )}
+      {sec.kind !== "sponsor" && (
+        <label className={cn("flex items-center gap-2 text-xs", frozen && "opacity-60")}>
+          <input type="checkbox" checked={sec.optional} disabled={frozen} onChange={(e) => onChange({ optional: e.target.checked })} />
+          <span>
+            Optional
+            <span className="block text-muted-foreground">The drafter may leave it out of an issue when there&apos;s nothing worth saying in it.</span>
           </span>
         </label>
       )}

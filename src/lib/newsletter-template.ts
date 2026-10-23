@@ -99,6 +99,8 @@ export const sectionSchema = z.object({
   bullets: z.enum(["list", "lines", "paragraphs"]).default("list"),
   /** A line that is only a link becomes a button (the sponsor's CTA, "Watch the full video"). HubSpot-style templates; beehiiv cards have their own setting. */
   linkButtons: z.boolean().default(false),
+  /** The drafter may leave this section out of an issue when there's nothing worth saying in it (a submission with it empty is accepted). */
+  optional: z.boolean().default(false),
 });
 
 /**
@@ -207,6 +209,16 @@ export const newsletterTemplateSchema = z
     beehiiv: beehiivMappingSchema.nullable().default(null),
     sections: z.array(sectionSchema).min(1).max(20),
     /**
+     * How this newsletter reads, learned from its past issues (the template
+     * learner, `newsletter-template-learn`) or written by hand: voice, rhythm,
+     * how issues open and close, subject-line habits, what varies issue to
+     * issue. Goes into the drafter's system prompt next to the Skill.
+     */
+    styleNotes: z.string().max(6000).nullable().default(null),
+    /** When / from how many issues `styleNotes` and the sections were learned. */
+    learnedAt: z.string().nullable().default(null),
+    learnedFrom: z.number().int().min(0).nullable().default(null),
+    /**
      * Locked: only each section's instructions can be edited (by anyone with
      * the drafter); everything else — sections, keys, types, settings, the
      * layout — only by a template admin (flag `newsletterTemplateAdmin`). For
@@ -250,7 +262,7 @@ const s = (
   key: string,
   heading: string | null,
   hint: string,
-  extra: Partial<Pick<NewsletterTemplateSection, "headingLevel" | "kind" | "pillColor" | "boxColor" | "story" | "screenshots" | "look" | "thumbnail" | "bullets" | "linkButtons">> = {},
+  extra: Partial<Pick<NewsletterTemplateSection, "headingLevel" | "kind" | "pillColor" | "boxColor" | "story" | "screenshots" | "look" | "thumbnail" | "bullets" | "linkButtons" | "optional">> = {},
 ): NewsletterTemplateSection => ({
   key,
   heading,
@@ -265,6 +277,7 @@ const s = (
   thumbnail: extra.thumbnail ?? false,
   bullets: extra.bullets ?? "list",
   linkButtons: extra.linkButtons ?? false,
+  optional: extra.optional ?? false,
 });
 
 /** Starter Story's email look, read off past issues (Klaviyo/HubSpot HTML): the lavender masthead, #6B72C4 links and buttons. */
@@ -282,6 +295,9 @@ export const DEFAULT_TEMPLATES: Record<string, NewsletterTemplate> = {
   "sunday breakfast": {
     version: 1,
     locked: false,
+    styleNotes: null,
+    learnedAt: null,
+    learnedFrom: null,
     style: STARTER_STORY_STYLE,
     // HubSpot account 20627419: "[TEMPLATE] Sunday Breakfast – Hub & Spoke (do
     // not send)", a copy of the Oct 11 2026 issue: sender, lists and footer.
@@ -322,6 +338,9 @@ export const DEFAULT_TEMPLATES: Record<string, NewsletterTemplate> = {
   "daily seinfeld": {
     version: 1,
     locked: false,
+    styleNotes: null,
+    learnedAt: null,
+    learnedFrom: null,
     style: { ...STARTER_STORY_STYLE, dividers: false },
     // HubSpot account 20627419: "[TEMPLATE] Daily Seinfeld – Hub & Spoke (do
     // not send)", a copy of the Oct 15 2026 issue: sender, lists and footer.
@@ -368,6 +387,9 @@ export const DEFAULT_TEMPLATES: Record<string, NewsletterTemplate> = {
         beehiiv: { author, layout: DEFAULT_BEEHIIV_LAYOUT },
         // The beehiiv build depends on this exact structure: changes go through a template admin.
         locked: true,
+        styleNotes: null,
+        learnedAt: null,
+        learnedFrom: null,
         sections: [
           s("intro", null, "2 to 4 short first-person lines in the channel voice, the signature on its own line, then a one-line teaser text link to the Free Resource offer, the arrow after the link: '[See the bundle](URL) →'."),
           s("article", null, "The article headline as an H2 (the how-to, benefit-first), then the video thumbnail, then the one-line concrete example.", { thumbnail: true }),

@@ -2587,6 +2587,58 @@ export const newsletterIssueHistory = pgTable(
   (table) => [index("newsletter_issue_history_group_date_idx").on(table.scheduleGroup, table.sentDate)],
 );
 
+/** One finding of the AI review of a newsletter draft. */
+export interface NewsletterReviewFinding {
+  id: string;
+  /** The template section it's about (null: the whole issue / subject). */
+  sectionKey: string | null;
+  severity: "fix" | "consider";
+  /** What's off, in one or two sentences. */
+  note: string;
+  /** The rewrite instruction that fixes it (Regenerate with it), when a rewrite is the fix. */
+  instruction: string | null;
+  /** The editor applied or dismissed it. */
+  state?: "applied" | "dismissed";
+}
+
+export interface NewsletterReview {
+  status: "running" | "done" | "failed";
+  /** Draft revision the review read. */
+  revision: number;
+  summary: string | null;
+  findings: NewsletterReviewFinding[];
+  error?: string | null;
+  at: string;
+}
+
+/**
+ * A proposed newsletter template, learned from the format's past issues
+ * (`newsletter-template-learn`): the format page shows it for review and
+ * saving it replaces the format's template. One row per run; the latest is
+ * the one shown.
+ */
+export const newsletterTemplateProposals = pgTable(
+  "newsletter_template_proposals",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    formatId: uuid("format_id")
+      .notNull()
+      .references(() => formats.id, { onDelete: "cascade" }),
+    /** pending | done | failed */
+    status: text("status").notNull().default("pending"),
+    /** The proposed template (validated NewsletterTemplate) once done. */
+    proposal: jsonb("proposal").$type<NewsletterTemplate>(),
+    /** What the model changed and why, for the reviewer. */
+    rationale: text("rationale"),
+    issueCount: integer("issue_count").notNull().default(0),
+    error: text("error"),
+    createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index("newsletter_template_proposals_format_idx").on(table.formatId, table.createdAt)],
+);
+
 export interface NewsletterSpecialSource {
   taskGid: string;
   taskName: string;
@@ -2669,6 +2721,8 @@ export const newsletterDrafts = pgTable(
     beehiivPostUrl: text("beehiiv_post_url"),
     beehiivStatus: text("beehiiv_status"),
     beehiivError: text("beehiiv_error"),
+    /** The editor's "AI review" of the issue (newsletter-review task): findings the editor applies one by one. */
+    review: jsonb("review").$type<NewsletterReview>(),
     createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
