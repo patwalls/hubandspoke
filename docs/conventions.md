@@ -350,6 +350,12 @@ It needs no secrets (Sentry source-map upload skips itself without
 - **Unit tests must not touch the DB.** CI has no Postgres. A test that
   imports `@/test/factories` or `db` belongs in `*.integration.test.ts`; a
   DB-backed test in the unit project fails CI with a connection error.
+- **The build must not need the internet beyond npm.** No `next/font/google`:
+  it downloads every font file from Google mid-build, and one failed fetch
+  failed a Heroku deploy (build d9e2de84, 2026-10-23). Fonts come from
+  `@fontsource` / `@fontsource-variable` packages imported as CSS (see
+  `src/app/layout.tsx`, `beehiiv-preview.tsx`); `src/app/build-offline.test.ts`
+  fails on a `next/font/google` import.
 - **Lint is not gated** — `main` carries pre-existing eslint errors. Gate it
   once they're cleared.
 - **Dependabot** (`.github/dependabot.yml`) opens one grouped weekly PR per

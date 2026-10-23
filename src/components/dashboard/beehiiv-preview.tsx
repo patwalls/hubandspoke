@@ -10,7 +10,11 @@
 // click a section to edit its text in place, click a screenshot to pick or
 // upload its image (or drop an image file on it). The editor owns all state.
 
-import { Open_Sans, Poppins } from "next/font/google";
+import "@fontsource-variable/open-sans/wght.css";
+import "@fontsource-variable/open-sans/wght-italic.css";
+import "@fontsource/poppins/400.css";
+import "@fontsource/poppins/600.css";
+import "@fontsource/poppins/700.css";
 import ReactMarkdown from "react-markdown";
 import { EditableSection, emptySectionHint, FixedPart, type PreviewEditing } from "@/components/dashboard/editable-section";
 import { cn } from "@/lib/utils";
@@ -19,8 +23,9 @@ import { AddShotButton, addPointFor, imageFor, ImageBlock, markAddPoints, markIm
 import { sponsorBlock, type NewsletterSection, type NewsletterTemplate } from "@/lib/newsletter-template";
 
 // The Kevin/Saj templates' fonts: Open Sans body (16px, 1.5), Poppins headings.
-const openSans = Open_Sans({ subsets: ["latin"], weight: ["400", "600", "700"], style: ["normal", "italic"] });
-const poppins = Poppins({ subsets: ["latin"], weight: ["400", "600", "700"] });
+// Self-hosted via @fontsource (see src/app/layout.tsx for why not next/font/google).
+const openSans = { className: "font-['Open_Sans_Variable',sans-serif]" };
+const poppins = { className: "font-['Poppins',sans-serif]" };
 
 /** "### Why Claude Works" → "Claude" — same rule as the push's card labels. */
 function toolFromWhy(md: string): string | null {

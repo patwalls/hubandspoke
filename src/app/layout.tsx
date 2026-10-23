@@ -1,16 +1,14 @@
 import type { Metadata } from "next";
-import { Inter, JetBrains_Mono } from "next/font/google";
+// Fonts ship from npm (@fontsource), never next/font/google: that one downloads
+// from Google mid-build and a single failed fetch fails the deploy (2026-10-23).
+import "@fontsource-variable/inter";
+import "@fontsource-variable/jetbrains-mono";
 import "./globals.css";
 
-const inter = Inter({
-  variable: "--font-sans",
-  subsets: ["latin"],
-});
-
-const jetbrainsMono = JetBrains_Mono({
-  variable: "--font-mono",
-  subsets: ["latin"],
-});
+const fontVars = {
+  "--font-sans": "'Inter Variable'",
+  "--font-mono": "'JetBrains Mono Variable'",
+} as React.CSSProperties;
 
 export const metadata: Metadata = {
   title: {
@@ -35,7 +33,8 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${inter.variable} ${jetbrainsMono.variable} h-full antialiased`}
+      className="h-full antialiased"
+      style={fontVars}
     >
       {/* overflow-x-clip (not -hidden): kills page-level horizontal panning on
           mobile without creating a scroll container, so position:sticky inside
