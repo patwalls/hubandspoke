@@ -1221,7 +1221,7 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
 ### `extract-poster-sweep` — ffmpeg poster fallback
 - **Trigger:** cron `35 * * * *`
 - **Files:** `src/jobs/tasks/scheduled.ts` (`extractPosterSweepTask`), `src/jobs/tasks/extract-poster.ts` (per-item task + `selectExtractPosterCandidates`), `src/jobs/tasks/poster-extract-pipeline.ts` (worker-only ffmpeg helper)
-- **Inputs:** Published short-form items (`instagram_reel`, `instagram_post`, `tiktok`, `youtube_shorts`) where `mediaS3Key IS NOT NULL AND posterS3Key IS NULL`. Ordered by views DESC, batch 50.
+- **Inputs:** Published short-form items (`instagram_reel`, `instagram_post`, `tiktok`, `youtube_shorts`) where `mediaS3Key IS NOT NULL AND posterS3Key IS NULL` and `mediaContentType` is not `audio/*` (an audio-only archive has no frame to grab — HUBANDSPOKE-3C, a TikTok archived as `audio/mp4`). Ordered by views DESC, batch 50.
 - **Outputs:** enqueues one `extract-poster` job per candidate, `jobKey: extract-poster-{id}`, `jobKeyMode: unsafe_dedupe`
 - **Why:** IG's Scrape Creators response sometimes omits `display_url`; without a poster, vision OCR can't run and the hook stays null. Frame 0 of the archived .mp4 IS the cover with overlay — same image vision needs.
 - **Sequencing:** runs after `enrichment-sweep` (`:20`, archives the .mp4) and before `vision-extract-sweep` (`:55`, OCRs the poster), so a freshly-enriched reel can land all three steps in a single hour.
@@ -1235,6 +1235,7 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
   - Streams the archived .mp4 from S3 to a tempfile, runs `ffmpeg -ss 0 -i input -frames:v 1 -q:v 2 frame.jpg`, uploads the JPEG to `{prefix}/{itemId}/{uuid}-frame0-poster.jpg`
   - Idempotent on `posterS3Key`: skips when one is already present unless `force=true`
   - 60s ffmpeg timeout, 5 MB cap on extracted frame
+  - **No video, no poster, no error (2026-10-23, HUBANDSPOKE-3C):** an `audio/*` `mediaContentType` skips before download; media labelled video whose bytes have no video stream (ffmpeg: `does not contain any stream`) raises `PosterExtractError` kind `no_video_stream`, which the task logs as a skip and completes instead of burning 25 retries. Every other kind still throws and retries. Note the mislabelled case stays a sweep candidate and is re-checked hourly (one download each) — no stamp column exists for it
   - Backfill: `scripts/enqueue-poster-extract.mjs --apply`
 
 ### Clip-idea promotion stamps `hookSource='clip_idea'`
