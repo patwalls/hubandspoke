@@ -122,6 +122,8 @@ export type FieldSaveState = "idle" | "saving" | "saved" | "error";
 import { TiktokDraftBanner } from "./tiktok-draft-banner";
 import { UserChip } from "./user-chip";
 import { UserCombobox } from "./user-combobox";
+import { DerivativesAssignAll } from "./derivatives-assign-all";
+import { assignAllIds } from "@/lib/derivatives/assign-all";
 import { UpNext } from "@/components/my-work/up-next";
 import { renderInstructions } from "@/lib/utils/markdown";
 import { recordVisit } from "@/lib/hooks/use-recent-items";
@@ -3944,6 +3946,12 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                 </p>
               </div>
             </div>
+            <DerivativesAssignAll
+              brand={brand}
+              ids={assignAllIds(mergedRows, statusNameSet)}
+              users={assignableUsers}
+              onDone={() => void load()}
+            />
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
