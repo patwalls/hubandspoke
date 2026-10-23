@@ -209,6 +209,40 @@ export async function listFormatVideos(formatId: string): Promise<FormatVideoOpt
   }));
 }
 
+/** The brand's published long-form videos from the last 90 days (any channel), newest first — the pillar picker for "one piece of pillar content". */
+export async function listBrandVideos(brand: string): Promise<FormatVideoOption[]> {
+  const published = sql`COALESCE(${productionItems.publishedAt}, ${productionItems.publishedDate}::timestamptz)`;
+  const rows = await db
+    .select({
+      id: productionItems.id,
+      title: productionItems.title,
+      publishedLink: productionItems.publishedLink,
+      youtubeUrl: productionItems.youtubeUrl,
+      publishedAt: sql<string | null>`${published}`,
+      transcriptId: transcripts.id,
+    })
+    .from(productionItems)
+    .leftJoin(transcripts, eq(transcripts.productionItemId, productionItems.id))
+    .where(
+      and(
+        eq(productionItems.brand, brand),
+        eq(productionItems.postType, "youtube_long"),
+        eq(productionItems.status, "Published"),
+        isNull(productionItems.deletedAt),
+        sql`${published} > now() - interval '90 days'`,
+      ),
+    )
+    .orderBy(desc(published))
+    .limit(40);
+  return rows.map((r) => ({
+    id: r.id,
+    title: r.title,
+    url: r.publishedLink ?? r.youtubeUrl,
+    publishedAt: r.publishedAt ? new Date(r.publishedAt).toISOString() : null,
+    hasTranscript: r.transcriptId != null,
+  }));
+}
+
 export async function createNewsletterDraft(args: {
   formatId: string;
   days?: number | null;
@@ -235,6 +269,17 @@ export async function createNewsletterDraft(args: {
       .limit(1);
     if (!item || !item.accountId || !accountIds.includes(item.accountId)) return { error: "That video isn't from this format's channels" };
     sourceItemId = args.sourceItemId;
+  } else if (args.sourceItemId) {
+    // A roundup format about ONE piece of pillar content: any of the brand's long-form videos with a transcript.
+    const [item] = await db
+      .select({ brand: productionItems.brand, postType: productionItems.postType, transcriptId: transcripts.id })
+      .from(productionItems)
+      .leftJoin(transcripts, eq(transcripts.productionItemId, productionItems.id))
+      .where(eq(productionItems.id, args.sourceItemId))
+      .limit(1);
+    if (!item || item.brand !== format.brand || item.postType !== "youtube_long") return { error: "That isn't one of this brand's videos" };
+    if (!item.transcriptId) return { error: "That video has no transcript yet" };
+    sourceItemId = args.sourceItemId;
   }
   const w = computeWindow(args.days);
   const [created] = await db
@@ -248,6 +293,8 @@ export async function createNewsletterDraft(args: {
       notes: args.notes?.trim() || null,
       sendDate: args.sendDate ?? null,
       sourceItemId,
+      // Pinned by the editor: the issue is about this one piece (roundup formats); the How-To's video is always its source.
+      sourcePinned: !!sourceItemId,
       createdByUserId: args.userId,
     })
     .returning({ id: newsletterDrafts.id });

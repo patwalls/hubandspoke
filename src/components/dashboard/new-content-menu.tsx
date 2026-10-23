@@ -47,8 +47,9 @@ interface VideoOption {
   id: string;
   title: string | null;
   publishedAt: string | null;
-  channel: string;
-  usedBySlot: string | null;
+  channel?: string;
+  usedBySlot?: string | null;
+  hasTranscript?: boolean;
 }
 
 /** Every kind of content the menu offers, in order; `platform` draws its logo. */
@@ -185,6 +186,12 @@ function NewNewsletterDialog({
     list: VideoOption[];
   } | null>(null);
   const [sourceItemId, setSourceItemId] = useState("");
+  /** Roundup formats: the issue is about one piece of pillar content, or a roundup the drafter assembles. */
+  const [mode, setMode] = useState<"one" | "roundup">("roundup");
+  const [brandVideosFor, setBrandVideosFor] = useState<{
+    brand: string;
+    list: VideoOption[];
+  } | null>(null);
   const [days, setDays] = useState(7);
   const [notes, setNotes] = useState("");
   const [sendDate, setSendDate] = useState("");
@@ -229,11 +236,30 @@ function NewNewsletterDialog({
     };
   }, [format?.id, format?.kind]);
   const videos = format && videosFor?.formatId === format.id ? videosFor.list : null;
+  // One piece for a roundup format: the brand's recent videos (any channel).
+  useEffect(() => {
+    if (!brand || format?.kind !== "roundup" || mode !== "one") return;
+    let cancelled = false;
+    void fetch(`/api/newsletter-drafts/videos?brand=${encodeURIComponent(brand)}`)
+      .then((r) => (r.ok ? r.json() : { videos: [] }))
+      .then((j: { videos: VideoOption[] }) => {
+        if (cancelled) return;
+        setBrandVideosFor({ brand, list: j.videos });
+        setSourceItemId((cur) =>
+          j.videos.some((v) => v.id === cur && v.hasTranscript !== false)
+            ? cur
+            : (j.videos.find((v) => v.hasTranscript !== false)?.id ?? ""),
+        );
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [brand, format?.kind, mode]);
+  const brandVideos = brandVideosFor?.brand === brand ? brandVideosFor.list : null;
+  const onePiece = format?.kind === "single_video" || mode === "one";
+  const pickList = format?.kind === "single_video" ? videos : brandVideos;
 
-  const ready =
-    !!formatId &&
-    (format?.kind !== "single_video" || (!!videos && !!sourceItemId)) &&
-    !creating;
+  const ready = !!formatId && (!onePiece || (!!pickList && !!sourceItemId)) && !creating;
 
   async function create() {
     setCreating(true);
@@ -246,7 +272,7 @@ function NewNewsletterDialog({
           formatId,
           sendDate: sendDate || null,
           notes: notes.trim() || null,
-          ...(format?.kind === "single_video" ? { sourceItemId } : { days }),
+          ...(onePiece ? { sourceItemId } : { days }),
         }),
       });
       const json = (await res.json().catch(() => ({}))) as {
@@ -330,33 +356,78 @@ function NewNewsletterDialog({
           </label>
 
           <div className="flex flex-col gap-1.5 text-sm">
-            <span className="text-xs font-medium text-muted-foreground">
-              Pillar content
-            </span>
-            {format?.kind === "single_video" ? (
-              videos === null ? (
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-medium text-muted-foreground">
+                Pillar content
+              </span>
+              {format?.kind === "roundup" && (
+                <div
+                  className="flex items-center rounded-lg border bg-muted/50 p-0.5 text-xs"
+                  role="radiogroup"
+                  aria-label="What the issue is about"
+                >
+                  {(
+                    [
+                      ["one", "One piece"],
+                      ["roundup", "Roundup"],
+                    ] as const
+                  ).map(([m, label]) => (
+                    <button
+                      key={m}
+                      type="button"
+                      role="radio"
+                      aria-checked={mode === m}
+                      onClick={() => setMode(m)}
+                      className={cn(
+                        "rounded-md px-2.5 py-1 font-medium transition-colors",
+                        mode === m
+                          ? "bg-background text-foreground shadow-sm"
+                          : "text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            {onePiece ? (
+              pickList === null ? (
                 <span className="flex h-9 items-center gap-2 text-xs text-muted-foreground">
                   <Loader2 className="size-3.5 animate-spin" /> Loading videos…
                 </span>
               ) : (
-                <select
-                  className={field}
-                  value={sourceItemId}
-                  onChange={(e) => setSourceItemId(e.target.value)}
-                >
-                  {videos.length === 0 && (
-                    <option value="">
-                      No recent videos on this format&apos;s channels
-                    </option>
+                <>
+                  <select
+                    className={field}
+                    value={sourceItemId}
+                    onChange={(e) => setSourceItemId(e.target.value)}
+                  >
+                    {pickList.length === 0 && (
+                      <option value="">
+                        {format?.kind === "single_video"
+                          ? "No recent videos on this format's channels"
+                          : "No recent videos for this brand"}
+                      </option>
+                    )}
+                    {pickList.map((v) => (
+                      <option key={v.id} value={v.id} disabled={v.hasTranscript === false}>
+                        {fmtDate(v.publishedAt)} · {v.channel ? `${v.channel} · ` : ""}
+                        {v.title ?? "Untitled"}
+                        {v.usedBySlot
+                          ? " (already used)"
+                          : v.hasTranscript === false
+                            ? " (no transcript yet)"
+                            : ""}
+                      </option>
+                    ))}
+                  </select>
+                  {format?.kind === "roundup" && (
+                    <span className="text-xs text-muted-foreground">
+                      The whole issue is about this video: every story section takes a different angle on it.
+                    </span>
                   )}
-                  {videos.map((v) => (
-                    <option key={v.id} value={v.id}>
-                      {fmtDate(v.publishedAt)} · {v.channel} ·{" "}
-                      {v.title ?? "Untitled"}
-                      {v.usedBySlot ? " (already used)" : ""}
-                    </option>
-                  ))}
-                </select>
+                </>
               )
             ) : (
               <div className="flex items-start gap-2 rounded-lg border bg-muted/40 px-3 py-2.5 text-xs text-muted-foreground">

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_TEMPLATES } from "@/lib/newsletter-template";
-import { describeTemplate, submissionProblem, TEMPLATE_FRAMING } from "./agent";
+import { describePillar, describeTemplate, submissionProblem, TEMPLATE_FRAMING } from "./agent";
 
 const sb = DEFAULT_TEMPLATES["sunday breakfast"];
 
@@ -40,5 +40,28 @@ describe("submissionProblem with optional sections", () => {
     expect(submissionProblem(sub(keys, ["coffee"]), t, true)).toBeNull();
     expect(submissionProblem(sub(keys, ["coffee", "eggs"]), t, true)).toMatch(/eggs/);
     expect(submissionProblem(sub(keys, ["coffee"]), sb, true)).toMatch(/coffee/);
+  });
+});
+
+describe("a roundup about one piece of pillar content", () => {
+  const pillar = { productionItemId: "p1", title: "The $50K app", url: "https://youtu.be/x", thumbnailUrl: null, publishedAt: "2026-10-20T00:00:00Z", transcript: "[0:01] hello", truncated: false, timestamped: true };
+  it("puts the video and its transcript in the turn and says every story section draws on it", () => {
+    const text = describePillar(pillar);
+    expect(text).toContain("ONE PIECE OF PILLAR CONTENT");
+    expect(text).toContain('VIDEO: "The $50K app"');
+    expect(text).toContain("[0:01] hello");
+  });
+  it("lets the pillar appear in several sections and never counts it as blocked", () => {
+    const keys = sb.sections.map((s) => s.key);
+    const sub = {
+      subject_options: ["a", "b", "c"],
+      subject: "a",
+      preview_text: "",
+      sections: keys.map((key) => ({ key, markdown: `${key} text`, source: key === "orange_juice" || key === "coffee" ? { kind: "video" as const, production_item_id: "p1" } : null })),
+      sources: [],
+    };
+    const blocked = new Set(["video:p1"]);
+    expect(submissionProblem(sub, sb, true, blocked)).toMatch(/last|same story/);
+    expect(submissionProblem(sub, sb, true, blocked, "video:p1")).toBeNull();
   });
 });

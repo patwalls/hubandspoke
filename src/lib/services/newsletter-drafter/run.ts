@@ -131,8 +131,11 @@ export async function runNewsletterDraft(
   };
   try {
     const video = config.kind === "single_video" ? await loadSourceVideo(row.sourceItemId, row.formatName) : null;
+    // A roundup about ONE piece of pillar content (the editor picked it in New → Newsletter).
+    const pillar = config.kind === "roundup" && row.sourceItemId ? await loadSourceVideo(row.sourceItemId) : null;
     const usage = video ? undefined : await loadUsage(usageGroupFor(row.formatName), { excludeDraftId: row.id });
     const blocked = usage ? blockedKeys(usage, row.sendDate) : undefined;
+    if (pillar) blocked?.delete(`video:${pillar.productionItemId}`);
     const [pastIssues, special] = await Promise.all([
       // Same-voice past issues for two-voice formats (Kevin / Saj by the video's channel).
       // Only issues in the current template count as examples (never a retired layout).
@@ -143,7 +146,7 @@ export async function runNewsletterDraft(
     // The suggested lineup (a hint for the agent; a content-API hiccup just drops it).
     const recentEditions = video ? await loadRecentEditions(row.formatName, row.id) : undefined;
     const storyPlan =
-      !video
+      !video && !pillar
         ? await buildStoryPlan({ brand: row.brand, window: { start: row.windowStart, end: row.windowEnd }, template, blocked }).catch(
             (err) => (opts.log?.(`newsletter-draft: story plan skipped (${(err as Error).message})`), null),
           )
@@ -163,6 +166,7 @@ export async function runNewsletterDraft(
       specialLabel: config.promo?.label ?? null,
       sponsoredPlaceholder: !sponsored && config.promo?.onMiss === "placeholder",
       video,
+      pillar,
       template,
       usage,
       blocked,
@@ -179,7 +183,9 @@ export async function runNewsletterDraft(
     // The How-To's one source is the picked video, whatever the agent lists.
     const sources = video
       ? [{ kind: "video" as const, productionItemId: video.productionItemId, title: video.title, url: video.url }]
-      : toStoredSources(s.sources);
+      : pillar
+        ? [{ kind: "video" as const, productionItemId: pillar.productionItemId, title: pillar.title, url: pillar.url }, ...toStoredSources(s.sources).filter((x) => !(x.kind === "video" && x.productionItemId === pillar.productionItemId))]
+        : toStoredSources(s.sources);
     const sections = template ? withPlanDates(withInferredSources(toStoredSections(s.sections ?? []), sources), storyPlan) : [];
     const saved = await db
       .update(newsletterDrafts)

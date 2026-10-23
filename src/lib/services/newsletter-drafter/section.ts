@@ -105,9 +105,11 @@ export async function regenerateDraftSection(
       .where(eq(brands.slug, row.brand))
       .limit(1);
     const video = config.kind === "single_video" ? await loadSourceVideo(row.sourceItemId, row.formatName) : null;
+    const pillar = config.kind === "roundup" && row.sourceItemId ? await loadSourceVideo(row.sourceItemId).catch(() => null) : null;
     const sponsor = row.specialCopy ? { copy: row.specialCopy, landingUrl: row.specialSource?.landingUrl ?? null } : null;
     const usage = video ? undefined : await loadUsage(usageGroupFor(row.formatName), { excludeDraftId: row.id });
     const blocked = usage ? blockedKeys(usage, row.sendDate) : undefined;
+    if (pillar) blocked?.delete(`video:${pillar.productionItemId}`);
     const exclude = opts.newStory ? newStoryExclusions(row.sections, sectionKey) : null;
     // Find new story: the same suggested lineup as the draft, so the swap looks in the right place.
     const storyPlan =
@@ -136,6 +138,7 @@ export async function regenerateDraftSection(
       notes: row.notes,
       specialLabel: config.promo?.label ?? null,
       video,
+      pillar,
       model: config.model,
       template,
       sections: row.sections,

@@ -254,6 +254,12 @@ export interface NewsletterAgentArgs {
   /** single_video formats: the one video this issue is written from. When set
    *  the agent gets only the submit tool — no search, no web. */
   video?: SourceVideo | null;
+  /**
+   * A roundup issue about ONE piece of pillar content (the editor picked it):
+   * the video + transcript go in the first turn and every story section draws
+   * on it; the tools stay for supporting material.
+   */
+  pillar?: SourceVideo | null;
   /** The format's model (format-config.ts); see newsletterModel() for the full order. */
   model?: string;
   /** Story usage for this newsletter (key → times run / last date), excluding this draft. */
@@ -452,6 +458,22 @@ export function describeTemplate(template: NewsletterTemplate, sponsorSupplied: 
   return `${rules.map((r) => `${r}\n\n`).join("")}${framing}ISSUE TEMPLATE — submit exactly these sections, every key, in this order (sections[].key / sections[].markdown):\n${lines.join("\n")}`;
 }
 
+/** A roundup issue about one piece of pillar content: the block of the first turn. Exported for tests. */
+export function describePillar(v: SourceVideo): string {
+  return [
+    `THIS ISSUE IS ABOUT ONE PIECE OF PILLAR CONTENT — the editor picked it. Every story section draws on this video (a different angle, lesson, moment or number in each; the lead section carries the main story), not on other stories. Link it with its URL; set each story section's source to it (the same source in several sections is right here). Use the tools only for supporting material the video calls for (a lead magnet, a case study it mentions).`,
+    [
+      `VIDEO: "${v.title ?? "Untitled"}"`,
+      `URL: ${v.url ?? "(none)"}`,
+      v.thumbnailUrl ? `THUMBNAIL URL (for sections marked THUMBNAIL): ${v.thumbnailUrl}` : null,
+      v.publishedAt ? `Published: ${v.publishedAt.slice(0, 10)}` : null,
+    ]
+      .filter(Boolean)
+      .join("\n"),
+    `TRANSCRIPT${v.truncated ? " (truncated — very long video)" : ""}${v.timestamped ? " (each line starts with its [M:SS] timestamp in the video)" : ""}:\n${v.transcript}`,
+  ].join("\n\n");
+}
+
 /** The first user turn. Exported for tests. */
 export function buildUserTurn(args: NewsletterAgentArgs): string {
   const today = args.window.end.toISOString().slice(0, 10);
@@ -491,6 +513,7 @@ export function buildUserTurn(args: NewsletterAgentArgs): string {
       `Draft the next "${args.formatName}" issue. Today is ${today}.${sendLine} The draft's default window is ${args.window.start.toISOString().slice(0, 10)} to ${today}.${brandHasCaseStudies(args.brand) ? ` Case studies are listed at ${CASE_STUDY_SITE}.` : ""}`,
     );
   }
+  if (args.pillar) parts.push(describePillar(args.pillar));
   if (args.template) parts.push(describeTemplate(args.template, sponsorSupplied, args.sectionExamples));
   if (!args.video && args.usage) parts.push(STORY_RULES);
   if (!args.video && args.storyPlan) parts.push(describeStoryPlan(args.storyPlan));
@@ -522,6 +545,8 @@ export function submissionProblem(
   template: NewsletterTemplate | null | undefined,
   sponsorSupplied: boolean,
   blocked?: Set<string>,
+  /** The issue's pinned pillar: may appear in several sections and is never blocked. */
+  pillarKey?: string | null,
 ): string | null {
   if (!template) {
     if (!sub.body_markdown || sub.body_markdown.trim().length < 200) return "body_markdown is missing or too short.";
@@ -543,7 +568,7 @@ export function submissionProblem(
   const seen = new Map<string, string>();
   for (const sec of sub.sections ?? []) {
     const k = storyKeyOf(sec.source);
-    if (!k) continue;
+    if (!k || k === pillarKey) continue;
     if (blocked?.has(k)) return `Section "${sec.key}" uses a story this newsletter ran in the last ${RECENT_BLOCK_DAYS} days (${k}). Pick a different one.`;
     if (seen.has(k)) return `Sections "${seen.get(k)}" and "${sec.key}" use the same story (${k}). Use a different story for one of them.`;
     seen.set(k, sec.key);
@@ -662,7 +687,7 @@ export async function runNewsletterAgent(args: NewsletterAgentArgs): Promise<New
       if (!parsed.success) {
         return { error: `Invalid submission: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}.` };
       }
-      const problem = submissionProblem(parsed.data, args.template, sponsorSupplied, args.video ? undefined : args.blocked);
+      const problem = submissionProblem(parsed.data, args.template, sponsorSupplied, args.video ? undefined : args.blocked, args.pillar ? `video:${args.pillar.productionItemId}` : null);
       if (problem) args.log?.(`newsletter agent submission rejected: ${problem}`);
       return problem ? { error: problem } : { value: parsed.data };
     },
@@ -725,7 +750,7 @@ export async function regenerateSection(
         if (!k) return { error: "Set source to the new story you chose." };
         if (args.newStoryExclude.has(k)) return { error: `That story (${k}) is excluded — pick a different one.` };
       }
-      if (k && args.blocked?.has(k)) return { error: `That story (${k}) ran in this newsletter in the last ${RECENT_BLOCK_DAYS} days. Pick a different one.` };
+      if (k && k !== (args.pillar ? `video:${args.pillar.productionItemId}` : null) && args.blocked?.has(k)) return { error: `That story (${k}) ran in this newsletter in the last ${RECENT_BLOCK_DAYS} days. Pick a different one.` };
       return { value: { markdown: parsed.data.markdown, source: parsed.data.source ?? null } };
     },
     reviewPrompt: null,

@@ -993,6 +993,18 @@ function Workspace({
       {header}
       {previewOpen && exactHtml && <ExactPreview html={exactHtml} device={device} onDevice={setDevice} onClose={() => setPreviewOpen(false)} />}
       {draft.kind === "single_video" && <VideoBar draft={draft} disabled={draft.status === "drafting" || busyAction !== null} onPick={(itemId) => post(`/api/newsletter-drafts/${draft.id}/video`, { itemId }, "video")} />}
+      {draft.kind === "roundup" && draft.sourceItemId && (
+        <div className="flex flex-wrap items-center gap-2 border-b px-5 py-2 text-sm">
+          <span className="font-medium">About one video</span>
+          <span className="truncate text-muted-foreground">{draft.sourceTitle ?? "the picked video"}</span>
+          {draft.sourceUrl && (
+            <a className="text-xs text-primary underline" href={draft.sourceUrl} target="_blank" rel="noreferrer">
+              Watch
+            </a>
+          )}
+          <span className="text-xs text-muted-foreground">Every story section takes an angle on it.</span>
+        </div>
+      )}
       {draft.hubspotStatus === "failed" && draft.hubspotError && (
         <p className="mx-5 mt-3 rounded-md bg-red-50 p-2 text-xs text-red-800 dark:bg-red-900/30 dark:text-red-200">Email push: {draft.hubspotError}</p>
       )}
