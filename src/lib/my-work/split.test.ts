@@ -17,8 +17,20 @@ describe("splitMyWork", () => {
       new Set(),
     );
     expect(s.yourTurn.map((r) => r.id)).toEqual(["a", "r"]);
-    expect(s.waitingOnOthers.map((r) => r.id)).toEqual(["v", "h", "n"]);
+    expect(s.waitingOnOthers.map((r) => r.id)).toEqual(["v", "h"]);
     expect(s.toReview).toEqual([]);
+  });
+
+  it("leaves Ideas, no-status and finished items off your plate", () => {
+    // Clip-idea generation hands every idea to the pillar's editor; Pat had
+    // 2,264 Ideas filling Waiting on others and pushing real work past the limit.
+    const s = splitMyWork(
+      [row("i", "Idea"), row("n", null), row("p", "Published"), row("k", "Killed"), row("a", "Assigned"), row("h", "On Hold")],
+      [],
+      new Set(),
+    );
+    expect(s.yourTurn.map((r) => r.id)).toEqual(["a"]);
+    expect(s.waitingOnOthers.map((r) => r.id)).toEqual(["h"]);
   });
 
   it("only offers Review items on brands you approve", () => {

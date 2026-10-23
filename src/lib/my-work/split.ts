@@ -10,9 +10,19 @@
  *   own items on that brand (some people approve their own).
  * - **Waiting on others**: the rest of your items (Review on a brand someone
  *   else approves, On Hold, Scheduled, …).
+ *
+ * Not on anyone's plate: finished items (Published, Killed), Ideas, and items
+ * with no status. Ideas are the backlog — clip-idea generation makes hundreds
+ * per pillar and gives them the pillar's editor (or whoever clicked
+ * Generate), so counting them buried real work under thousands of rows.
  */
 
 export const YOUR_TURN_STATUSES = ["Assigned", "Ready To Publish"] as const;
+export const OFF_PLATE_STATUSES = ["Published", "Killed", "Idea"] as const;
+
+export function isOnPlate(status: string | null): boolean {
+  return status !== null && !(OFF_PLATE_STATUSES as readonly string[]).includes(status);
+}
 export const REVIEW_STATUS = "Review";
 
 export interface MyWorkRow {
@@ -44,7 +54,7 @@ export function splitMyWork<R extends MyWorkRow>(
   const yourTurn: R[] = [];
   const waitingOnOthers: R[] = [];
   for (const r of mine) {
-    if (reviewIds.has(r.id)) continue;
+    if (reviewIds.has(r.id) || !isOnPlate(r.status)) continue;
     if (r.status && (YOUR_TURN_STATUSES as readonly string[]).includes(r.status)) {
       yourTurn.push(r);
     } else {

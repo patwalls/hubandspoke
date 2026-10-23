@@ -1,12 +1,11 @@
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { contentEvents, productionItems } from "@/lib/db/schema";
-import { REVIEW_STATUS, splitMyWork, type MyWorkSplit } from "./split";
+import { OFF_PLATE_STATUSES, REVIEW_STATUS, YOUR_TURN_STATUSES, splitMyWork, type MyWorkSplit } from "./split";
 import { htmlToPlainText } from "@/lib/comments/sanitize";
 import { rowNews, type RowNews } from "./news";
 import { buildMyWorkDigest } from "./digest";
 
-const TERMINAL = ["Published", "Killed"];
 const REVIEWER_WINDOW_DAYS = 30;
 
 export const myWorkColumns = {
@@ -61,14 +60,21 @@ export async function getMyWork(userId: string): Promise<MyWorkSplit<MyWorkItem>
       .where(
         and(
           eq(productionItems.editorUserId, userId),
-          sql`(${productionItems.status} IS NULL OR ${productionItems.status} NOT IN (${sql.join(
-            TERMINAL.map((s) => sql`${s}`),
+          sql`${productionItems.status} NOT IN (${sql.join(
+            OFF_PLATE_STATUSES.map((s) => sql`${s}`),
             sql`, `,
-          )}))`,
+          )})`,
           isNull(productionItems.deletedAt),
         ),
       )
-      .orderBy(desc(productionItems.updatedAt))
+      // Your turn first, so a long Waiting list can't push it past the limit.
+      .orderBy(
+        desc(sql`${productionItems.status} IN (${sql.join(
+          YOUR_TURN_STATUSES.map((s) => sql`${s}`),
+          sql`, `,
+        )})`),
+        desc(productionItems.updatedAt),
+      )
       .limit(200) as Promise<MyWorkItem[]>,
     getReviewBrands(userId),
   ]);
