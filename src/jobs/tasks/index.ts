@@ -90,6 +90,7 @@ import {
   scheduleNodateSweepTask,
   publishLiveSweepTask,
   dailyScorecardEmailTask,
+  myWorkDigestTask,
   scCreditsWatchTask,
   descriptCreditsWatchTask,
   ytArchiveWatchTask,
@@ -195,6 +196,7 @@ export interface TaskPayloads {
   "publish-live-sweep": Record<string, never>;
   "threshold-monitor-sweep": Record<string, never>;
   "daily-scorecard-email": Record<string, never>;
+  "my-work-digest": Record<string, never>;
   "sc-credits-watch": Record<string, never>;
   "descript-credits-watch": Record<string, never>;
   "yt-archive-watch": Record<string, never>;
@@ -267,6 +269,7 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "publish-live-sweep": publishLiveSweepTask,
   "threshold-monitor-sweep": thresholdMonitorSweepTask,
   "daily-scorecard-email": dailyScorecardEmailTask,
+  "my-work-digest": myWorkDigestTask,
   "sc-credits-watch": scCreditsWatchTask,
   "descript-credits-watch": descriptCreditsWatchTask,
   "yt-archive-watch": ytArchiveWatchTask,

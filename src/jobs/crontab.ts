@@ -19,6 +19,9 @@
 // 9am-Eastern-wall-clock cadence becomes important, switch to 14:00 UTC and
 // accept 10am EDT in summer instead.
 //
+// `my-work-digest` at 12:00 UTC on weekdays = 8am EDT, before the US team
+// starts and mid-afternoon for the editors further east.
+//
 // `performance-decay` runs on its own named queue so hourly runs never
 // overlap. On 2026-10-21 four deploys in an hour kept interrupting it; the
 // retried 21:00 run and the 22:00 run then ran side by side, held both
@@ -43,6 +46,7 @@ export const CRONTAB = `
 */20 * * * * youtube-download-sweep
 0 17 * * 1 account-refresh-sweep
 0 13 * * * daily-scorecard-email
+0 12 * * 1-5 my-work-digest
 */15 * * * * sc-credits-watch
 */15 * * * * descript-credits-watch
 45 * * * * yt-archive-watch

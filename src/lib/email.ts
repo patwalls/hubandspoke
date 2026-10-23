@@ -481,3 +481,13 @@ export async function sendClipIdeaDroughtEmail(opts: {
     `,
   });
 }
+
+/** My Work morning email (my-day M4); content built by `buildMyWorkDigest`. */
+export async function sendMyWorkDigestEmail(opts: {
+  to: string;
+  subject: string;
+  text: string;
+  html: string;
+}) {
+  return sendMail(opts);
+}

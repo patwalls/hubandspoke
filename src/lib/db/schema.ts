@@ -1804,6 +1804,12 @@ export const users = pgTable(
     dailyScorecardEmailEnabled: boolean("daily_scorecard_email_enabled")
       .notNull()
       .default(false),
+    // My Work morning email (my-day M4): opt-out, so default true. Only sent
+    // to people with the `myWorkDigest` flag and something waiting on them;
+    // flipped by the person themselves on /my-work/email.
+    myWorkDigestEnabled: boolean("my_work_digest_enabled")
+      .notNull()
+      .default(true),
     invitedBy: uuid("invited_by").references((): AnyPgColumn => users.id, {
       onDelete: "set null",
     }),

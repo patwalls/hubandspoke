@@ -4,6 +4,34 @@ The `/build` loop's notebook: what people actually do, candidates considered (bu
 why), and what other tools ship. Newest first. Never re-propose something listed here without
 new evidence.
 
+## 2026-10-23 — lap 9 (project lap: my-day, milestone 4)
+
+**Learned** (3 days of usage, 30 days of actions)
+- The status-only people still never open `/my-work`: Noman opened 5 content pages, Kate and
+  Nuriel only the What's new pop-up. Pat and Sam are the only My Work visitors (20 views,
+  24 header clicks). The app's way of reaching them has to come to them, so the morning email.
+- The one-click handoff landed: the curator used `handoff:send-to-review` twice within hours.
+- This week: 409 items, 42 clips, 13 designs (on pace). No failed renders. Sentry has only
+  info-level HTTP overhead and large-payload notices (ops loop).
+
+**Did the last features land?** `my-work-news` (23:30): too early, no My Work visit since.
+`handoff-button`: 2 uses by the curator. `clip-editor-next-idea`, `publish-way-in`: still no marks.
+
+**Outward**
+- Asana's Daily Summary email goes out Mon–Fri with due-soon and newly assigned tasks, leaves out
+  empty sections, and caps the list. Users ask why it skips overdue tasks.
+  https://help.asana.com/s/article/email-notifications ,
+  https://forum.asana.com/t/include-overdue-tasks-in-daily-summary/47709
+- Lesson: weekdays only, no email when nothing is waiting, a short top list, and nothing that
+  is waiting on you dropped. So oldest reviews and send-backs go first, and the total count
+  goes in the subject.
+
+**Candidates**
+- → building: **My Work morning email** (my-day M4, flag `myWorkDigest`, Pat first). source:
+  usage (status-only people never open My Work; inbox ignored)
+- Graduate `myWorkDigest` to everyone if Pat keeps it on for a few days. source: usage
+- My Work's row actions should hand off the editor too (still open). source: usage
+
 ## 2026-10-22 — lap 8 (project lap: my-day, milestone 3)
 
 **Learned** (2 days of usage, 30 days of actions)
@@ -267,6 +295,8 @@ week of Oct 12). Cross-posts steady at 60–80/week.
   source: usage
 
 ## Built
+- 2026-10-23 My Work morning email, flag `myWorkDigest` (project my-day milestone 4). Card
+  `2026-10-23-my-work-digest`.
 - 2026-10-22 New comments + send-backs on My Work rows (project my-day milestone 3). Card
   `2026-10-22-my-work-news`.
 - 2026-10-22 One-click handoff on the content page (polish). Card `2026-10-22-handoff-button`.

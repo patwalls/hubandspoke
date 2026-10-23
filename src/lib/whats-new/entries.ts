@@ -29,6 +29,18 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-10-23-my-work-digest",
+    shippedAt: "2026-10-23T02:44:00Z",
+    kind: "feature",
+    title: "A morning email with what's waiting on you",
+    body:
+      "On weekday mornings you get one email with how many posts are waiting on you and the five to do first: " +
+      "send-backs and new comments at the top. No email on days when nothing is waiting, and you can turn it off from My Work.",
+    href: "/my-work/email",
+    screen: "/my-work/email",
+    audience: { flag: "myWorkDigest" },
+  },
+  {
     id: "2026-10-22-my-work-news",
     shippedAt: "2026-10-22T23:30:00Z",
     kind: "feature",

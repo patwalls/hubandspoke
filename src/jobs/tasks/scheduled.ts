@@ -22,7 +22,9 @@ import { maybeAlertYtArchiveBehind } from "@/lib/services/yt-archive-watch";
 import { maybeAlertClipIdeaDrought } from "@/lib/services/clip-idea-drought-watch";
 import { platformSupportsLatest } from "@/lib/services/account-content-sync";
 import { getScorecardData } from "@/lib/services/scorecard";
-import { sendDailyScorecardEmail } from "@/lib/email";
+import { sendDailyScorecardEmail, sendMyWorkDigestEmail } from "@/lib/email";
+import { loadMyWorkDigest } from "@/lib/my-work/queries";
+import { isFeatureEnabled } from "@/lib/feature-flags";
 import { db } from "@/lib/db";
 import { accounts, productionItems, users } from "@/lib/db/schema";
 import { and, eq, gte, inArray, isNotNull, isNull } from "drizzle-orm";
@@ -392,6 +394,46 @@ export const dailyScorecardEmailTask: Task = async (_payload, helpers) => {
   }
   helpers.logger.info(
     `daily-scorecard-email sent=${sent} failed=${failed} of ${recipients.length} (${Date.now() - start}ms)`
+  );
+};
+
+/**
+ * My Work morning email (my-day M4), weekdays. One email per person who has
+ * the `myWorkDigest` flag, hasn't turned it off (`users.my_work_digest_enabled`)
+ * and has something on their turn or to review — nothing waiting, no email.
+ * Sends inline like the scorecard (the list is a dozen people); each send is
+ * wrapped so one failure doesn't stop the rest, and the task never throws
+ * after sending, so a retry can't email anyone twice.
+ */
+export const myWorkDigestTask: Task = async (_payload, helpers) => {
+  const start = Date.now();
+  const people = (
+    await db
+      .select({ id: users.id, email: users.email, name: users.name })
+      .from(users)
+      .where(eq(users.myWorkDigestEnabled, true))
+  ).filter((u) => isFeatureEnabled("myWorkDigest", u));
+  let sent = 0;
+  let empty = 0;
+  let failed = 0;
+  for (const p of people) {
+    try {
+      const digest = await loadMyWorkDigest(p.id, p.name);
+      if (!digest) {
+        empty++;
+        continue;
+      }
+      await sendMyWorkDigestEmail({ to: p.email, subject: digest.subject, text: digest.text, html: digest.html });
+      sent++;
+    } catch (err) {
+      failed++;
+      helpers.logger.error(
+        `my-work-digest failed for user=${p.id}: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
+  helpers.logger.info(
+    `my-work-digest sent=${sent} nothing-waiting=${empty} failed=${failed} of ${people.length} (${Date.now() - start}ms)`
   );
 };
 

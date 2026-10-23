@@ -44,10 +44,12 @@ comments in the app ask for this directly.
    move, a approve, b send back.
 3. **What changed since you last looked** (2026-10-22, lap 8 — shipped, card `2026-10-22-my-work-news`; "last looked" = your last event or comment on the item, since usage_events doesn't record item ids; at ship time 8 people had 38 rows with a comment from someone else, 21 of them new): per-row "new comment" / "sent back" dots, and the
    comment preview on the row. Replaces the ignored inbox for the people who never open it.
-4. **Morning email digest** (opt-out): one email a day with your count and the top 5, instead
+4. **Morning email digest** (2026-10-23, lap 9 — shipped behind flag `myWorkDigest` for Pat, card `2026-10-23-my-work-digest`; weekdays 12:00 UTC, preview + off switch at `/my-work/email`; graduate to everyone next lap if it held) (opt-out): one email a day with your count and the top 5, instead
    of one email per assignment.
 
 ## Watch next
+
+- After M4: does Pat keep the morning email on (`my-work:digest-off` marks, `my_work_digest_enabled`)? Then flip `myWorkDigest` to everyone and watch whether the status-only people open `/my-work` from it.
 
 - After M3: do people with a dotted row open that item (content-page views) or act from the row sooner?
 
