@@ -6,8 +6,9 @@
 # Guard rails (Pat, 2026-10-14: "someone can't do something crazy"): a PR is left for a human when
 # it touches the gate or the supply chain (.github/, Dockerfile*, docker-compose*, deploy/,
 # package.json, package-lock.json, any *.sh under scripts/ or deploy/), when it is large
-# (> 600 changed lines), when it was not opened by Pat's account, or when its head is not in
-# this repository. pull_request_target: this file runs from main, never from the PR, and
+# (> 600 changed lines, not counting drizzle/meta/*.json: a schema change's generated snapshot is
+# ~7k lines, retro 2026-10-23; the migration SQL still counts), when it was not opened by Pat's
+# account, or when its head is not in this repository. pull_request_target: this file runs from main, never from the PR, and
 # never checks the PR's code out — the build check does that with a read-only token.
 # Also left for a human (S-104, idea 53082d): what Claude Code loads OUTSIDE the lap sandbox on
 # the next lap — .claude/settings*, hooks/, skills/, agents/, launch.json and .mcp.json. A lap can
@@ -49,8 +50,12 @@ jobs:
           if [ "$EVENT" = "pull_request_target" ]; then n="$PR_NUM"; else
             n="$(gh pr list --state open --json number,headRefOid --jq ".[] | select(.headRefOid==\"$SUITE_SHA\") | .number" | head -1)"; fi
           [ -n "$n" ] || { echo "no open PR for this event"; echo "skip=1" >> "$GITHUB_OUTPUT"; exit 0; }
-          gh pr view "$n" --json number,headRefName,headRefOid,baseRefName,author,labels,isCrossRepository,additions,deletions,url \
-            --jq '"num=\(.number)\nbranch=\(.headRefName)\nsha=\(.headRefOid)\nbase=\(.baseRefName)\nauthor=\(.author.login)\ncross=\(.isCrossRepository)\nhold=\(any(.labels[]; .name=="hold"))\nlines=\(.additions + .deletions)\nurl=\(.url)"' >> "$GITHUB_OUTPUT"
+          gh pr view "$n" --json number,headRefName,headRefOid,baseRefName,author,labels,isCrossRepository,url \
+            --jq '"num=\(.number)\nbranch=\(.headRefName)\nsha=\(.headRefOid)\nbase=\(.baseRefName)\nauthor=\(.author.login)\ncross=\(.isCrossRepository)\nhold=\(any(.labels[]; .name=="hold"))\nurl=\(.url)"' >> "$GITHUB_OUTPUT"
+          # changed lines, minus drizzle's generated meta (snapshot + journal); drizzle/*.sql still counts
+          lines="$(gh api --paginate "repos/$GH_REPO/pulls/$n/files" \
+            --jq '.[] | select(.filename | test("^drizzle/meta/[^/]*\\.json$") | not) | .additions + .deletions' | awk '{s+=$1} END {print s+0}')"
+          echo "lines=$lines" >> "$GITHUB_OUTPUT"
       - name: Guard rails
         if: steps.pr.outputs.skip != '1'
         id: guard
@@ -72,7 +77,7 @@ jobs:
           [ "$AUTHOR" = "patwalls" ] || why="${why:-opened by $AUTHOR, not the ship broker}"
           [ "$HOLD" = "false" ] || why="${why:-labelled hold}"
           [ "$LINES" -le 600 ] || why="${why:-$LINES changed lines (cap 600)}"
-          touched="$(gh pr diff "$NUM" --name-only | grep -E '^(\.github/|Dockerfile|docker-compose|deploy/|package\.json$|package-lock\.json$|scripts/.*\.sh$|\.claude/(settings[^/]*$|hooks/|skills/|agents/|launch\.json$)|\.mcp\.json$)' || true)"
+          touched="$(gh pr diff "$NUM" --name-only | grep -E '^(\.github/|Dockerfile|docker-compose|deploy/|package\.json$|package-lock\.json$|scripts/.*\.sh$|\.claude/(settings[^/]*$|hooks/|skills/|agents/|launch\.json$)|\.mcp\.json$|docs/build/(scout\.md$|projects/))' || true)"
           [ -z "$touched" ] || why="${why:-touches $(echo "$touched" | head -3 | tr '\n' ' ')}"
           if [ -n "$why" ]; then
             echo "left for a human: $why"

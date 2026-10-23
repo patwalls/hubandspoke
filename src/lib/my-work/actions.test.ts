@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { rowActionsFor, sendBackCommentHtml } from "./actions";
+import { rowActionsFor, sendBackCommentHtml, withHandoff } from "./actions";
 
 const kinds = (a: { kind: string }[]) => a.map((x) => x.kind);
 
@@ -40,5 +40,36 @@ describe("sendBackCommentHtml", () => {
     expect(sendBackCommentHtml(" hook <b>too</b> long & slow ")).toBe(
       "<p>Sent back: hook &lt;b&gt;too&lt;/b&gt; long &amp; slow</p>",
     );
+  });
+});
+
+describe("withHandoff", () => {
+  const andrew = { id: "a", name: "Andrew Gibbs" };
+  const john = { id: "j", name: "John Henry Parr" };
+
+  it("sends your Assigned row to the brand's reviewer", () => {
+    const a = withHandoff(rowActionsFor("your-turn", "Assigned"), {
+      kind: "send-to-review", to: "Review", person: andrew, others: [],
+    });
+    expect(a[0].handTo).toEqual(andrew);
+  });
+
+  it("hands both Approve and Send back to whoever sent it to review", () => {
+    const a = withHandoff(rowActionsFor("to-review", "Review"), {
+      kind: "approve", to: "Ready To Publish", person: john, others: [],
+    });
+    expect(a.map((x) => x.handTo)).toEqual([john, john]);
+  });
+
+  it("leaves the actions status-only when there's no one to hand to", () => {
+    const a = withHandoff(rowActionsFor("to-review", "Review"), null);
+    expect(a.every((x) => x.handTo === undefined)).toBe(true);
+  });
+
+  it("never hands a review row to the reviewer picked for send-to-review", () => {
+    const a = withHandoff(rowActionsFor("to-review", "Review"), {
+      kind: "send-to-review", to: "Review", person: andrew, others: [],
+    });
+    expect(a.every((x) => x.handTo === undefined)).toBe(true);
   });
 });

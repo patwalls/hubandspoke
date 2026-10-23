@@ -233,7 +233,7 @@ git checkout -b ops/<short-slug>
 > `ship run hubandspoke <action> --branch <your branch> -- …` builds and tests THAT commit (a file you
 > named in the args, like a simshot png, is copied back to you); `ship web hubandspoke --branch <your
 > branch>` opens the PR, which merges itself once CI's `build` is green unless it touches the
-> workflows, Dockerfile, deploy, package files or shell scripts, grows past 600 lines, or is labelled
+> workflows, Dockerfile, deploy, package files or shell scripts, grows past 600 lines (drizzle/meta/*.json not counted), or is labelled
 > `hold` — then a human looks. There is no `ship push` to master any more. `ship sync hubandspoke` moves
 > this checkout to the merged base.
 git commit -am "proposal: <what and why, with the production evidence>"

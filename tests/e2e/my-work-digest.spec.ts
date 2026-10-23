@@ -44,10 +44,9 @@ test("Morning email preview lists what's waiting, and turns off", async ({ page 
 
     await page.goto("/my-work");
     const popup = page.getByRole("dialog", { name: "What's new" });
-    if (await popup.isVisible()) {
-      await popup.getByRole("button", { name: "Got it" }).click();
-      await expect(popup).toBeHidden();
-    }
+    // The pop-up opens after its fetch lands; wait for it rather than racing it.
+    await popup.getByRole("button", { name: "Got it" }).click({ timeout: 15_000 }).catch(() => {});
+    await expect(popup).toBeHidden();
     await page.getByRole("link", { name: "Morning email" }).click();
     await expect(page).toHaveURL(/\/my-work\/email$/);
     if (await popup.isVisible()) {

@@ -30,7 +30,7 @@ export interface WhatsNewEntry {
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
     id: "2026-10-23-my-work-digest",
-    shippedAt: "2026-10-23T02:44:00Z",
+    shippedAt: "2026-10-23T16:00:00Z",
     kind: "feature",
     title: "A morning email with what's waiting on you",
     body:
@@ -39,6 +39,27 @@ export const WHATS_NEW: WhatsNewEntry[] = [
     href: "/my-work/email",
     screen: "/my-work/email",
     audience: { flag: "myWorkDigest" },
+  },
+  {
+    id: "2026-10-23-my-work-handoff",
+    shippedAt: "2026-10-23T11:30:00Z",
+    kind: "feature",
+    title: "My Work hands the post to the next person",
+    body:
+      "The buttons on My Work rows now pass the post along too, like the handoff button on a post's page: " +
+      "Send to review goes to the brand's reviewer, and Approve or Send back goes to whoever sent it. The name is on the button.",
+    href: "/my-work",
+    screen: "/my-work",
+  },
+  {
+    id: "2026-10-23-cross-post-paste",
+    shippedAt: "2026-10-23T07:15:00Z",
+    kind: "feature",
+    title: "Paste cross-post links without leaving the video",
+    body:
+      "On a post's Cross-post tab, every cross-post that's ready to publish now has its own link box. Post it, paste the live " +
+      "link, press Enter: it's marked Published and the cursor jumps to the next one, no trip to each post's page.",
+    screen: "/[brand]/content/[id]?tab=cross-post",
   },
   {
     id: "2026-10-22-my-work-news",

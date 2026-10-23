@@ -305,7 +305,7 @@ Notes:
 - `src/lib/email.ts` - Mail client (HubSpot SMTP via nodemailer)
 - `src/jobs/` - Graphile Worker: task registry + enqueue helper + worker entrypoint + crontab
 - `src/lib/feature-flags.ts` - Per-user feature flags (email allowlists; `requireFeature()` gates routes). See `docs/conventions.md` → Feature flags
-- `.claude/commands/build.md` - The product loop (`hubandspoke-build`, every 4h): reads `usage_events` + `content_events`, ships one feature a lap via `app-loop/*` PRs, adds a What's new card (`src/lib/whats-new/entries.ts`). Notebook in `docs/build/`
+- `.claude/commands/build.md` - The product loop (`hubandspoke-build`, every 4h): reads `usage_events` + `content_events`, ships one feature a lap via `app-loop/*` PRs, adds a What's new card (`src/lib/whats-new/entries.ts`). Notebook is private at `~/.loops/notes/hubandspoke-build/` on closet-cloud, never in this public repo (S-163); only its saved SQL lives in `docs/build/sql/`
 - `src/lib/clip-editor/` + `src/components/clip-editor/` - In-app clip editor (flag `clipEditor`): edit doc model → render plan → browser preview / ffmpeg export. Read the header of `doc.ts` before extending
 
 ## Cron / Scheduled Jobs
