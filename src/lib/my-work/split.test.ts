@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { splitMyWork, waitingCount, type MyWorkRow } from "./split";
+import { splitMyWork, upNext, waitingCount, type MyWorkRow } from "./split";
 
 const ME = "me";
 const row = (id: string, status: string | null, brand = "futurepedia", editorUserId: string | null = ME): MyWorkRow => ({
@@ -46,5 +46,31 @@ describe("splitMyWork", () => {
     );
     expect(s.waitingOnOthers.map((r) => r.id)).toEqual(["h"]);
     expect(waitingCount(s)).toBe(2);
+  });
+});
+
+describe("upNext", () => {
+  const split = {
+    // Fetched oldest first.
+    toReview: [row("rv-old", "Review"), row("rv-new", "Review")],
+    // Fetched newest first.
+    yourTurn: [row("t-new", "Assigned"), row("t-old", "Assigned")],
+    waitingOnOthers: [row("w", "On Hold")],
+  };
+
+  it("offers the oldest post to review first, and never the one you're on", () => {
+    expect(upNext(split, null).next?.id).toBe("rv-old");
+    expect(upNext(split, "rv-old").next?.id).toBe("rv-new");
+  });
+
+  it("then your turn, oldest-touched first; waiting-on-others never counts", () => {
+    const yours = { ...split, toReview: [] };
+    expect(upNext(yours, null)).toMatchObject({ next: { id: "t-old" }, remaining: 2 });
+    expect(upNext(yours, "t-old")).toMatchObject({ next: { id: "t-new" }, remaining: 1 });
+  });
+
+  it("is empty when the post you're on was the only one waiting", () => {
+    const one = { toReview: [], yourTurn: [row("only", "Assigned")], waitingOnOthers: [] };
+    expect(upNext(one, "only")).toEqual({ next: null, remaining: 0 });
   });
 });

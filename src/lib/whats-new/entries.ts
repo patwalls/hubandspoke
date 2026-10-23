@@ -29,6 +29,16 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-10-23-my-work-up-next",
+    shippedAt: "2026-10-23T16:05:00Z",
+    kind: "feature",
+    title: "Go straight to the next post waiting on you",
+    body:
+      "A post's page now shows \"Up next\" after its status: the next post waiting on you, oldest first. " +
+      "Finish this one, click it, and you're on the next, without going back to a list.",
+    screen: "/[brand]/content/[id]",
+  },
+  {
     id: "2026-10-23-my-work-digest",
     shippedAt: "2026-10-23T16:00:00Z",
     kind: "feature",

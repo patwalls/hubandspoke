@@ -58,3 +58,19 @@ export function splitMyWork<R extends MyWorkRow>(
 export function waitingCount(split: MyWorkSplit<MyWorkRow>): number {
   return split.yourTurn.length + split.toReview.length;
 }
+
+/**
+ * What the content page's "Up next" link points at: the next post waiting on
+ * you, other than the one you're looking at. To review first (oldest first, as
+ * fetched), then your turn oldest-touched first — the order fetched is newest
+ * first, so it's reversed here. `remaining` counts everything else waiting.
+ */
+export function upNext<R extends MyWorkRow>(
+  split: MyWorkSplit<R>,
+  currentId: string | null,
+): { next: R | null; remaining: number } {
+  const queue = [...split.toReview, ...[...split.yourTurn].reverse()].filter(
+    (r) => r.id !== currentId,
+  );
+  return { next: queue[0] ?? null, remaining: queue.length };
+}
