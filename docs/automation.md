@@ -35,6 +35,7 @@ CRON ENTRIES (src/jobs/crontab.ts, UTC)
   (live)     cross-post candidate queue → GET /api/cross-post-queue, no scheduled job — runs on every page load of /[brand]/queue Cross-post tab
   Mon 17:00  account-refresh-sweep → fan-out → account-refresh (per account)
   13:00      daily-scorecard-email → HubSpot SMTP (per opted-in user). 9am EDT / 8am EST in winter.
+  Mon–Fri 12:00 my-work-digest     → HubSpot SMTP: My Work morning email per flagged, opted-in person with something waiting
   */15 min   sc-credits-watch       → email Pat + Sam when SC returns HTTP 402 (deduped 4h)
   */15 min   descript-credits-watch → email Pat + Sam when Descript jobs hit "Insufficient AI credits" (deduped 4h)
   *:45       yt-archive-watch       → Sentry issue + email Pat + Sam when YouTube items sit unarchived >12h (home-machine cron down; email deduped 6h)
@@ -884,6 +885,22 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
 - **Outputs:** enqueues one `account-refresh` job per account, `jobKey: account-refresh-{id}`
 - **Downstream:** `account-refresh`
 - **Rules:** explicitly skips `newsletter` and `other` (no SC coverage)
+
+### `my-work-digest` — My Work morning email (my-day M4)
+- **Trigger:** cron `0 12 * * 1-5` (12:00 UTC weekdays; 8am EDT / 7am EST).
+- **Files:** `src/jobs/tasks/scheduled.ts` (`myWorkDigestTask`),
+  `src/lib/my-work/digest.ts` (`buildMyWorkDigest`, pure, unit-tested),
+  `src/lib/my-work/queries.ts` (`loadMyWorkDigest`), `src/lib/email.ts`
+  (`sendMyWorkDigestEmail`).
+- **Inputs:** the same reads as `/my-work` (`getMyWork` + `getRowNews`).
+  Recipients = users with the `myWorkDigest` flag AND
+  `users.my_work_digest_enabled = true` (opt-out, default true).
+- **Outputs:** one HubSpot SMTP send per recipient with something on their
+  turn or to review; nothing waiting → no email. No DB writes.
+- **Idempotency:** per-person sends are wrapped and the task never throws,
+  so graphile never retries it and nobody gets two.
+- **Preview / opt-out:** `/my-work/email` renders the exact email for the
+  signed-in person and has the on/off switch (`PATCH /api/my-work/digest`).
 
 ### `daily-scorecard-email` — daily publish-count scorecard
 - **Trigger:** cron `0 13 * * *` (13:00 UTC daily). 9am EDT during DST,

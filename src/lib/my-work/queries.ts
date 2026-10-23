@@ -4,6 +4,7 @@ import { contentEvents, productionItems } from "@/lib/db/schema";
 import { REVIEW_STATUS, splitMyWork, type MyWorkSplit } from "./split";
 import { htmlToPlainText } from "@/lib/comments/sanitize";
 import { rowNews, type RowNews } from "./news";
+import { buildMyWorkDigest } from "./digest";
 
 const TERMINAL = ["Published", "Killed"];
 const REVIEWER_WINDOW_DAYS = 30;
@@ -154,4 +155,26 @@ export async function getRowNews(userId: string, itemIds: string[]): Promise<Map
     if (news) out.set(id, news);
   }
   return out;
+}
+
+/** The app origin links in emails point at. */
+export function appBaseUrl(): string {
+  return process.env.NEXTAUTH_URL?.replace(/\/$/, "") || "http://localhost:3000";
+}
+
+/**
+ * This person's morning email (my-day M4), or null when nothing is waiting.
+ * Shared by the `my-work-digest` task and the /my-work/email preview, so the
+ * preview is exactly what lands in the inbox.
+ */
+export async function loadMyWorkDigest(userId: string, name: string | null) {
+  const { yourTurn, toReview } = await getMyWork(userId);
+  const news = await getRowNews(userId, [...new Set([...yourTurn, ...toReview].map((r) => r.id))]);
+  return buildMyWorkDigest({
+    firstName: (name ?? "").trim().split(/\s+/)[0] || null,
+    yourTurn,
+    toReview,
+    news,
+    baseUrl: appBaseUrl(),
+  });
 }

@@ -1,0 +1,1 @@
+ALTER TABLE "users" ADD COLUMN "my_work_digest_enabled" boolean DEFAULT true NOT NULL;

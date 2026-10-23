@@ -77,6 +77,15 @@ const FLAGS = {
     emails: ["sam@starterstory.com", "swalls@hubspot.com"],
     envVar: "FEATURE_NEWSLETTER_TEMPLATE_ADMIN_EMAILS",
   },
+  /**
+   * My Work morning email (my-day M4): one email each weekday with what's
+   * waiting on you and the top five. Pat first; `e2e@local.test` only ever
+   * exists in the throwaway e2e database. See docs/features.md → "My Work".
+   */
+  myWorkDigest: {
+    emails: ["patrickswalls@gmail.com", "e2e@local.test"],
+    envVar: "FEATURE_MY_WORK_DIGEST_EMAILS",
+  },
 } as const satisfies Record<string, FlagDefinition>;
 
 export type FeatureFlag = keyof typeof FLAGS;

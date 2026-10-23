@@ -15,6 +15,7 @@ import { pickHandoff, ASSIGNED, type Handoff, type HandoffPerson } from "@/lib/h
 import { getBrandReviewers, getSentToReviewByMany } from "@/lib/handoff/queries";
 import { RowActions } from "@/components/my-work/row-actions";
 import { MyWorkKeys } from "@/components/my-work/my-work-keys";
+import { isFeatureEnabled } from "@/lib/feature-flags";
 
 export const dynamic = "force-dynamic";
 
@@ -118,7 +119,14 @@ export default async function MyWorkPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-xl font-semibold text-foreground">My Work</h1>
+        <div className="flex items-baseline justify-between gap-3">
+          <h1 className="text-xl font-semibold text-foreground">My Work</h1>
+          {isFeatureEnabled("myWorkDigest", session.user) && (
+            <Link href="/my-work/email" className="text-xs text-muted-foreground hover:text-foreground hover:underline">
+              Morning email
+            </Link>
+          )}
+        </div>
         <p className="text-xs text-muted-foreground mt-0.5">
           Everything you&apos;re on the hook for, across every brand.
         </p>
