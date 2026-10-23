@@ -59,11 +59,12 @@ test("cross-post tab and publish dialog lead to the Publish tab, focused on the 
         reposted_from_item_id = ${sourceId}, pillar_content_item_id = ${pillarId}
       WHERE id IN (${xId}, ${linkedinId})`;
 
-    await page.goto(`/starter-story/content/${sourceId}?tab=cross-post`);
+    // The What's new pop-up can open after the page renders; close it whenever it shows.
     const popup = page.getByRole("dialog", { name: "What's new" });
-    if (await popup.isVisible().catch(() => false)) {
+    await page.addLocatorHandler(popup, async () => {
       await popup.getByRole("button", { name: "Got it" }).click();
-    }
+    });
+    await page.goto(`/starter-story/content/${sourceId}?tab=cross-post`);
     const banner = page.getByTestId("cross-post-publish-tab");
     await expect(banner).toContainText("2 cross-posts are ready to publish.");
 
