@@ -29,6 +29,16 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-10-23-cross-post-paste",
+    shippedAt: "2026-10-23T07:15:00Z",
+    kind: "feature",
+    title: "Paste cross-post links without leaving the video",
+    body:
+      "On a post's Cross-post tab, every cross-post that's ready to publish now has its own link box. Post it, paste the live " +
+      "link, press Enter: it's marked Published and the cursor jumps to the next one, no trip to each post's page.",
+    screen: "/[brand]/content/[id]?tab=cross-post",
+  },
+  {
     id: "2026-10-22-my-work-news",
     shippedAt: "2026-10-22T23:30:00Z",
     kind: "feature",

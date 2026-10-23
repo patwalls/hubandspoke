@@ -4,6 +4,43 @@ The `/build` loop's notebook: what people actually do, candidates considered (bu
 why), and what other tools ship. Newest first. Never re-propose something listed here without
 new evidence.
 
+## 2026-10-23 — lap 10 (polish lap)
+
+**Learned** (3 days of usage, 30 days of actions)
+- The curator still publishes 10–17 posts a day by hand and opened the Publish tab 0 times on
+  10-22. Their flow at 19:07: publish the X pillar, open its Cross-post tab, create 4
+  cross-posts, then for each one go production → item page → paste link → back, about 1.5 min
+  each. The way in (`publish:way-in:*`) has never been clicked.
+- John re-exports clips a lot: 80 renders over 37 clips in 14 days. 15 of 48 re-renders had a
+  doc identical to the one before, and 5 of those since 10-16 came 1–4 minutes after a finished
+  render. Why is still open (couldn't see the file? didn't trust it?).
+- Sentry: "Large HTTP payload" on `/[brand]/content` (`/api/reports/content`) has 9 users, but
+  it has been trimmed three times already. `/[brand]/queue` p95 is 11 s against a p50 of 11 ms,
+  which is cold starts and belongs to the ops loop. No failed renders.
+- Pipeline on pace (411 items, 42 clips, 13 designs this week).
+
+**Did the last features land?** `handoff-button`: yes, the curator used it twice
+(`handoff:send-to-review`). `my-work-news` / `row-actions`: still only Pat and Sam. The
+status-only people reach work through item pages and the pop-up. `publish-way-in`: never
+clicked; the curator's eyes are on the cross-post list, not a banner. This lap builds on that.
+`clip-editor-next-idea`: has no mark, so there's no way to tell.
+
+**Outward**
+- Gain: with manual publishing you post natively, then mark the post published on the calendar
+  entry itself, and it turns Live. The record is kept where the post sits.
+  https://help.gainapp.com/article/212-how-do-i-mark-content-as-published
+- Sprout Social: published posts can't be edited, only duplicated. Their record is the post
+  itself. https://support.sproutsocial.com/hc/en-us/articles/38265010643469
+- Lesson (third time): the link box goes where the post is created, not on a separate screen.
+
+**Candidates**
+- → building: **Paste live links on the Cross-post tab**, with a box per ready cross-post and
+  Enter to go to the next one. source: usage (curator, ~11 a day, 4 trips on 10-22 alone)
+- Re-export of an unchanged clip: show "Up to date: rendered 2 min ago" with the download, in
+  place of a fresh 50 s render. source: usage (John, 5 in a week). First check what he does
+  right after a render.
+- My Work's row actions should hand off the editor too (still open). source: usage
+
 ## 2026-10-22 — lap 8 (project lap: my-day, milestone 3)
 
 **Learned** (2 days of usage, 30 days of actions)
@@ -267,6 +304,8 @@ week of Oct 12). Cross-posts steady at 60–80/week.
   source: usage
 
 ## Built
+- 2026-10-23 Paste cross-post live links on the Cross-post tab (polish). Card
+  `2026-10-23-cross-post-paste`.
 - 2026-10-22 New comments + send-backs on My Work rows (project my-day milestone 3). Card
   `2026-10-22-my-work-news`.
 - 2026-10-22 One-click handoff on the content page (polish). Card `2026-10-22-handoff-button`.
