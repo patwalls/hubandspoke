@@ -87,7 +87,7 @@ want, and really anticipate based on data … and more research about what other
 - **Land first.** Before any reading: `ship prs hubandspoke` and `git -C ~/code/hubandspoke-build
   branch --list 'app-loop/*'`. A branch the last lap built and didn't ship, a PR not merged, a
   `--next` that starts with FIRST — finish that now. A PR red on CI: read why (`ship prs`), fix,
-  push again. A PR "left for a human" (over 600 lines, touches package.json / scripts/*.sh /
+  push again. A PR "left for a human" (over 600 lines not counting drizzle/meta/*.json, touches package.json / scripts/*.sh /
   .github / .claude): say so in `--blocked` with the PR link, then carry on with smaller work.
 - **The clock.** `$LOOPS_LAP_DEADLINE` (UTC) is when this lap is killed. **25 minutes before it,
   stop building**: what is green ships; what isn't is committed on its branch with `--next "FIRST:

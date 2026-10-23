@@ -371,6 +371,9 @@ It needs no secrets (Sentry source-map upload skips itself without
   It runs on `pull_request_target`, i.e. from `main`'s copy of the file, so a
   PR can't loosen its own gate; it never checks out PR code. Any PR touching
   `.github/` is left for a human, since it could rewrite what `build` checks.
+  So is one over 600 changed lines — counted without `drizzle/meta/*.json`
+  (drizzle's generated snapshot + journal, ~7k lines per schema change), so a
+  loop PR with a migration still merges itself; the `drizzle/*.sql` counts.
 - Third-party actions are pinned by commit SHA; Dependabot bumps the pins.
 
 ## Shipping a user-facing feature: What's new + usage
