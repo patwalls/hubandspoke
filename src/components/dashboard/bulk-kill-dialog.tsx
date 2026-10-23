@@ -21,6 +21,8 @@ interface BulkKillDialogProps {
   count: number;
   saving?: boolean;
   onConfirm: (reason: string) => void | Promise<void>;
+  /** Singular noun for what's being killed. Defaults to "idea". */
+  noun?: string;
 }
 
 export function BulkKillDialog({
@@ -29,6 +31,7 @@ export function BulkKillDialog({
   count,
   saving = false,
   onConfirm,
+  noun: singular = "idea",
 }: BulkKillDialogProps) {
   const [reason, setReason] = useState("");
 
@@ -44,7 +47,7 @@ export function BulkKillDialog({
     await onConfirm(trimmed.slice(0, REASON_MAX));
   }
 
-  const noun = count === 1 ? "idea" : "ideas";
+  const noun = count === 1 ? singular : `${singular}s`;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

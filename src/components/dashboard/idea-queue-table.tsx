@@ -417,7 +417,7 @@ export function IdeaQueueTable({
   );
 }
 
-function CheckboxCell({
+export function CheckboxCell({
   checked,
   indeterminate = false,
   onChange,

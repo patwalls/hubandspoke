@@ -9,12 +9,13 @@ import { ago, previewText, type RowNews } from "@/lib/my-work/news";
 import { htmlToPlainText } from "@/lib/comments/sanitize";
 import { cn } from "@/lib/utils";
 import { statusClassWithPalette } from "@/lib/badge-colors";
-import { getAllStatusPalettes } from "@/lib/db/brand-statuses";
+import { getAllStatusPalettes, getBrandStatuses } from "@/lib/db/brand-statuses";
 import { rowActionsFor, withHandoff, type MyWorkSection } from "@/lib/my-work/actions";
 import { pickHandoff, ASSIGNED, type Handoff, type HandoffPerson } from "@/lib/handoff/pick";
 import { getBrandReviewers, getSentToReviewByMany } from "@/lib/handoff/queries";
 import { RowActions } from "@/components/my-work/row-actions";
 import { MyWorkKeys } from "@/components/my-work/my-work-keys";
+import { MyWorkSelection, SelectAll, SelectRow } from "@/components/my-work/bulk-select";
 import { isFeatureEnabled } from "@/lib/feature-flags";
 
 export const dynamic = "force-dynamic";
@@ -91,6 +92,14 @@ export default async function MyWorkPage() {
   // Section client so each row's chip uses the brand's configured color.
   const palettes = await getAllStatusPalettes();
 
+  // Each brand's statuses in pipeline order, for the bulk "Move to" menu.
+  const pageBrands = [...new Set([...mineRows, ...toReview].map((r) => r.brand))];
+  const statusesByBrand = Object.fromEntries(
+    await Promise.all(
+      pageBrands.map(async (b) => [b, (await getBrandStatuses(b)).map((s) => s.name)] as const),
+    ),
+  );
+
   // Who each row's action hands it to (same rules as the content page's
   // handoff button): your Assigned rows → the brand's reviewer; To review
   // rows → back to whoever sent them.
@@ -133,6 +142,7 @@ export default async function MyWorkPage() {
         <MyWorkKeys />
       </div>
 
+      <MyWorkSelection statusesByBrand={statusesByBrand}>
       <Section
         title="Your turn"
         subtitle="Assigned to you to edit, or ready for you to post."
@@ -171,6 +181,7 @@ export default async function MyWorkPage() {
         news={news}
         handoffs={handoffs}
       />
+      </MyWorkSelection>
 
       <div className="rounded-lg border border-border bg-card">
         <div className="px-4 py-3 border-b border-border">
@@ -278,6 +289,9 @@ function Section({
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-accent/40">
+                <th className="w-9 pl-3 py-2">
+                  <SelectAll rows={rows.map((r) => ({ id: r.id, brand: r.brand }))} label={title} />
+                </th>
                 <th className="px-3 py-2 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
                   Title
                 </th>
@@ -305,6 +319,9 @@ function Section({
                   data-my-work-row
                   className="border-b border-border/50 hover:bg-accent/30 transition-colors data-[focused]:bg-accent/50 data-[focused]:outline data-[focused]:outline-1 data-[focused]:outline-primary/40"
                 >
+                  <td className="w-9 pl-3 py-2">
+                    <SelectRow id={r.id} brand={r.brand} title={r.title || "(Untitled)"} />
+                  </td>
                   <td className="px-3 py-2">
                     <Link
                       href={`/${r.brand}/content/${r.id}`}
