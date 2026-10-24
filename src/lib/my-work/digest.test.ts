@@ -25,9 +25,9 @@ describe("buildMyWorkDigest", () => {
   it("puts send-backs, then new comments, ahead of the rest; caps at five", () => {
     const at = new Date();
     const news = new Map<string, RowNews>([
-      ["t6", { comment: { author: "Andrew", text: "captions?", at }, sentBack: null, isNew: true }],
-      ["t7", { comment: null, sentBack: { by: "Sam", at }, isNew: true }],
-      ["r1", { comment: { author: "Old", text: "seen", at }, sentBack: null, isNew: false }],
+      ["t6", { comment: { author: "Andrew", text: "captions?", at }, sentBack: null, handedBy: null, isNew: true }],
+      ["t7", { comment: null, sentBack: { by: "Sam", at }, handedBy: null, isNew: true }],
+      ["r1", { comment: { author: "Old", text: "seen", at }, sentBack: null, handedBy: null, isNew: false }],
     ]);
     const yourTurn = ["t1", "t2", "t3", "t4", "t5", "t6", "t7"].map((id) => row(id));
     const d = buildMyWorkDigest({ ...base, news, yourTurn, toReview: [row("r1", "Review")] })!;
@@ -38,6 +38,14 @@ describe("buildMyWorkDigest", () => {
       "To review",
     ]);
     expect(d.text).toContain("…and 3 more.");
+  });
+
+  it("says who handed a new post to you", () => {
+    const news = new Map<string, RowNews>([
+      ["a", { comment: null, sentBack: null, handedBy: { by: "Evgeny", at: new Date() }, isNew: true }],
+    ]);
+    const d = buildMyWorkDigest({ ...base, news, yourTurn: [row("z"), row("a")], toReview: [] })!;
+    expect(d.top[0]).toMatchObject({ row: { id: "a" }, why: "Handed to you by Evgeny" });
   });
 
   it("escapes titles in the html", () => {

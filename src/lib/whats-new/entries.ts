@@ -29,6 +29,17 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-10-24-my-work-handed-to-you",
+    shippedAt: "2026-10-24T13:45:00Z",
+    kind: "feature",
+    title: "See who handed you a post",
+    body:
+      "When someone makes you the editor of a post, its row in My Work now says who and when (\"From Sam · 2h\") " +
+      "with a blue dot, until you work on it. New assignments no longer blend in with the rest.",
+    href: "/my-work",
+    screen: "/my-work",
+  },
+  {
     id: "2026-10-24-keep-typed-title",
     shippedAt: "2026-10-24T09:30:00Z",
     kind: "fix",

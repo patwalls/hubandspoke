@@ -901,6 +901,9 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
   so graphile never retries it and nobody gets two.
 - **Preview / opt-out:** `/my-work/email` renders the exact email for the
   signed-in person and has the on/off switch (`PATCH /api/my-work/digest`).
+- **Order and reasons:** send-backs, then new comments and posts handed to
+  you since your last action ("Handed to you by …", my-day M9), then To
+  review oldest first, then Your turn.
 
 ### `daily-scorecard-email` — daily publish-count scorecard
 - **Trigger:** cron `0 13 * * *` (13:00 UTC daily). 9am EDT during DST,

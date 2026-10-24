@@ -109,7 +109,7 @@ export async function getRowNews(userId: string, itemIds: string[]): Promise<Map
   const ids = sql.join(itemIds.map((id) => sql`${id}::uuid`), sql`, `);
   const firstName = (name: string | null) => (name ?? "").trim().split(/\s+/)[0] || "Someone";
 
-  const [comments, sendBacks, mine] = await Promise.all([
+  const [comments, sendBacks, handedTo, mine] = await Promise.all([
     db.execute<{ item_id: string; body: string; at: Date | string; name: string | null }>(sql`
       SELECT DISTINCT ON (c.content_item_id)
         c.content_item_id AS item_id, c.body, c.created_at AS at,
@@ -134,6 +134,19 @@ export async function getRowNews(userId: string, itemIds: string[]): Promise<Map
         AND e.created_at > now() - make_interval(days => ${NEWS_WINDOW_DAYS})
       ORDER BY e.content_item_id, e.created_at DESC
     `),
+    // editor_change payloads carry names, not ids (schema.ts ContentEventPayload).
+    db.execute<{ item_id: string; at: Date | string; name: string | null }>(sql`
+      SELECT DISTINCT ON (e.content_item_id)
+        e.content_item_id AS item_id, e.created_at AS at, u.name
+      FROM content_events e
+      LEFT JOIN users u ON u.id = e.user_id
+      WHERE e.content_item_id IN (${ids})
+        AND e.event_type = 'editor_change'
+        AND e.payload->>'to' = (SELECT name FROM users WHERE id = ${userId}::uuid)
+        AND e.user_id IS NOT NULL AND e.user_id <> ${userId}::uuid
+        AND e.created_at > now() - make_interval(days => ${NEWS_WINDOW_DAYS})
+      ORDER BY e.content_item_id, e.created_at DESC
+    `),
     db.execute<{ item_id: string; at: Date | string }>(sql`
       SELECT item_id, max(at) AS at FROM (
         SELECT content_item_id AS item_id, created_at AS at FROM content_events
@@ -147,15 +160,18 @@ export async function getRowNews(userId: string, itemIds: string[]): Promise<Map
 
   const commentBy = new Map([...comments].map((r) => [r.item_id, r]));
   const sendBackBy = new Map([...sendBacks].map((r) => [r.item_id, r]));
+  const handedBy = new Map([...handedTo].map((r) => [r.item_id, r]));
   const mineBy = new Map([...mine].map((r) => [r.item_id, new Date(r.at)]));
 
   const out = new Map<string, RowNews>();
   for (const id of itemIds) {
     const c = commentBy.get(id);
     const b = sendBackBy.get(id);
+    const h = handedBy.get(id);
     const news = rowNews({
       lastComment: c ? { author: firstName(c.name), text: htmlToPlainText(c.body), at: new Date(c.at) } : null,
       lastSendBack: b ? { by: firstName(b.name), at: new Date(b.at) } : null,
+      lastHandedTo: h ? { by: firstName(h.name), at: new Date(h.at) } : null,
       myLastAt: mineBy.get(id) ?? null,
     });
     if (news) out.set(id, news);
