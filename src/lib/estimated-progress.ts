@@ -11,3 +11,22 @@ export function estimatedProgress(elapsedMs: number, expectedMs: number): number
   if (elapsedMs <= 0 || expectedMs <= 0) return 0;
   return CAP * (1 - Math.exp((-K * elapsedMs) / expectedMs));
 }
+
+/** The newsletter drafter's phases, in order, and the share of the bar each one starts at. */
+export const DRAFT_PHASES = ["starting", "gathering", "reading", "writing", "reviewing"] as const;
+export type DraftPhaseName = (typeof DRAFT_PHASES)[number];
+const PHASE_START: Record<DraftPhaseName, number> = { starting: 0.03, gathering: 0.1, reading: 0.25, writing: 0.55, reviewing: 0.72 };
+const PHASE_END: Record<DraftPhaseName, number> = { starting: 0.1, gathering: 0.25, reading: 0.55, writing: 0.72, reviewing: 0.97 };
+
+/**
+ * A drafting run's bar: the phase it reported sets the floor, and time spent
+ * in that phase eases it toward the next phase's start (never past it), so the
+ * bar moves on its own between turns but only jumps ahead on real progress.
+ * Pure; exported for tests.
+ */
+export function draftProgress(phase: DraftPhaseName | null, msInPhase: number, expectedPhaseMs = 60_000): number {
+  const p = phase ?? "starting";
+  const start = PHASE_START[p];
+  const span = PHASE_END[p] - start;
+  return start + span * (estimatedProgress(msInPhase, expectedPhaseMs) / 0.95);
+}

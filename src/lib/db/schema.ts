@@ -2587,6 +2587,16 @@ export const newsletterIssueHistory = pgTable(
   (table) => [index("newsletter_issue_history_group_date_idx").on(table.scheduleGroup, table.sentDate)],
 );
 
+/** A running draft's progress: its current phase, the turn, when it started. */
+export interface NewsletterDraftProgress {
+  phase: "starting" | "gathering" | "reading" | "writing" | "reviewing";
+  turn: number;
+  /** What it's doing right now, in a few words ("Reading 3 transcripts"). */
+  detail: string | null;
+  startedAt: string;
+  at: string;
+}
+
 /** One finding of the AI review of a newsletter draft. */
 export interface NewsletterReviewFinding {
   id: string;
@@ -2721,6 +2731,8 @@ export const newsletterDrafts = pgTable(
     beehiivPostUrl: text("beehiiv_post_url"),
     beehiivStatus: text("beehiiv_status"),
     beehiivError: text("beehiiv_error"),
+    /** Where a running draft is (agent.ts → run.ts, each turn): the editor's progress bar. Cleared when it lands. */
+    progress: jsonb("progress").$type<NewsletterDraftProgress>(),
     /** The editor's "AI review" of the issue (newsletter-review task): findings the editor applies one by one. */
     review: jsonb("review").$type<NewsletterReview>(),
     createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),

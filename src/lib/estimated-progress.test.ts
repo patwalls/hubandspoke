@@ -23,3 +23,15 @@ describe("estimatedProgress", () => {
     }
   });
 });
+
+describe("draftProgress", () => {
+  it("starts each phase at its floor, creeps with time, and never passes the next phase's start", async () => {
+    const { draftProgress } = await import("./estimated-progress");
+    expect(draftProgress("reading", 0)).toBeCloseTo(0.25);
+    expect(draftProgress("reading", 30_000)).toBeGreaterThan(0.25);
+    expect(draftProgress("reading", 10 * 60_000)).toBeLessThanOrEqual(0.55);
+    expect(draftProgress("writing", 0)).toBeGreaterThanOrEqual(draftProgress("reading", 10 * 60_000));
+    expect(draftProgress("reviewing", 60 * 60_000)).toBeLessThan(1);
+    expect(draftProgress(null, 0)).toBeCloseTo(0.03);
+  });
+});

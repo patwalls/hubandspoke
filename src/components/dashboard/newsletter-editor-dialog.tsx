@@ -30,8 +30,9 @@ import { isVideoThumbnail } from "@/components/dashboard/preview-screenshots";
 import { formatTimestamp, insertStepScreenshot, parseScreenshotMarks, removeScreenshotMark, screenshotKey, stepsWithoutScreenshots, type ScreenshotMark } from "@/lib/newsletter-screenshots";
 import type { PreSendCheck } from "@/lib/services/newsletter-drafter/checks";
 import { applyFixes, type ProofreadFix } from "@/lib/services/newsletter-drafter/proofread";
-import type { NewsletterDraftSource, NewsletterReview, NewsletterReviewFinding, NewsletterSpecialSource } from "@/lib/db/schema";
+import type { NewsletterDraftProgress, NewsletterDraftSource, NewsletterReview, NewsletterReviewFinding, NewsletterSpecialSource } from "@/lib/db/schema";
 import { NEWSLETTER_START_DELAY_MS } from "@/lib/services/newsletter-drafter/format-config";
+import { DRAFT_PHASES, draftProgress, type DraftPhaseName } from "@/lib/estimated-progress";
 
 export interface EditorDraft {
   id: string;
@@ -69,6 +70,8 @@ export interface EditorDraft {
   beehiivError: string | null;
   /** The editor's AI review (POST …/review), when asked for. */
   review?: NewsletterReview | null;
+  /** A running draft's phase (written by the worker each turn). */
+  progress?: NewsletterDraftProgress | null;
   updatedAt: string;
   /** Per section with a story: how often this newsletter ran it before. */
   sectionUsage?: Record<string, { count: number; lastDate: string | null; label: string; published?: string | null }>;
@@ -1242,13 +1245,52 @@ function IdeaPanel({ draft, disabled, drafting, onDraft }: { draft: EditorDraft;
 }
 
 /** A run in progress: a free cancel window first (the job waits in the queue), then the run itself. */
+const PHASE_LABELS: Record<DraftPhaseName, string> = {
+  starting: "Getting ready",
+  gathering: "Finding stories",
+  reading: "Reading sources",
+  writing: "Writing",
+  reviewing: "Reviewing",
+};
+
 function DraftingPanel({ draft, cancelling, onCancel }: { draft: EditorDraft; cancelling: boolean; onCancel: () => void }) {
   const now = useNow();
   const left = Math.ceil((Date.parse(draft.updatedAt) + NEWSLETTER_START_DELAY_MS - now) / 1000);
+  const p = draft.progress ?? null;
+  const phase = p?.phase ?? null;
+  const pct = left > 0 ? 0 : draftProgress(phase, p ? now - Date.parse(p.at) : 0);
+  const elapsed = p ? Math.max(0, Math.round((now - Date.parse(p.startedAt)) / 1000)) : 0;
+  const current = phase ? DRAFT_PHASES.indexOf(phase) : -1;
+  // A single-video issue never searches for stories.
+  const steps = DRAFT_PHASES.filter((ph) => ph !== "starting" && !(ph === "gathering" && draft.kind === "single_video"));
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center text-muted-foreground">
       <Sparkles className="size-6 animate-pulse text-pink-500" />
       <span className="text-sm font-medium text-foreground">{left > 0 ? `Starting in ${left}s…` : `Drafting ${draft.formatName}…`}</span>
+      {left <= 0 && (
+        <div className="flex w-full max-w-md flex-col gap-2">
+          <div role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(pct * 100)} className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+            <div className="h-full rounded-full bg-pink-500 transition-[width] duration-700 ease-out" style={{ width: `${Math.max(2, pct * 100)}%` }} />
+          </div>
+          <div className="flex items-center justify-between gap-2 text-[11px]">
+            {steps.map((ph) => {
+              const i = DRAFT_PHASES.indexOf(ph);
+              const done = current > i;
+              const now_ = current === i;
+              return (
+                <span key={ph} className={cn("flex items-center gap-1", done && "text-foreground", now_ && "font-medium text-pink-600 dark:text-pink-400")}>
+                  {done ? <Check className="size-3" /> : now_ ? <Loader2 className="size-3 animate-spin" /> : <span className="size-1.5 rounded-full bg-muted-foreground/40" />}
+                  {PHASE_LABELS[ph]}
+                </span>
+              );
+            })}
+          </div>
+          <span className="text-xs text-foreground/80">
+            {p?.detail ?? "Starting…"}
+            {p && ` · ${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, "0")}`}
+          </span>
+        </div>
+      )}
       <span className="max-w-md text-xs">
         {left > 0
           ? "Cancel now and nothing runs (no charge)."

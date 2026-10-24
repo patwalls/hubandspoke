@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_TEMPLATES } from "@/lib/newsletter-template";
-import { describePillar, describeTemplate, submissionProblem, TEMPLATE_FRAMING } from "./agent";
+import { describePillar, describeTemplate, phaseFor, submissionProblem, TEMPLATE_FRAMING } from "./agent";
 
 const sb = DEFAULT_TEMPLATES["sunday breakfast"];
 
@@ -63,5 +63,15 @@ describe("a roundup about one piece of pillar content", () => {
     const blocked = new Set(["video:p1"]);
     expect(submissionProblem(sub, sb, true, blocked)).toMatch(/last|same story/);
     expect(submissionProblem(sub, sb, true, blocked, "video:p1")).toBeNull();
+  });
+});
+
+describe("phaseFor (the editor's progress bar)", () => {
+  it("maps the tools a turn called to the run's phase", () => {
+    expect(phaseFor(["list_recent_videos", "list_recent_case_studies"], false)).toEqual({ phase: "gathering", detail: "Finding stories" });
+    expect(phaseFor(["get_video_transcript", "get_video_transcript", "web_fetch"], false)).toEqual({ phase: "reading", detail: "Reading 2 transcripts and 1 page" });
+    expect(phaseFor([], false)).toEqual({ phase: "writing", detail: "Writing" });
+    expect(phaseFor(["submit_newsletter"], false)).toEqual({ phase: "reviewing", detail: "Reviewing its own draft" });
+    expect(phaseFor(["get_video_transcript"], true)).toEqual({ phase: "reviewing", detail: "Revising" });
   });
 });

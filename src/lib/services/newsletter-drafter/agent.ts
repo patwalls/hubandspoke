@@ -276,8 +276,31 @@ export interface NewsletterAgentArgs {
   shouldStop?: () => Promise<boolean>;
   /** Worker logger, e.g. helpers.logger.info: one line per turn with the tools called. */
   log?: (msg: string) => void;
+  /** Called after each model turn with where the run is (the editor's progress bar). Errors are ignored. */
+  onProgress?: (p: { phase: DraftPhase; turn: number; detail: string | null }) => Promise<void> | void;
   signal?: AbortSignal;
   client?: Anthropic;
+}
+
+export type DraftPhase = "gathering" | "reading" | "writing" | "reviewing";
+
+/**
+ * Where a run is after a turn, from the tools it just called: listing stories
+ * → gathering, transcripts / page fetches → reading, the first submit →
+ * reviewing (the self-review pass), a turn with no tools → writing. Pure;
+ * exported for tests.
+ */
+export function phaseFor(tools: string[], reviewing: boolean): { phase: DraftPhase; detail: string | null } {
+  const n = (name: string) => tools.filter((t) => t === name).length;
+  if (tools.some((t) => t.startsWith("submit_"))) return { phase: "reviewing", detail: reviewing ? "Final pass" : "Reviewing its own draft" };
+  if (reviewing) return { phase: "reviewing", detail: "Revising" };
+  const reads = n("get_video_transcript") + n("web_fetch");
+  if (reads) {
+    const parts = [n("get_video_transcript") && `${n("get_video_transcript")} transcript${n("get_video_transcript") > 1 ? "s" : ""}`, n("web_fetch") && `${n("web_fetch")} page${n("web_fetch") > 1 ? "s" : ""}`].filter(Boolean);
+    return { phase: "reading", detail: `Reading ${parts.join(" and ")}` };
+  }
+  if (tools.length) return { phase: "gathering", detail: "Finding stories" };
+  return { phase: "writing", detail: "Writing" };
 }
 
 export interface SourceVideo {
@@ -628,6 +651,9 @@ async function runLoop<T>(spec: LoopSpec<T>): Promise<{ value: T; model: string;
 
     const toolUses = message.content.filter((b): b is Anthropic.Beta.BetaToolUseBlock => b.type === "tool_use");
     args.log?.(`newsletter agent turn ${turn}: ${toolUses.map((u) => u.name).join(", ") || message.stop_reason}`);
+    // Server-side web_fetch calls show up as server_tool_use blocks.
+    const called = [...toolUses.map((u) => u.name), ...message.content.filter((b) => b.type === "server_tool_use").map((b) => (b as { name: string }).name)];
+    await Promise.resolve(args.onProgress?.({ turn, ...phaseFor(called, reviewing) })).catch(() => undefined);
     if (toolUses.length === 0) {
       if (nudged) throw new NewsletterAgentError(`model ended without calling ${spec.submitTool}`);
       nudged = true;

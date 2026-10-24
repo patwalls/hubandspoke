@@ -5,7 +5,7 @@
 
 import { and, desc, eq, isNotNull, like, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { brands, formats, newsletterDrafts, newsletterIssueHistory } from "@/lib/db/schema";
+import { brands, formats, newsletterDrafts, newsletterIssueHistory, type NewsletterDraftProgress } from "@/lib/db/schema";
 import { newsletterModel, NewsletterCancelledError, runNewsletterAgent, storyKeyOf, type NewsletterSubmission } from "./agent";
 import { blockedKeys, loadUsage, toStoredSources, usageGroupFor, withInferredSources } from "./usage";
 import { buildStoryPlan, withPlanDates } from "./story-plan";
@@ -129,7 +129,13 @@ export async function runNewsletterDraft(
     const [cur] = await db.select({ id: newsletterDrafts.id }).from(newsletterDrafts).where(ours).limit(1);
     return !cur;
   };
+  const startedAt = new Date().toISOString();
+  // The editor's progress bar reads this (each turn); only while this run still owns the row.
+  const progress = async (p: { phase: NewsletterDraftProgress["phase"]; turn: number; detail: string | null }) => {
+    await db.update(newsletterDrafts).set({ progress: { ...p, startedAt, at: new Date().toISOString() } }).where(ours);
+  };
   try {
+    await progress({ phase: "starting", turn: 0, detail: "Loading the template and past issues" }).catch(() => undefined);
     const video = config.kind === "single_video" ? await loadSourceVideo(row.sourceItemId, row.formatName) : null;
     // A roundup about ONE piece of pillar content (the editor picked it in New → Newsletter).
     const pillar = config.kind === "roundup" && row.sourceItemId ? await loadSourceVideo(row.sourceItemId) : null;
@@ -176,6 +182,7 @@ export async function runNewsletterDraft(
       sectionExamples: template ? sectionExamples(pastIssues, template) : null,
       model: config.model,
       log: opts.log,
+      onProgress: progress,
       shouldStop,
       signal: opts.signal,
     });
@@ -211,6 +218,7 @@ export async function runNewsletterDraft(
         specialError: special && !special.ok ? special.error : null,
         model: result.model,
         error: null,
+        progress: null,
         updatedAt: new Date(),
       })
       .where(ours)
@@ -226,7 +234,7 @@ export async function runNewsletterDraft(
     if (opts.signal?.aborted) throw err;
     await db
       .update(newsletterDrafts)
-      .set({ status: "failed", error: (err as Error).message.slice(0, 2000), model: newsletterModel(config.model), updatedAt: new Date() })
+      .set({ status: "failed", error: (err as Error).message.slice(0, 2000), model: newsletterModel(config.model), progress: null, updatedAt: new Date() })
       .where(ours);
     throw err;
   }
