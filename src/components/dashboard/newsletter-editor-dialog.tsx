@@ -1257,12 +1257,13 @@ function DraftingPanel({ draft, cancelling, onCancel }: { draft: EditorDraft; ca
   const now = useNow();
   const left = Math.ceil((Date.parse(draft.updatedAt) + NEWSLETTER_START_DELAY_MS - now) / 1000);
   const p = draft.progress ?? null;
-  const phase = p?.phase ?? null;
+  // One video (a How-To, or a roundup the editor pinned to one piece): there are no stories to find.
+  const oneVideo = draft.kind === "single_video" || !!draft.sourceItemId;
+  const phase = oneVideo && p?.phase === "gathering" ? "reading" : (p?.phase ?? null);
   const pct = left > 0 ? 0 : draftProgress(phase, p ? now - Date.parse(p.at) : 0);
   const elapsed = p ? Math.max(0, Math.round((now - Date.parse(p.startedAt)) / 1000)) : 0;
   const current = phase ? DRAFT_PHASES.indexOf(phase) : -1;
-  // A single-video issue never searches for stories.
-  const steps = DRAFT_PHASES.filter((ph) => ph !== "starting" && !(ph === "gathering" && draft.kind === "single_video"));
+  const steps = DRAFT_PHASES.filter((ph) => ph !== "starting" && !(ph === "gathering" && oneVideo));
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center text-muted-foreground">
       <Sparkles className="size-6 animate-pulse text-pink-500" />

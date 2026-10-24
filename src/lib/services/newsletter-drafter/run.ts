@@ -87,6 +87,23 @@ export async function loadSourceVideo(sourceItemId: string | null, formatName?: 
   };
 }
 
+/**
+ * "This run still owns the draft": it's still `drafting` with the updated_at
+ * the run started from (Cancel and a later Redraft both move it). Compared at
+ * millisecond precision: a row whose updated_at came from Postgres `now()`
+ * (microseconds — every draft made by POST /api/newsletter-drafts) reads back
+ * into a JS Date truncated to milliseconds, and an exact compare never
+ * matched, so the run skipped itself as "cancelled" and the draft sat on
+ * Drafting forever (2026-10-23). Exported for tests.
+ */
+export function draftOwnedBy(id: string, updatedAt: Date) {
+  return and(
+    eq(newsletterDrafts.id, id),
+    eq(newsletterDrafts.status, "drafting"),
+    sql`date_trunc('milliseconds', ${newsletterDrafts.updatedAt}) = ${updatedAt.toISOString()}::timestamptz`,
+  );
+}
+
 export async function runNewsletterDraft(
   newsletterDraftId: string,
   opts: { signal?: AbortSignal; log?: (msg: string) => void } = {},
@@ -124,7 +141,7 @@ export async function runNewsletterDraft(
   const template = templateFor(row.formatName, row.formatTemplate);
   // This run owns the row only while it's still `drafting` with the same
   // updated_at it started from: Cancel (and a later Redraft) both move it.
-  const ours = and(eq(newsletterDrafts.id, row.id), eq(newsletterDrafts.status, "drafting"), eq(newsletterDrafts.updatedAt, row.updatedAt));
+  const ours = draftOwnedBy(row.id, row.updatedAt);
   const shouldStop = async () => {
     const [cur] = await db.select({ id: newsletterDrafts.id }).from(newsletterDrafts).where(ours).limit(1);
     return !cur;
