@@ -13,7 +13,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { AlertTriangle, Check, CheckCircle2, CircleAlert, Eye, ExternalLink, History, LayoutTemplate, Lightbulb, ListChecks, Loader2, Mail, Monitor, MoreHorizontal, MousePointerClick, RefreshCw, Shuffle, Smartphone, SpellCheck, Sparkles, Wand2, X } from "lucide-react";
+import { AlertTriangle, Check, CheckCircle2, RotateCcw, CircleAlert, Eye, ExternalLink, History, LayoutTemplate, Lightbulb, ListChecks, Loader2, Mail, Monitor, MoreHorizontal, MousePointerClick, RefreshCw, Smartphone, SpellCheck, Sparkles, Wand2, X } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -25,8 +25,10 @@ import { composeIssue, type NewsletterSection, type NewsletterTemplate } from "@
 import { EmailPreview, FOOTER_NOTE, MOBILE_WIDTH } from "@/components/dashboard/email-preview";
 import { EMAIL_WIDTH, renderEmailHtml } from "@/lib/newsletter-email-html";
 import { formatShortcut, useInlineFormat } from "@/components/dashboard/editable-section";
-import { RichSectionEditor } from "@/components/dashboard/rich-section-editor";
 import { TemplateEditorDialog } from "@/components/dashboard/newsletter-template-section";
+import { StoryCard, type StoryPick } from "@/components/dashboard/story-card";
+import { layoutFor, replaceAtPath } from "@/lib/newsletter-layout";
+import type { DocNode } from "@/lib/newsletter-rich-doc";
 import { ImagePanel, ScreenshotMarkPanel, ScreenshotPicker, useScreenshots } from "@/components/dashboard/newsletter-screenshot-picker";
 import { isVideoThumbnail } from "@/components/dashboard/preview-screenshots";
 import { formatTimestamp, insertStepScreenshot, parseScreenshotMarks, removeScreenshotMark, screenshotKey, stepsWithoutScreenshots, type ScreenshotMark } from "@/lib/newsletter-screenshots";
@@ -71,6 +73,8 @@ export interface EditorDraft {
   beehiivPostUrl: string | null;
   beehiivStatus: string | null;
   beehiivError: string | null;
+  /** This issue's own design (designed parts edited in the draft); null = the template's. */
+  layout?: Record<string, unknown> | null;
   /** The editor's AI review (POST …/review), when asked for. */
   review?: NewsletterReview | null;
   /** A running draft's phase (written by the worker each turn). */
@@ -246,6 +250,8 @@ function Workspace({
   const [checks, setChecks] = useState<PreSendCheck[] | null>(null);
   const [fixes, setFixes] = useState<ProofreadFix[] | null>(null);
   const [notes, setNotes] = useState(draft.notes ?? "");
+  /** This issue's own design (a designed part edited here), or null = the template's. */
+  const [layout, setLayout] = useState<DocNode | null>((draft.layout as DocNode | null) ?? null);
   /**
    * The side panel. Before a click removes the button it came from (+ Add
    * screenshot, a trash icon), focus moves here without scrolling: otherwise
@@ -268,6 +274,7 @@ function Workspace({
     setBody(draft.bodyMarkdown ?? "");
     setSpecialCopy(draft.specialCopy ?? "");
     setNotes(draft.notes ?? "");
+    setLayout((draft.layout as DocNode | null) ?? null);
   }, [draft]);
 
   const dirty =
@@ -277,6 +284,7 @@ function Workspace({
     (!draft.template && body !== (draft.bodyMarkdown ?? "")) ||
     specialCopy !== (draft.specialCopy ?? "") ||
     notes !== (draft.notes ?? "") ||
+    JSON.stringify(layout ?? null) !== JSON.stringify(draft.layout ?? null) ||
     !sameSections(sections, draft.sections);
 
   // Autosave, like the design editor: a moment after the last change.
@@ -285,7 +293,7 @@ function Workspace({
     const t = setTimeout(() => void save(), AUTOSAVE_MS);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- re-arm on every edit; save() reads the latest state
-  }, [dirty, draft.status, subject, previewText, sections, body, specialCopy, notes]);
+  }, [dirty, draft.status, subject, previewText, sections, body, specialCopy, notes, layout]);
   flushRef.current = () => (dirty ? save() : saveChain.current);
 
   const preview = useMemo(() => {
@@ -312,6 +320,7 @@ function Workspace({
           previewText,
           specialCopy,
           notes: notes.trim() || null,
+          layout,
           revision: revisionRef.current,
           ...(draft.template ? { sections: withSections ?? sections } : { bodyMarkdown: body }),
         }),
@@ -354,6 +363,12 @@ function Workspace({
   async function regenerate(key: string, instruction: string, newStory = false) {
     if (dirty && !(await save())) return;
     await post(`/api/newsletter-drafts/${draft.id}/sections/${key}/regenerate`, { instruction: instruction || null, newStory }, `regen:${key}`);
+  }
+
+  /** Find new story → the editor picked one: rewrite the section around it. */
+  async function pickStory(key: string, story: StoryPick, instruction: string) {
+    if (dirty && !(await save())) return;
+    await post(`/api/newsletter-drafts/${draft.id}/sections/${key}/regenerate`, { instruction: instruction || null, story }, `regen:${key}`);
   }
 
   async function cancelRun(section?: string) {
@@ -555,6 +570,12 @@ function Workspace({
                   <DropdownMenuItem onClick={openTemplate} className="cursor-pointer gap-2">
                     <LayoutTemplate className="size-4" />
                     Edit template
+                  </DropdownMenuItem>
+                )}
+                {layout && (
+                  <DropdownMenuItem onClick={() => setLayout(null)} className="cursor-pointer gap-2">
+                    <RotateCcw className="size-4" />
+                    Reset to the template&apos;s design
                   </DropdownMenuItem>
                 )}
                 <DropdownMenuItem onClick={redraft} disabled={busyAction !== null} className="cursor-pointer gap-2">
@@ -771,9 +792,9 @@ function Workspace({
   );
 
   const exactHtml = useMemo(
-    () => (draft.template && !draft.template.beehiiv ? renderEmailHtml({ template: draft.template, sections, sponsor: sponsorArg, subject, previewText, screenshots: previewShots, footerNote: FOOTER_NOTE }) : ""),
+    () => (draft.template && !draft.template.beehiiv ? renderEmailHtml({ template: draft.template, sections, sponsor: sponsorArg, subject, previewText, screenshots: previewShots, footerNote: FOOTER_NOTE, layout }) : ""),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- previewShots is rebuilt each render; its parts are what matters
-    [draft.template, sections, sponsorArg, subject, previewText, shots.chosen, shots.urlFor],
+    [draft.template, sections, sponsorArg, subject, previewText, shots.chosen, shots.urlFor, layout],
   );
   const canvasWidth = device === "mobile" && !draft.template?.beehiiv ? MOBILE_WIDTH : EMAIL_WIDTH;
   const visual = draft.template ? (
@@ -806,15 +827,21 @@ function Workspace({
               sponsor={sponsorArg}
               screenshots={previewShots}
               width={canvasWidth}
+              layout={layout}
               edit={{
                 selected,
                 editingSection,
                 regenerating: draft.regenerating,
                 onSelectSection: (key) => {
                   setSelected(key);
-                  if (draft.template?.sections.find((s) => s.key === key)?.kind !== "sponsor") setEditingSection(key);
+                  setEditingSection(key);
                 },
-                onChangeSection: setSectionMd,
+                onChangeSection: (key, md) => {
+                  // The sponsor's slot: the promo copy when there is some, else the section's text.
+                  if (draft.template?.sections.find((s) => s.key === key)?.kind === "sponsor" && specialCopy.trim()) setSpecialCopy(md);
+                  else setSectionMd(key, md);
+                },
+                onChangeDesign: (path, nodes, count) => setLayout((cur) => replaceAtPath(cur ?? layoutFor(draft.template!), path, nodes, count)),
                 onDoneEditing: () => {
                   setEditingSection(null);
                   if (dirty) void save();
@@ -874,10 +901,6 @@ function Workspace({
             <SponsorSection
               label={draft.specialLabel ?? selSection.heading ?? "Sponsor"}
               draft={draft}
-              copy={specialCopy}
-              setCopy={setSpecialCopy}
-              agentMarkdown={sectionMd(selSection.key)}
-              setAgentMarkdown={(md) => setSectionMd(selSection.key, md)}
               busyAction={busyAction}
               onAction={special}
             />
@@ -898,6 +921,7 @@ function Workspace({
                 source={draft.kind === "roundup" ? (sections.find((x) => x.key === selSection.key)?.source ?? null) : null}
                 usage={draft.sectionUsage?.[selSection.key] ?? null}
                 onFindNewStory={draft.kind === "roundup" && !draft.sourceItemId ? (instruction) => regenerate(selSection.key, instruction, true) : undefined}
+                    onPickStory={draft.kind === "roundup" && !draft.sourceItemId ? (story, instruction) => void pickStory(selSection.key, story, instruction) : undefined}
                 onCancel={() => cancelRun(selSection.key)}
               />
               <p className="text-xs text-muted-foreground">
@@ -1016,7 +1040,7 @@ function Workspace({
               <Textarea className="min-h-16 text-xs" placeholder="An offer to pitch, an angle, a story to feature — Regenerate and Redraft read this." value={notes} onChange={(e) => setNotes(e.target.value)} />
             </label>
             <p className="rounded-md bg-muted/60 p-3 text-xs text-muted-foreground">
-              Click any part of the email to edit it. Text opens right where it is, with Regenerate{draft.kind === "roundup" && !draft.sourceItemId ? " and Find new story" : ""} here{hasShots ? "; a screenshot opens its video scrubber, frames, Upload and Remove" : ""}. Locked parts (headings, labels, masthead, footer) come from the template.
+              Click any part of the email to edit it. Text opens right where it is, with Regenerate{draft.kind === "roundup" && !draft.sourceItemId ? " and Find new story" : ""} here{hasShots ? "; a screenshot opens its video scrubber, frames, Upload and Remove" : ""}. Headings, the masthead and other designed parts come from the template: edit them here for this issue, or open Template to change every issue.
             </p>
             {sourcesList}
           </>
@@ -1123,10 +1147,6 @@ function Workspace({
                     key={sec.key}
                     label={draft.specialLabel ?? sec.heading ?? "Sponsor"}
                     draft={draft}
-                    copy={specialCopy}
-                    setCopy={setSpecialCopy}
-                    agentMarkdown={sections.find((x) => x.key === sec.key)?.markdown ?? ""}
-                    setAgentMarkdown={(md) => setSections((cur) => cur.map((x) => (x.key === sec.key ? { ...x, markdown: md } : x)))}
                     busyAction={busyAction}
                     onAction={special}
                   />
@@ -1147,6 +1167,7 @@ function Workspace({
                     source={draft.kind === "roundup" ? (sections.find((x) => x.key === sec.key)?.source ?? null) : null}
                     usage={draft.sectionUsage?.[sec.key] ?? null}
                     onFindNewStory={draft.kind === "roundup" && !draft.sourceItemId ? (instruction) => regenerate(sec.key, instruction, true) : undefined}
+                    onPickStory={draft.kind === "roundup" && !draft.sourceItemId ? (story, instruction) => void pickStory(sec.key, story, instruction) : undefined}
                     onCancel={() => cancelRun(sec.key)}
                   >
                     {hasShots && (
@@ -1384,6 +1405,7 @@ function SectionEditor({
   source,
   usage,
   onFindNewStory,
+  onPickStory,
   onCancel,
   hideText = false,
   children,
@@ -1400,6 +1422,8 @@ function SectionEditor({
   source?: NewsletterSection["source"];
   usage?: { count: number; lastDate: string | null; label: string; published?: string | null } | null;
   onFindNewStory?: (instruction: string) => void;
+  /** Find new story → a story the editor picked in the search. */
+  onPickStory?: (story: StoryPick, instruction: string) => void;
   onCancel?: () => void;
   /** Visual view: the text is edited in the email itself, not here. */
   hideText?: boolean;
@@ -1436,27 +1460,19 @@ function SectionEditor({
           </span>
         )}
       </div>
-      {source && (
-        <div className="flex min-w-0 items-center gap-2 text-xs">
-          <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-muted-foreground">{source.kind === "video" ? "Video" : "Case study"}</span>
-          {source.url ? (
-            <a className="truncate text-primary underline" href={source.url} target="_blank" rel="noreferrer" title={source.title ?? source.url}>
-              {source.title ?? source.url}
-            </a>
-          ) : (
-            <span className="truncate">{source.title ?? source.key}</span>
-          )}
-          {usage?.published && <span className="shrink-0 whitespace-nowrap text-muted-foreground">· {usage.published}</span>}
-          <span
-            className={cn(
-              "shrink-0 whitespace-nowrap",
-              !usage || usage.count === 0 ? "text-emerald-700 dark:text-emerald-300" : "text-muted-foreground",
-            )}
-            title="Times this story has run in this newsletter (issues we have records of: HubSpot since late Aug 2026, Klaviyo before)"
-          >
-            · {usage?.label ?? "Never featured"}
-          </span>
-        </div>
+      {(source || onPickStory) && (
+        <StoryCard
+          draftId={draftId}
+          source={source}
+          usage={usage}
+          canSwap={!!onPickStory}
+          busy={disabled || regenerating}
+          onPick={(story) => onPickStory?.(story, instruction)}
+          onAuto={() => {
+            onFindNewStory?.(instruction);
+            setInstruction("");
+          }}
+        />
       )}
       {!hideText && (
         <Textarea
@@ -1550,21 +1566,6 @@ function SectionEditor({
           <RefreshCw />
           Regenerate
         </Button>
-        {onFindNewStory && source && (
-          <Button
-            size="sm"
-            variant="outline"
-            title="Swap to a different video or case study this newsletter hasn't run recently"
-            onClick={() => {
-              onFindNewStory(instruction);
-              setInstruction("");
-            }}
-            disabled={disabled || regenerating}
-          >
-            <Shuffle />
-            Find new story
-          </Button>
-        )}
       </div>
     </div>
   );
@@ -1796,19 +1797,11 @@ function ReviewPanel({
 function SponsorSection({
   label,
   draft,
-  copy,
-  setCopy,
-  agentMarkdown,
-  setAgentMarkdown,
   busyAction,
   onAction,
 }: {
   label: string;
   draft: EditorDraft;
-  copy: string;
-  setCopy: (s: string) => void;
-  agentMarkdown: string;
-  setAgentMarkdown: (s: string) => void;
   busyAction: string | null;
   onAction: (a: "verbatim" | "rewrite" | "refresh") => void;
 }) {
@@ -1850,11 +1843,7 @@ function SponsorSection({
           </Button>
         </div>
       </div>
-      {fromAsana ? (
-        <RichSectionEditor key="asana" standalone autoFocus={false} markdown={copy} onChange={setCopy} placeholder="The sponsor's copy" />
-      ) : (
-        <RichSectionEditor key="agent" standalone autoFocus={false} markdown={agentMarkdown} onChange={setAgentMarkdown} placeholder="The sponsored section" />
-      )}
+      <p className="rounded-md bg-white/70 p-2 text-xs text-muted-foreground dark:bg-transparent">Edit the copy right in the email: click the section there.</p>
       {draft.specialSource?.landingUrl && <span className="break-all text-xs text-muted-foreground">Landing page: {draft.specialSource.landingUrl}</span>}
     </div>
   );

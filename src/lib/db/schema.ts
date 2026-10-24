@@ -2731,6 +2731,8 @@ export const newsletterDrafts = pgTable(
     beehiivPostUrl: text("beehiiv_post_url"),
     beehiivStatus: text("beehiiv_status"),
     beehiivError: text("beehiiv_error"),
+    /** This issue's own design (newsletter-layout.ts), when the editor changed a designed part in the draft; null = the template's. */
+    layout: jsonb("layout").$type<Record<string, unknown>>(),
     /** Where a running draft is (agent.ts → run.ts, each turn): the editor's progress bar. Cleared when it lands. */
     progress: jsonb("progress").$type<NewsletterDraftProgress>(),
     /** The editor's "AI review" of the issue (newsletter-review task): findings the editor applies one by one. */

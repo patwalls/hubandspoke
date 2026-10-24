@@ -177,7 +177,7 @@ function Swatches({ value, onPick, onNone }: { value: string | null; onPick: (c:
   );
 }
 
-function LayoutToolbar({ editor, onAddSlot }: { editor: Editor; onAddSlot: () => string }) {
+function LayoutToolbar({ editor, onAddSlot }: { editor: Editor; onAddSlot?: () => string }) {
   const [linkUrl, setLinkUrl] = useState<string | null>(null);
   const [colors, setColors] = useState<"pill" | "box" | null>(null);
   const [, force] = useState(0);
@@ -255,8 +255,8 @@ function LayoutToolbar({ editor, onAddSlot }: { editor: Editor; onAddSlot: () =>
       <Btn title="Divider" onClick={() => chain().setHorizontalRule().run()}>
         <Minus className="size-4" />
       </Btn>
-      <Sep />
-      <button
+      {onAddSlot && <Sep />}
+      {onAddSlot && <button
         type="button"
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => chain().insertContent({ type: "slot", attrs: { key: onAddSlot() } }).run()}
@@ -264,7 +264,7 @@ function LayoutToolbar({ editor, onAddSlot }: { editor: Editor; onAddSlot: () =>
         title="A section AI writes every issue"
       >
         <Sparkles className="size-3.5" /> AI section
-      </button>
+      </button>}
       {colors === "pill" && (
         <Swatches
           value={(editor.getAttributes("heading").pill as string | null) ?? null}
@@ -293,20 +293,25 @@ export function LayoutEditor({
   onSelectSlot,
   onAddSlot,
   editorRef,
+  inline = false,
+  onDone,
 }: {
   layout: LayoutDoc;
   sections: NewsletterTemplateSection[];
   selected: string | null;
   onChange: (layout: LayoutDoc) => void;
   onSelectSlot: (key: string) => void;
-  /** A new section for a slot being inserted: returns its key. */
-  onAddSlot: () => string;
+  /** A new section for a slot being inserted: returns its key. Without it there are no AI sections to add (a draft's design). */
+  onAddSlot?: () => string;
+  /** In a draft: a small editor in place of one designed part (outlined, finishes on click-away / Esc). */
+  inline?: boolean;
+  onDone?: () => void;
   /** The editor, for the side panel (remove a slot). */
   editorRef?: React.MutableRefObject<Editor | null>;
 }) {
-  const live = useRef({ sections, selected, onSelectSlot });
+  const live = useRef({ sections, selected, onSelectSlot, onChange });
   useLayoutEffect(() => {
-    live.current = { sections, selected, onSelectSlot };
+    live.current = { sections, selected, onSelectSlot, onChange };
   });
   const [hooks] = useState<LayoutHooks>(() => ({
     section: (key) => live.current.sections.find((s) => s.key === key) ?? null,
@@ -314,10 +319,13 @@ export function LayoutEditor({
     onSelect: (key) => live.current.onSelectSlot(key),
   }));
   const [body, setBody] = useState<HTMLDivElement | null>(null);
+  const wrapper = useRef<HTMLDivElement | null>(null);
   const editor = useEditor({
     immediatelyRender: false,
+    autofocus: inline ? "end" : false,
     extensions: [
-      StarterKit.configure({ heading: false, code: false, codeBlock: false, strike: false, underline: false, link: { openOnClick: false, autolink: true } }),
+      // In place in a draft there is no empty line added after the part being edited (typing lands in it).
+      StarterKit.configure({ heading: false, code: false, codeBlock: false, strike: false, underline: false, link: { openOnClick: false, autolink: true }, ...(inline ? { trailingNode: false } : {}) }),
       PillHeading.configure({ levels: [2, 3] }),
       Callout,
       DesignImage,
@@ -327,7 +335,8 @@ export function LayoutEditor({
     ],
     content: layout as unknown as Record<string, unknown>,
     editorProps: { attributes: { class: "nl-rich outline-none" } },
-    onUpdate: ({ editor: e }) => onChange(e.getJSON() as LayoutDoc),
+    // Through the ref: the editor is built once, the callback changes every render.
+    onUpdate: ({ editor: e }) => live.current.onChange(e.getJSON() as LayoutDoc),
   });
   useEffect(() => {
     if (editorRef) editorRef.current = editor;
@@ -338,17 +347,33 @@ export function LayoutEditor({
     editor.view.dispatch(editor.state.tr.setMeta("slot-refresh", true));
   }, [editor, sections, selected]);
 
-  if (!editor) return <div className="min-h-40" />;
+  if (!editor) return <div className={inline ? "min-h-8" : "min-h-40"} />;
   return (
-    <div className="relative">
-      <div className="sticky top-2 z-20 mb-3 flex justify-center">
+    <div
+      ref={wrapper}
+      className={cn("relative", inline && "-mx-2 rounded-md px-2 py-1.5 outline-2 outline-[#49adff] outline-solid")}
+      onClick={(e) => inline && e.stopPropagation()}
+      onKeyDown={(e) => {
+        if (inline && e.key === "Escape") {
+          e.preventDefault();
+          onDone?.();
+        }
+      }}
+      onBlur={(e) => {
+        if (!inline) return;
+        const to = e.relatedTarget as HTMLElement | null;
+        if (to && wrapper.current?.contains(to)) return;
+        onDone?.();
+      }}
+    >
+      <div className={inline ? "sticky top-2 z-20 -mt-11 mb-2 flex justify-end" : "sticky top-2 z-20 mb-3 flex justify-center"}>
         <LayoutToolbar editor={editor} onAddSlot={onAddSlot} />
       </div>
       <div ref={setBody} className="relative">
         <BlockHandle
           editor={editor}
           container={body}
-          extraInserts={[{ label: "AI section", icon: <Sparkles className="size-3.5 text-[#2563eb]" />, make: () => ({ type: "slot", attrs: { key: onAddSlot() } }) }]}
+          extraInserts={onAddSlot ? [{ label: "AI section", icon: <Sparkles className="size-3.5 text-[#2563eb]" />, make: () => ({ type: "slot", attrs: { key: onAddSlot() } }) }] : []}
         />
         <EditorContent editor={editor} />
       </div>

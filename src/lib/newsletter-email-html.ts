@@ -77,6 +77,8 @@ export interface RenderEmailArgs {
   canvas?: boolean;
   /** Personalization tokens: "sample" (preview, default), "hubspot" (the push), "raw". */
   personalization?: Personalization;
+  /** This issue's own design (a draft whose designed parts were changed); else the template's. */
+  layout?: DocNode | null;
 }
 
 // ── Style tokens ────────────────────────────────────────────────────────
@@ -274,7 +276,7 @@ export interface EmailSectionPart {
 
 /** The email as the layout draws it: fixed design, the sections' slots, and boxes holding either. */
 export type EmailBlock =
-  | { kind: "fixed"; html: string; node: string }
+  | { kind: "fixed"; html: string; node: string; path: number[] }
   | ({ kind: "slot" } & EmailSectionPart)
   | { kind: "box"; color: string; children: EmailBlock[] };
 
@@ -341,17 +343,19 @@ export function renderEmailParts(args: RenderEmailArgs): EmailParts {
   const st = template.style;
   const t = tokens(st);
   const byKey = new Map(template.sections.map((s) => [s.key, s]));
-  const build = (nodes: DocNode[]): EmailBlock[] =>
-    nodes.flatMap((node): EmailBlock[] => {
+  const build = (nodes: DocNode[], at: number[]): EmailBlock[] =>
+    nodes.flatMap((node, i): EmailBlock[] => {
+      const path = [...at, i];
       if (node.type === "slot") {
         const sec = byKey.get(String(node.attrs?.key ?? ""));
         return sec ? [{ kind: "slot", ...slotPart(args, sec, t) }] : [];
       }
-      if (node.type === "callout") return [{ kind: "box", color: typeof node.attrs?.color === "string" ? node.attrs.color : "#f1f5f9", children: build(node.content ?? []) }];
+      if (node.type === "callout") return [{ kind: "box", color: typeof node.attrs?.color === "string" ? node.attrs.color : "#f1f5f9", children: build(node.content ?? [], path) }];
       const html = fixedHtml(node, args, t);
-      return html ? [{ kind: "fixed", html, node: node.type }] : [];
+      // An empty paragraph left by an edit still gets a (thin) block on the canvas, so it can be clicked and removed.
+      return html || args.canvas ? [{ kind: "fixed", html: html || "<p style=\"margin:0 0 8px 0;\">&nbsp;</p>", node: node.type, path }] : [];
     });
-  return { blocks: build(layoutFor(template).content ?? []), bodyStyle: bodyStyle(st), background: st.contentBackground };
+  return { blocks: build(layoutFor(template, args.layout).content ?? [], []), bodyStyle: bodyStyle(st), background: st.contentBackground };
 }
 
 /**

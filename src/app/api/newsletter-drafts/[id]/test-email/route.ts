@@ -3,6 +3,7 @@ import { requireFeature } from "@/lib/auth-guards";
 import { sendNewsletterTestEmail } from "@/lib/email";
 import { renderEmailHtml } from "@/lib/newsletter-email-html";
 import { composeIssue } from "@/lib/newsletter-template";
+import type { DocNode } from "@/lib/newsletter-rich-doc";
 import { getNewsletterDraft } from "@/lib/services/newsletter-drafter/queries";
 
 interface RouteContext {
@@ -33,6 +34,7 @@ export async function POST(_request: NextRequest, context: RouteContext) {
     subject: draft.subject,
     previewText: draft.previewText,
     screenshots: { chosen: draft.screenshots, urlFor: (_c, markKey) => previews[markKey] ?? null },
+    layout: draft.layout as DocNode | null,
     footerNote: "Test send from Hub & Spoke. HubSpot adds the real footer (unsubscribe link, address) when it sends.",
   });
   try {

@@ -733,6 +733,22 @@ export interface RegenerateSectionArgs extends NewsletterAgentArgs {
   sourcesNote?: string | null;
   /** "Find new story": swap the section to a different story, never one of these keys. */
   newStoryExclude?: Set<string> | null;
+  /** The editor picked the new story (Find new story → search): rewrite the section around exactly this one. */
+  pinnedStory?: PinnedStory | null;
+}
+
+export interface PinnedStory {
+  kind: "video" | "case_study";
+  key: string;
+  title: string | null;
+  url: string | null;
+  productionItemId: string | null;
+}
+
+/** The turn's instruction for a story the editor picked. Pure; exported for tests. */
+export function pinnedStoryInstruction(p: PinnedStory, steer?: string | null): string {
+  const how = p.kind === "video" ? `read its transcript with get_video_transcript (production_item_id ${p.productionItemId})` : `read the case study with web_fetch (${p.url})`;
+  return `NEW STORY — THE EDITOR PICKED IT: rewrite this section around exactly this ${p.kind === "video" ? "video" : "case study"}: "${p.title ?? "Untitled"}"${p.url ? ` (${p.url})` : ""}. First ${how}; every fact must come from it. Set source to it (kind ${p.kind}${p.kind === "video" ? `, production_item_id ${p.productionItemId}` : `, url ${p.url}`}).${steer?.trim() ? ` The editor's steer: ${steer.trim()}` : ""}`;
 }
 
 /** Rewrite one section of an existing issue (or, with newStoryExclude, swap it to a new story). */
@@ -754,7 +770,9 @@ export async function regenerateSection(
     sec.kind !== "sponsor" && sec.screenshots ? `${SCREENSHOT_RULE}\nThis section is marked SCREENSHOTS.` : null,
     sec.kind !== "sponsor" && sec.thumbnail ? `${THUMBNAIL_RULE}\nThis section is marked THUMBNAIL: keep its thumbnail image.` : null,
     `Its current content:\n${current || "(empty)"}`,
-    args.newStoryExclude
+    args.pinnedStory
+      ? pinnedStoryInstruction(args.pinnedStory, args.instruction)
+      : args.newStoryExclude
       ? `FIND A NEW STORY: replace this section's video/case study with a DIFFERENT one and rewrite the section around it. ${where ?? "Use the tools to find it: this window's stories first, then list_older_videos / search_case_studies."} Never use a story marked blocked, and never any of these: ${[...args.newStoryExclude].join(", ") || "(none)"}. Set source to the story you chose.${args.instruction?.trim() ? ` The editor's steer: ${args.instruction.trim()}` : ""}`
       : args.instruction?.trim()
         ? `The editor's instruction (follow it): ${args.instruction.trim()}`
@@ -772,6 +790,10 @@ export async function regenerateSection(
       const parsed = SubmitSectionInput.safeParse(input);
       if (!parsed.success) return { error: "markdown is required." };
       const k = storyKeyOf(parsed.data.source);
+      if (args.pinnedStory) {
+        if (k !== args.pinnedStory.key) return { error: `Use the story the editor picked (${args.pinnedStory.key}) and set source to it.` };
+        return { value: { markdown: parsed.data.markdown, source: parsed.data.source ?? null } };
+      }
       if (args.newStoryExclude) {
         if (!k) return { error: "Set source to the new story you chose." };
         if (args.newStoryExclude.has(k)) return { error: `That story (${k}) is excluded — pick a different one.` };

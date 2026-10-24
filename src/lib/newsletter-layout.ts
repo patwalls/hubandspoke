@@ -45,8 +45,9 @@ export function layoutFromSections(template: NewsletterTemplate): LayoutDoc {
  * or by an older editor) is appended at the end with its heading, so no
  * section is ever silently left out of the email.
  */
-export function layoutFor(template: NewsletterTemplate): LayoutDoc {
-  const saved = template.layout as LayoutDoc | null | undefined;
+export function layoutFor(template: NewsletterTemplate, override?: LayoutDoc | null): LayoutDoc {
+  // A draft's own design (the editor changed a designed part in that issue) beats the template's.
+  const saved = (override ?? template.layout) as LayoutDoc | null | undefined;
   if (!(saved?.type === "doc" && Array.isArray(saved.content))) return layoutFromSections(template);
   const have = new Set(slotKeys(saved));
   const missing = template.sections.filter((sec) => !have.has(sec.key));
@@ -134,4 +135,24 @@ export function withLayout(template: NewsletterTemplate, layout: LayoutDoc): New
 export function newSlotKey(template: NewsletterTemplate, base = "section"): string {
   const taken = new Set(template.sections.map((s) => s.key));
   for (let n = template.sections.length + 1; ; n++) if (!taken.has(`${base}_${n}`)) return `${base}_${n}`;
+}
+
+/**
+ * The layout with `count` nodes starting at `path` (child indexes from the
+ * doc down) replaced by `nodes` (zero or more). Pure; exported for tests.
+ */
+export function replaceAtPath(layout: LayoutDoc, path: number[], nodes: DocNode[], count = 1): LayoutDoc {
+  if (!path.length) return layout;
+  const [i, ...rest] = path;
+  const content = [...(layout.content ?? [])];
+  if (rest.length) content[i] = replaceAtPath(content[i], rest, nodes, count);
+  else content.splice(i, count, ...nodes);
+  return { ...layout, content };
+}
+
+/** The node at `path`, or null. Pure. */
+export function nodeAtPath(layout: LayoutDoc, path: number[]): DocNode | null {
+  let n: DocNode | undefined = layout;
+  for (const i of path) n = n?.content?.[i];
+  return n ?? null;
 }

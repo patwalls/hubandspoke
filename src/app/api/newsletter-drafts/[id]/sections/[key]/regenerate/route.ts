@@ -21,7 +21,14 @@ export async function POST(request: NextRequest, context: RouteContext) {
   const guard = await requireFeature("newsletterDrafter");
   if (guard.response) return guard.response;
   const { id, key } = await context.params;
-  const parsed = z.object({ instruction: z.string().max(8000).nullable().optional(), newStory: z.boolean().optional() }).safeParse(await request.json().catch(() => ({})));
+  const parsed = z.object({
+      instruction: z.string().max(8000).nullable().optional(),
+      newStory: z.boolean().optional(),
+      story: z
+        .object({ kind: z.enum(["video", "case_study"]), key: z.string().max(300), title: z.string().max(500).nullable(), url: z.string().max(1000).nullable(), productionItemId: z.string().uuid().nullable() })
+        .nullable()
+        .optional(),
+    }).safeParse(await request.json().catch(() => ({})));
   if (!parsed.success) return NextResponse.json({ error: "Invalid body" }, { status: 400 });
   const draft = await getNewsletterDraft(id);
   if (!draft) return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -34,7 +41,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     .where(and(eq(newsletterDrafts.id, id), eq(newsletterDrafts.status, "ready")));
   await enqueue(
     "newsletter-section-regenerate",
-    { newsletterDraftId: id, sectionKey: key, instruction: parsed.data.instruction?.trim() || null, newStory: !!parsed.data.newStory },
+    { newsletterDraftId: id, sectionKey: key, instruction: parsed.data.instruction?.trim() || null, newStory: !!parsed.data.newStory, story: parsed.data.story ?? null },
     { jobKey: `newsletter-section:${id}:${key}`, maxAttempts: 1, runAt: new Date(Date.now() + NEWSLETTER_START_DELAY_MS) },
   );
   return NextResponse.json({ ok: true }, { status: 202 });

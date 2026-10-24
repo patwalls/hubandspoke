@@ -12,6 +12,7 @@ import { db } from "@/lib/db";
 import { brands, formats, newsletterDrafts } from "@/lib/db/schema";
 import { createDraftEmailFromTemplate } from "@/lib/hubspot-marketing-email";
 import { renderEmailBody } from "@/lib/newsletter-email-html";
+import type { DocNode } from "@/lib/newsletter-rich-doc";
 import { resolvePendingScreenshots, screenshotUrlsByKey } from "@/lib/services/newsletter-drafter/screenshots";
 import { advanceNewsletterItem } from "@/lib/services/newsletter-drafter/queue-status";
 import { hubspotEmailName, templateFor } from "@/lib/newsletter-template";
@@ -33,6 +34,7 @@ export const hubspotNewsletterCreateDraftTask: Task = async (rawPayload, helpers
       screenshots: newsletterDrafts.screenshots,
       specialCopy: newsletterDrafts.specialCopy,
       specialSource: newsletterDrafts.specialSource,
+      layout: newsletterDrafts.layout,
       hubspotEmailId: newsletterDrafts.hubspotEmailId,
       formatName: formats.name,
       formatTemplate: formats.newsletterTemplate,
@@ -62,7 +64,7 @@ export const hubspotNewsletterCreateDraftTask: Task = async (rawPayload, helpers
   // Picked screenshots go in as public links; a placeholder with no pick is left out of the email.
   const chosen = await resolvePendingScreenshots(row.id, row.screenshots);
   const shotUrls = await screenshotUrlsByKey(chosen);
-  const html = renderEmailBody({ template, sections: row.sections, sponsor, screenshots: { chosen, urlFor: (c) => shotUrls[c.key] ?? null }, personalization: "hubspot" });
+  const html = renderEmailBody({ template, sections: row.sections, sponsor, screenshots: { chosen, urlFor: (c) => shotUrls[c.key] ?? null }, personalization: "hubspot", layout: row.layout as DocNode | null });
   if (!row.sections.some((s) => s.markdown.trim()) && !sponsor) return fail("this draft has no sections to send (redraft it with the template)");
 
   try {

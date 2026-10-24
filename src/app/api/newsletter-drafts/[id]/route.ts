@@ -44,6 +44,11 @@ const PatchBody = z
       .max(20)
       .optional(),
     notes: z.string().max(4000).nullable().optional(),
+    /** This issue's own design (designed parts edited in the draft); null = back to the template's. */
+    layout: z
+      .custom<Record<string, unknown>>((v) => v === null || (!!v && typeof v === "object" && (v as { type?: unknown }).type === "doc"))
+      .nullable()
+      .optional(),
     /** The revision the editor loaded; a stale save is refused. */
     revision: z.number().int().optional(),
   })

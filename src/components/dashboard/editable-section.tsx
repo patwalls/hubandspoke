@@ -51,6 +51,8 @@ export interface PreviewEditing {
   onSelectLook?: () => void;
   /** Draft: open the format's template (clicking a designed, fixed part). */
   onEditTemplate?: () => void;
+  /** Draft: replace `count` designed nodes at `path` of this issue's layout with `nodes` (an edit to a designed part, this issue only). */
+  onChangeDesign?: (path: number[], nodes: import("@/lib/newsletter-rich-doc").DocNode[], count: number) => void;
 }
 
 export function EditableSection({
@@ -71,7 +73,7 @@ export function EditableSection({
 }) {
   const regenerating = edit.regenerating.includes(sectionKey);
   // The sponsor's copy comes from Asana in a draft; its instructions are still editable in the template.
-  if (edit.editingSection === sectionKey && (!isSponsor || edit.mode === "template") && !regenerating) {
+  if (edit.editingSection === sectionKey && !regenerating) {
     return edit.mode === "template" ? (
       <textarea
         autoFocus
@@ -111,10 +113,10 @@ export function EditableSection({
       // Links in the preview don't navigate while editing.
       onClickCapture={(e) => (e.target as HTMLElement).closest("a") && e.preventDefault()}
       onKeyDown={(e) => e.key === "Enter" && e.target === e.currentTarget && edit.onSelectSection(sectionKey)}
-      title={edit.mode === "template" ? "Click to edit what the drafter writes here" : isSponsor ? "Click to edit the sponsor section" : "Click to edit"}
+      title={edit.mode === "template" ? "Click to edit what the drafter writes here" : "Click to edit"}
       className={cn(
         "relative -mx-2 rounded-md px-2 [&_a]:cursor-text",
-        isSponsor ? "cursor-pointer" : "cursor-text",
+        "cursor-text",
         edit.selected === sectionKey ? "outline-2 outline-[#49adff] outline-solid" : "hover:outline-2 hover:outline-dashed hover:outline-[#49adff]/60",
         regenerating && "pointer-events-none opacity-50",
       )}

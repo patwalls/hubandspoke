@@ -148,8 +148,8 @@ describe("renderEmailParts / renderEmailBody / renderEmailHtml", () => {
   });
 
   it("pruneForSend drops an empty slot with its heading, a box left with only a heading, and stacked / edge dividers", () => {
-    const h = (t: string): EmailBlock => ({ kind: "fixed", html: t, node: "heading" });
-    const hr: EmailBlock = { kind: "fixed", html: "<hr>", node: "horizontalRule" };
+    const h = (t: string): EmailBlock => ({ kind: "fixed", html: t, node: "heading", path: [] });
+    const hr: EmailBlock = { kind: "fixed", html: "<hr>", node: "horizontalRule", path: [] };
     const s = (key: string, content: string): EmailBlock => ({ kind: "slot", key, content, empty: !content, addPoints: [] });
     const out = pruneForSend([hr, h("A"), s("a", ""), hr, h("B"), s("b", "B text"), hr, { kind: "box", color: "#eee", children: [h("C"), s("c", "")] }, hr]);
     expect(out).toEqual([h("B"), s("b", "B text")]);
@@ -199,5 +199,20 @@ describe("buttons written as [button: …] and personalization tokens", () => {
     expect(markdownToEmailHtml("Hey {{first_name}}!", style, { personalization: "raw" })).toContain("Hey {{first_name}}!");
     const body = renderEmailBody({ template: sb, sections: [{ key: "intro", markdown: "Hey {{first_name}}!" }], personalization: "hubspot" });
     expect(body).toContain("contact.firstname");
+  });
+});
+
+describe("a draft's own design", () => {
+  it("renders the draft's layout instead of the template's, and fixed blocks carry their path", async () => {
+    const { replaceAtPath } = await import("./newsletter-layout");
+    const { layoutFor } = await import("./newsletter-layout");
+    const base = layoutFor(sb);
+    const ojAt = base.content!.findIndex((n) => n.type === "heading" && n.content?.[0].text === "The Orange Juice 🍊");
+    const mine = replaceAtPath(base, [ojAt], [{ type: "heading", attrs: { level: 2, pill: "#000000" }, content: [{ type: "text", text: "The Big Juice" }] }]);
+    const body = renderEmailBody({ template: sb, sections: [{ key: "orange_juice", markdown: "Story." }], layout: mine });
+    expect(body).toContain("The Big Juice");
+    expect(body).not.toContain("The Orange Juice");
+    const fixed = renderEmailParts({ template: sb, sections: [], layout: mine }).blocks.find((b) => b.kind === "fixed" && b.html.includes("The Big Juice"));
+    expect(fixed).toMatchObject({ path: [ojAt] });
   });
 });

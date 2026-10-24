@@ -10,13 +10,16 @@
 // (EditableSection), click a screenshot spot or an image for its panel, drop
 // an image file on either. beehiiv formats keep their own card preview.
 
-import { useMemo, type CSSProperties, type DragEvent, type MouseEvent } from "react";
+import { useMemo, useState, type CSSProperties, type DragEvent, type MouseEvent } from "react";
 import { Loader2, Plus } from "lucide-react";
 import { BeehiivPreview } from "@/components/dashboard/beehiiv-preview";
 import { EditableSection, emptySectionHint, FixedPart, type PreviewEditing } from "@/components/dashboard/editable-section";
 import type { PreviewScreenshots } from "@/components/dashboard/preview-screenshots";
 import { boxStyle, EMAIL_WIDTH, renderEmailParts, type EmailBlock } from "@/lib/newsletter-email-html";
-import type { NewsletterSection, NewsletterTemplate } from "@/lib/newsletter-template";
+import { LayoutEditor } from "@/components/dashboard/layout-editor";
+import { layoutFor, nodeAtPath } from "@/lib/newsletter-layout";
+import type { DocNode } from "@/lib/newsletter-rich-doc";
+import { sponsorBlock, type NewsletterSection, type NewsletterTemplate } from "@/lib/newsletter-template";
 
 /** What stands in for the footer the email tool adds (never part of what we send). */
 export const FOOTER_NOTE = "HubSpot adds the footer here when it sends: unsubscribe link, address, social links.";
@@ -34,6 +37,7 @@ export function EmailPreview({
   edit,
   screenshots,
   width = EMAIL_WIDTH,
+  layout,
 }: {
   template: NewsletterTemplate;
   sections?: NewsletterSection[];
@@ -49,12 +53,14 @@ export function EmailPreview({
   screenshots?: PreviewScreenshots;
   /** The email's width on screen: 600 (desktop) or MOBILE_WIDTH. */
   width?: number;
+  /** This issue's own design (a draft whose designed parts were changed). */
+  layout?: DocNode | null;
 }) {
   // beehiiv formats (Futurepedia): draw the card layout the push builds.
   if (template.beehiiv?.layout) {
     return <BeehiivPreview template={template} sections={sections} sponsor={sponsor} showHints={showHints} scale={scale} clipHeight={clipHeight} className={className} edit={edit} screenshots={screenshots} />;
   }
-  return <HtmlEmailPreview template={template} sections={sections} sponsor={sponsor} showHints={showHints} scale={scale} clipHeight={clipHeight} className={className} edit={edit} screenshots={screenshots} width={width} />;
+  return <HtmlEmailPreview template={template} sections={sections} sponsor={sponsor} showHints={showHints} scale={scale} clipHeight={clipHeight} className={className} edit={edit} screenshots={screenshots} width={width} layout={layout ?? null} />;
 }
 
 function HtmlEmailPreview({
@@ -68,7 +74,9 @@ function HtmlEmailPreview({
   edit,
   screenshots,
   width,
+  layout,
 }: {
+  layout: DocNode | null;
   template: NewsletterTemplate;
   sections: NewsletterSection[];
   sponsor: { copy: string | null; landingUrl: string | null } | null;
@@ -84,9 +92,25 @@ function HtmlEmailPreview({
   /** Draft canvas: images and screenshot spots are clickable. */
   const draftCanvas = !!edit && edit.mode !== "template";
   const parts = useMemo(
-    () => renderEmailParts({ template, sections, sponsor, showHints, screenshots: screenshots ?? null, canvas: draftCanvas }),
-    [template, sections, sponsor, showHints, screenshots, draftCanvas],
+    () => renderEmailParts({ template, sections, sponsor, showHints, screenshots: screenshots ?? null, canvas: draftCanvas, layout }),
+    [template, sections, sponsor, showHints, screenshots, draftCanvas, layout],
   );
+  // A designed part open for editing in this issue: where it starts, and how many nodes it is now.
+  const [designEdit, setDesignEdit] = useState<{ path: number[]; doc: DocNode; count: number } | null>(null);
+  const canEditDesign = draftCanvas && !!edit?.onChangeDesign;
+  const startDesignEdit = (path: number[]) => {
+    const node = nodeAtPath(layoutFor(template, layout), path);
+    if (!node) return;
+    setDesignEdit({ path, doc: { type: "doc", content: [node] }, count: 1 });
+  };
+  /** A fixed block the open design editor now covers (its first node draws the editor, the rest are hidden). */
+  const editState = (path: number[]): "editor" | "hidden" | null => {
+    if (!designEdit) return null;
+    const p = designEdit.path;
+    if (path.length !== p.length || path.slice(0, -1).some((x, i) => x !== p[i])) return null;
+    const d = path[path.length - 1] - p[p.length - 1];
+    return d === 0 ? "editor" : d > 0 && d < designEdit.count ? "hidden" : null;
+  };
   const byKey = new Map(sections.map((x) => [x.key, x.markdown]));
 
   /** A click (or drop) inside a section's HTML: on a screenshot spot or an image, or just the text. */
@@ -124,7 +148,13 @@ function HtmlEmailPreview({
     ) : null;
     if (edit) {
       content = (
-        <EditableSection sectionKey={sec.key} markdown={edit.mode === "template" ? sec.hint : (byKey.get(sec.key) ?? "")} isSponsor={sec.kind === "sponsor"} edit={edit}>
+        <EditableSection
+          sectionKey={sec.key}
+          // The sponsor's slot edits the promo copy when there is some (with its CTA), else what the drafter wrote.
+          markdown={edit.mode === "template" ? sec.hint : sec.kind === "sponsor" && sponsor?.copy?.trim() ? sponsorBlock(sponsor.copy, sponsor.landingUrl) : (byKey.get(sec.key) ?? "")}
+          isSponsor={sec.kind === "sponsor"}
+          edit={edit}
+        >
           {content ?? emptySectionHint(sec.hint)}
           {part.addPoints.length > 0 && (
             <span className="mb-3 flex flex-wrap items-center justify-center gap-1.5">
@@ -162,6 +192,40 @@ function HtmlEmailPreview({
         <div key={`b-${i}`} style={boxStyle(b.color) as CSSProperties}>
           {render(b.children)}
         </div>
+      ) : canEditDesign ? (
+        editState(b.path) === "hidden" ? null : editState(b.path) === "editor" ? (
+          <LayoutEditor
+            key={`edit-${b.path.join(".")}`}
+            inline
+            layout={designEdit!.doc}
+            sections={template.sections}
+            selected={null}
+            onSelectSlot={() => undefined}
+            onChange={(doc) => {
+              const nodes = doc.content ?? [];
+              edit!.onChangeDesign!(designEdit!.path, nodes, designEdit!.count);
+              setDesignEdit((cur) => (cur ? { ...cur, count: nodes.length } : cur));
+            }}
+            onDone={() => {
+              setDesignEdit(null);
+              edit!.onDoneEditing();
+            }}
+          />
+        ) : (
+          <div
+            key={`f-${i}`}
+            role="button"
+            tabIndex={0}
+            title="Click to edit (this issue only — the template stays as it is)"
+            onClick={(e) => {
+              e.stopPropagation();
+              startDesignEdit(b.path);
+            }}
+            className="-mx-2 cursor-text rounded-md px-2 hover:outline-2 hover:outline-dashed hover:outline-[#49adff]/60"
+          >
+            <div dangerouslySetInnerHTML={{ __html: b.html }} />
+          </div>
+        )
       ) : (
         <FixedPart key={`f-${i}`} edit={edit} reason="Part of the template's design — edit the template to change it" onSelect={edit?.onEditTemplate}>
           <div dangerouslySetInnerHTML={{ __html: b.html }} />

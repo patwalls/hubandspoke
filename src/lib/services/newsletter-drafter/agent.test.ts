@@ -75,3 +75,15 @@ describe("phaseFor (the editor's progress bar)", () => {
     expect(phaseFor(["get_video_transcript"], true)).toEqual({ phase: "reviewing", detail: "Revising" });
   });
 });
+
+describe("pinnedStoryInstruction (Find new story → the editor picked one)", () => {
+  it("names the story, how to read it, and the source to set", async () => {
+    const { pinnedStoryInstruction } = await import("./agent");
+    const v = pinnedStoryInstruction({ kind: "video", key: "video:abc", title: "The $50K app", url: "https://youtu.be/x", productionItemId: "abc" }, "shorter");
+    expect(v).toContain('"The $50K app"');
+    expect(v).toContain("get_video_transcript (production_item_id abc)");
+    expect(v).toContain("The editor's steer: shorter");
+    const c = pinnedStoryInstruction({ kind: "case_study", key: "case:/stories/x", title: "X", url: "https://www.starterstory.com/stories/x", productionItemId: null });
+    expect(c).toContain("web_fetch (https://www.starterstory.com/stories/x)");
+  });
+});

@@ -1,0 +1,1 @@
+ALTER TABLE "newsletter_drafts" ADD COLUMN "layout" jsonb;

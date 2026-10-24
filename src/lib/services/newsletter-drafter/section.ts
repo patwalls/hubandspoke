@@ -9,7 +9,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { brands, formats, newsletterDrafts } from "@/lib/db/schema";
 import { composeIssue, templateFor, type NewsletterSection } from "@/lib/newsletter-template";
-import { NewsletterCancelledError, regenerateSection, storyKeyOf } from "./agent";
+import { NewsletterCancelledError, regenerateSection, storyKeyOf, type PinnedStory } from "./agent";
 import { blockedKeys, loadUsage, usageGroupFor, withInferredSources } from "./usage";
 import { formatConfigFor } from "./format-config";
 import { loadSourceVideo } from "./run";
@@ -61,7 +61,7 @@ export async function regenerateDraftSection(
   newsletterDraftId: string,
   sectionKey: string,
   instruction: string | null,
-  opts: { signal?: AbortSignal; newStory?: boolean; log?: (msg: string) => void } = {},
+  opts: { signal?: AbortSignal; newStory?: boolean; story?: PinnedStory | null; log?: (msg: string) => void } = {},
 ): Promise<{ ok: boolean; reason?: string }> {
   const [row] = await db
     .select({
@@ -110,7 +110,7 @@ export async function regenerateDraftSection(
     const usage = video ? undefined : await loadUsage(usageGroupFor(row.formatName), { excludeDraftId: row.id });
     const blocked = usage ? blockedKeys(usage, row.sendDate) : undefined;
     if (pillar) blocked?.delete(`video:${pillar.productionItemId}`);
-    const exclude = opts.newStory ? newStoryExclusions(row.sections, sectionKey) : null;
+    const exclude = opts.newStory || opts.story ? newStoryExclusions(row.sections, sectionKey) : null;
     // Find new story: the same suggested lineup as the draft, so the swap looks in the right place.
     const storyPlan =
       exclude && !video
@@ -146,7 +146,8 @@ export async function regenerateDraftSection(
       instruction,
       usage,
       blocked,
-      newStoryExclude: exclude,
+      newStoryExclude: opts.story ? null : exclude,
+      pinnedStory: opts.story ?? null,
       storyPlan,
       log: opts.log,
       shouldStop: async () => !(await stillWanted(row.id, sectionKey)),
@@ -160,7 +161,7 @@ export async function regenerateDraftSection(
       newKey && result.source
         ? { kind: result.source.kind, key: newKey, title: result.source.title ?? null, url: result.source.url ?? null }
         : (prev?.source ?? null);
-    const tried = opts.newStory && prev?.source?.key ? [...new Set([...(prev.tried ?? []), prev.source.key])] : prev?.tried;
+    const tried = (opts.newStory || opts.story) && prev?.source?.key ? [...new Set([...(prev.tried ?? []), prev.source.key])] : prev?.tried;
     const sections = withPlanDates(spliceSection(row.sections, sectionKey, result.markdown, { source, ...(tried ? { tried } : {}) }), storyPlan);
     await db
       .update(newsletterDrafts)
@@ -173,7 +174,7 @@ export async function regenerateDraftSection(
       .where(and(eq(newsletterDrafts.id, row.id), sql`jsonb_exists(${newsletterDrafts.regenerating}, ${sectionKey})`));
     await clearRegenerating(row.id, sectionKey, null);
     // New placeholders get frames picked; a new story means a new video, so its old picks go.
-    if (opts.newStory) await dropSectionScreenshots(row.id, sectionKey);
+    if (opts.newStory || opts.story) await dropSectionScreenshots(row.id, sectionKey);
     await autoPickScreenshotsSafely(row.id, opts.log);
     return { ok: true };
   } catch (err) {
