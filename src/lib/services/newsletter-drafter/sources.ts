@@ -295,7 +295,12 @@ export async function listOlderVideos(brand: string, before: Date, limit = 120):
   }));
 }
 
-/** Search the whole Starter Story case-study catalog by topic / business / founder (content API title search). */
-export async function searchCaseStudies(query: string): Promise<ContentResult[]> {
-  return (await searchContent({ q: query, limit: 25 })).filter((r) => r.url);
+/**
+ * Search the Starter Story catalog by topic / business / founder (the content
+ * API matches business names and titles). `all`: every editorial story, not
+ * only interview + breakdown episodes — written case studies too (the
+ * editor's Find new story search).
+ */
+export async function searchCaseStudies(query: string, opts: { all?: boolean } = {}): Promise<ContentResult[]> {
+  return (await searchContent({ q: query, limit: 25, all: opts.all })).filter((r) => r.url);
 }

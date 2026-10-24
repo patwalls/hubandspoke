@@ -74,7 +74,7 @@ export async function listStoryOptions(args: { brand: string; formatName: string
   const [vids, cases] = await Promise.all([
     videos(args.brand, q ? { q } : { sinceDays: RECOMMEND_VIDEO_DAYS }),
     withCases
-      ? (q ? searchCaseStudies(q) : listRecentCaseStudies({ start: new Date(now - RECOMMEND_CASE_DAYS * DAY_MS), end: new Date(now) })).catch(() => [])
+      ? (q ? searchCaseStudies(q, { all: true }) : listRecentCaseStudies({ start: new Date(now - RECOMMEND_CASE_DAYS * DAY_MS), end: new Date(now) })).catch(() => [])
       : Promise.resolve([]),
   ]);
   const opt = (o: Omit<StoryOption, "timesRun" | "lastRun" | "blocked" | "inIssue">): StoryOption => {
