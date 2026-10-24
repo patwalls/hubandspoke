@@ -181,9 +181,13 @@ function HtmlEmailPreview({
         `}</style>
       )}
       <div
-        style={{ width, maxWidth: "100%", margin: "0 auto", background: parts.background, border: "1px solid #eaf0f6", borderRadius: 12, overflow: "hidden", transition: "width .2s ease" }}
+        style={{ width, maxWidth: "100%", margin: "0 auto", background: parts.background, border: "1px solid #eaf0f6", borderRadius: 12, overflow: "visible", transition: "width .2s ease" }}
       >
-        <div className="nlc-canvas" style={parts.bodyStyle as CSSProperties}>
+        <div
+          className="nlc-canvas"
+          // The in-place editor (rich-section-editor.tsx) draws links, headings and buttons in the email's colors.
+          style={{ ...(parts.bodyStyle as CSSProperties), ["--nl-link" as string]: st.linkColor, ["--nl-heading" as string]: st.headingColor, ["--nl-button" as string]: st.buttonColor ?? st.linkColor }}
+        >
           {parts.masthead && (
             <FixedPart edit={edit} reason="Masthead: set in the template's Look" onSelect={edit?.onSelectLook}>
               <div dangerouslySetInnerHTML={{ __html: parts.masthead }} />

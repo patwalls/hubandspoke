@@ -13,7 +13,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { AlertTriangle, Check, CheckCircle2, CircleAlert, Eye, ExternalLink, FileText, History, LayoutTemplate, Lightbulb, ListChecks, Loader2, Mail, Monitor, MoreHorizontal, MousePointerClick, RefreshCw, Shuffle, Smartphone, SpellCheck, Sparkles, Wand2, X } from "lucide-react";
+import { AlertTriangle, Check, CheckCircle2, CircleAlert, Eye, ExternalLink, History, LayoutTemplate, Lightbulb, ListChecks, Loader2, Mail, Monitor, MoreHorizontal, MousePointerClick, RefreshCw, Shuffle, Smartphone, SpellCheck, Sparkles, Wand2, X } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -25,6 +25,7 @@ import { composeIssue, type NewsletterSection, type NewsletterTemplate } from "@
 import { EmailPreview, FOOTER_NOTE, MOBILE_WIDTH } from "@/components/dashboard/email-preview";
 import { EMAIL_WIDTH, renderEmailHtml } from "@/lib/newsletter-email-html";
 import { formatShortcut, useInlineFormat } from "@/components/dashboard/editable-section";
+import { RichSectionEditor } from "@/components/dashboard/rich-section-editor";
 import { ImagePanel, ScreenshotMarkPanel, ScreenshotPicker, useScreenshots } from "@/components/dashboard/newsletter-screenshot-picker";
 import { isVideoThumbnail } from "@/components/dashboard/preview-screenshots";
 import { formatTimestamp, insertStepScreenshot, parseScreenshotMarks, removeScreenshotMark, screenshotKey, stepsWithoutScreenshots, type ScreenshotMark } from "@/lib/newsletter-screenshots";
@@ -523,10 +524,10 @@ function Workspace({
                 <MoreHorizontal />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="min-w-56">
-                {draft.template && (
-                  <DropdownMenuItem onClick={() => setView((v) => (v === "visual" ? "text" : "visual"))} className="cursor-pointer gap-2">
-                    {view === "visual" ? <FileText className="size-4" /> : <LayoutTemplate className="size-4" />}
-                    {view === "visual" ? "Text view" : "Visual view"}
+                {draft.template && view === "text" && (
+                  <DropdownMenuItem onClick={() => setView("visual")} className="cursor-pointer gap-2">
+                    <LayoutTemplate className="size-4" />
+                    Visual view
                   </DropdownMenuItem>
                 )}
                 <DropdownMenuItem onClick={redraft} disabled={busyAction !== null} className="cursor-pointer gap-2">
@@ -813,6 +814,11 @@ function Workspace({
                 },
                 onAddShot: (key, n) => void addShot(key, n),
                 addingShot,
+                shotUrl: (sectionKey, label) => {
+                  const k = screenshotKey(sectionKey, label);
+                  const c = shots.chosen[k];
+                  return c ? shots.urlFor(c, k) : null;
+                },
                 onDropImage: (key, index, file) => {
                   setEditingSection(null);
                   void imageToPlaceholder(key, index).then((markKey) => {
@@ -863,12 +869,12 @@ function Workspace({
                 onRegenerate={(instruction) => regenerate(selSection.key, instruction)}
                 source={draft.kind === "roundup" ? (sections.find((x) => x.key === selSection.key)?.source ?? null) : null}
                 usage={draft.sectionUsage?.[selSection.key] ?? null}
-                onFindNewStory={draft.kind === "roundup" ? (instruction) => regenerate(selSection.key, instruction, true) : undefined}
+                onFindNewStory={draft.kind === "roundup" && !draft.sourceItemId ? (instruction) => regenerate(selSection.key, instruction, true) : undefined}
                 onCancel={() => cancelRun(selSection.key)}
               />
               <p className="text-xs text-muted-foreground">
                 {editingSection === selSection.key
-                  ? "Typing in the email edits this section. Select words for Bold / Italic (or ⌘B / ⌘I); [text](link) and “- ” bullets work. Images show as [🖼 …]. Click outside to finish; it saves on its own."
+                  ? "You're editing the email itself: the toolbar above the text does bold, italic, links, headings, lists, buttons, images and the reader's first name (⌘B / ⌘I work too). Click outside or press Esc to finish; it saves on its own."
                   : "Click the section in the email to edit its text."}
               </p>
             </>
@@ -982,7 +988,7 @@ function Workspace({
               <Textarea className="min-h-16 text-xs" placeholder="An offer to pitch, an angle, a story to feature — Regenerate and Redraft read this." value={notes} onChange={(e) => setNotes(e.target.value)} />
             </label>
             <p className="rounded-md bg-muted/60 p-3 text-xs text-muted-foreground">
-              Click any part of the email to edit it. Text opens right where it is, with Regenerate{draft.kind === "roundup" ? " and Find new story" : ""} here{hasShots ? "; a screenshot opens its video scrubber, frames, Upload and Remove" : ""}. Locked parts (headings, labels, masthead, footer) come from the template.
+              Click any part of the email to edit it. Text opens right where it is, with Regenerate{draft.kind === "roundup" && !draft.sourceItemId ? " and Find new story" : ""} here{hasShots ? "; a screenshot opens its video scrubber, frames, Upload and Remove" : ""}. Locked parts (headings, labels, masthead, footer) come from the template.
             </p>
             {sourcesList}
           </>
@@ -1098,7 +1104,7 @@ function Workspace({
                     onRegenerate={(instruction) => regenerate(sec.key, instruction)}
                     source={draft.kind === "roundup" ? (sections.find((x) => x.key === sec.key)?.source ?? null) : null}
                     usage={draft.sectionUsage?.[sec.key] ?? null}
-                    onFindNewStory={draft.kind === "roundup" ? (instruction) => regenerate(sec.key, instruction, true) : undefined}
+                    onFindNewStory={draft.kind === "roundup" && !draft.sourceItemId ? (instruction) => regenerate(sec.key, instruction, true) : undefined}
                     onCancel={() => cancelRun(sec.key)}
                   >
                     {hasShots && (
@@ -1794,9 +1800,9 @@ function SponsorSection({
         </div>
       </div>
       {fromAsana ? (
-        <Textarea className="min-h-28 text-xs" value={copy} onChange={(e) => setCopy(e.target.value)} />
+        <RichSectionEditor key="asana" standalone autoFocus={false} markdown={copy} onChange={setCopy} placeholder="The sponsor's copy" />
       ) : (
-        <Textarea className="min-h-28 font-mono text-xs" value={agentMarkdown} onChange={(e) => setAgentMarkdown(e.target.value)} />
+        <RichSectionEditor key="agent" standalone autoFocus={false} markdown={agentMarkdown} onChange={setAgentMarkdown} placeholder="The sponsored section" />
       )}
       {draft.specialSource?.landingUrl && <span className="break-all text-xs text-muted-foreground">Landing page: {draft.specialSource.landingUrl}</span>}
     </div>

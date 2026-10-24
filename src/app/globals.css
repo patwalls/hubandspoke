@@ -193,6 +193,81 @@
 .tiptap img {
   @apply rounded border border-border max-w-full sm:max-w-sm h-auto my-2 block;
 }
+/* The newsletter editor's in-place text (rich-section-editor.tsx): the email's own
+   type scale (newsletter-email-html.ts tokens), not the comment box's compact one. */
+.tiptap.nl-rich p {
+  margin: 0 0 16px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+.tiptap.nl-rich > :last-child {
+  margin-bottom: 0;
+}
+.tiptap.nl-rich h2 {
+  margin: 20px 0 10px;
+  font-size: 21px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--nl-heading, #111);
+}
+.tiptap.nl-rich h3 {
+  margin: 16px 0 8px;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--nl-heading, #111);
+}
+.tiptap.nl-rich ul,
+.tiptap.nl-rich ol {
+  margin: 0 0 16px;
+  padding-left: 24px;
+}
+.tiptap.nl-rich li {
+  margin: 0 0 8px;
+}
+.tiptap.nl-rich li > p {
+  margin: 0;
+}
+.tiptap.nl-rich a {
+  color: var(--nl-link, #197bbd);
+  text-decoration: underline;
+  word-break: normal;
+}
+.tiptap.nl-rich blockquote {
+  margin: 0 0 16px;
+  padding-left: 16px;
+  border-left: 3px solid #e5e7eb;
+  font-style: italic;
+  color: #4b5563;
+}
+.tiptap.nl-rich hr {
+  margin: 24px 0;
+  border: 0;
+  border-top: 1px solid #e5e7eb;
+}
+.tiptap.nl-rich img {
+  max-width: 100%;
+  width: 100%;
+  border: 0;
+  margin: 0;
+  border-radius: 10px;
+}
+.tiptap.nl-rich .react-renderer {
+  display: block;
+  width: 100%;
+}
+.tiptap.nl-rich .ProseMirror-selectednode > [data-node-view-wrapper] {
+  outline: 2px solid #49adff;
+  outline-offset: 2px;
+  border-radius: 12px;
+}
+.tiptap.nl-rich p.is-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+  color: #9ca3af;
+}
 .tippy-box {
   background: transparent;
 }

@@ -9,14 +9,16 @@
 // section edits its instructions instead of its text. Fixed parts of the
 // email (masthead, footer, labels and headings the template sets) render
 // through FixedPart: locked with a note in a draft, selectable in the
-// template editor when the template owns them. While typing a draft, a
-// selection gets a small Bold / Italic toolbar (and Cmd+B / Cmd+I), and
-// images show as short "[🖼 …]" tokens instead of their URLs.
+// template editor when the template owns them. A draft section opens in a
+// WYSIWYG editor (rich-section-editor.tsx) that looks like the email — no
+// Markdown on screen.
 
-import { useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { AtSign, Bold, Camera, Heading2, Italic, Link2, List, ListOrdered, Loader2, Lock, Minus, Quote, RectangleHorizontal, Sparkles } from "lucide-react";
+import { useLayoutEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
+import { Loader2, Lock, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { collapseImages, expandImages, insertBlock, prefixLines, toggleInline, wrapLink, type Edited, type InlineMark } from "@/lib/markdown-format";
+import { toggleInline, type Edited, type InlineMark } from "@/lib/markdown-format";
+import { screenshotKey } from "@/lib/newsletter-screenshots";
+import { RichSectionEditor } from "@/components/dashboard/rich-section-editor";
 
 export interface PreviewEditing {
   /** "draft" (default): edit drafted text. "template": edit each section's instructions. */
@@ -40,6 +42,8 @@ export interface PreviewEditing {
   /** Draft: "+ Add screenshot" under step `n` of a section with screenshots (`busy`: which one is being added, as "<sectionKey>:<n>"). */
   onAddShot?: (sectionKey: string, n: number) => void;
   addingShot?: string | null;
+  /** Draft: the picked image for a screenshot spot (the in-place editor shows it). */
+  shotUrl?: (sectionKey: string, label: string) => string | null;
   /** Template editor: the template is locked (structure can't change; FixedParts show a lock). */
   structureLocked?: boolean;
   /** Template editor: a beehiiv card, or the email's look (masthead, images, poll), was clicked. */
@@ -76,7 +80,22 @@ export function EditableSection({
         className={TEXTAREA}
       />
     ) : (
-      <DraftTextBox markdown={markdown} onChange={(md) => edit.onChangeSection(sectionKey, md)} onDone={edit.onDoneEditing} />
+      <RichSectionEditor
+        markdown={markdown}
+        onChange={(md) => edit.onChangeSection(sectionKey, md)}
+        onDone={edit.onDoneEditing}
+        hooks={{
+          shotUrl: (label) => edit.shotUrl?.(sectionKey, label) ?? null,
+          onOpenShot: (label) => {
+            edit.onDoneEditing();
+            edit.onSelectShot(sectionKey, screenshotKey(sectionKey, label));
+          },
+          onOpenImage: (index) => {
+            edit.onDoneEditing();
+            edit.onSelectImage?.(sectionKey, index);
+          },
+        }}
+      />
     );
   }
   return (
@@ -146,127 +165,6 @@ export function useInlineFormat() {
     return r.value;
   };
   return { ref, apply, edit };
-}
-
-/** A toolbar button: keeps the text box focused (a blur would close it). */
-function Btn({ title, onClick, children }: { title: string; onClick: () => void; children: ReactNode }) {
-  return (
-    <button type="button" title={title} onMouseDown={(e) => e.preventDefault()} onClick={onClick} className="flex size-7 items-center justify-center rounded text-[#222] hover:bg-[#eef6ff]">
-      {children}
-    </button>
-  );
-}
-const Sep = () => <span className="mx-0.5 h-4 w-px bg-[#e5e7eb]" />;
-
-/** The in-place text box's toolbar: inline marks, links, blocks, a button, an image spot, a personalization token. */
-function Toolbar({ text, onChange, edit }: { text: string; onChange: (next: string) => void; edit: ReturnType<typeof useInlineFormat>["edit"] }) {
-  const [linkUrl, setLinkUrl] = useState<string | null>(null);
-  const run = (fn: (value: string, start: number, end: number) => Edited) => {
-    const next = edit(text, fn);
-    if (next != null) onChange(next);
-  };
-  return (
-    <div className="absolute -top-9 right-0 z-20 flex items-center gap-0.5 rounded-md border bg-white p-0.5 shadow-md" onMouseDown={(e) => e.stopPropagation()}>
-      {linkUrl !== null ? (
-        <form
-          className="flex items-center gap-1 px-1"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (linkUrl.trim()) run((v, s0, e0) => wrapLink(v, s0, e0, linkUrl.trim()));
-            setLinkUrl(null);
-          }}
-        >
-          <Link2 className="size-3.5 text-[#6b7280]" />
-          <input
-            autoFocus
-            value={linkUrl}
-            onChange={(e) => setLinkUrl(e.target.value)}
-            onKeyDown={(e) => e.key === "Escape" && setLinkUrl(null)}
-            placeholder="https://…"
-            className="h-6 w-56 rounded border px-1.5 text-[12px] outline-none focus:border-[#49adff]"
-          />
-          <button type="submit" className="rounded bg-[#49adff] px-2 py-0.5 text-[11px] font-medium text-white">
-            Link
-          </button>
-        </form>
-      ) : (
-        <>
-          <Btn title="Bold (⌘B)" onClick={() => run((v, s0, e0) => toggleInline(v, s0, e0, "**"))}>
-            <Bold className="size-4" />
-          </Btn>
-          <Btn title="Italic (⌘I)" onClick={() => run((v, s0, e0) => toggleInline(v, s0, e0, "*"))}>
-            <Italic className="size-4" />
-          </Btn>
-          <Btn title="Link the selected words" onClick={() => setLinkUrl("")}>
-            <Link2 className="size-4" />
-          </Btn>
-          <Sep />
-          <Btn title="Heading" onClick={() => run((v, s0, e0) => prefixLines(v, s0, e0, "## "))}>
-            <Heading2 className="size-4" />
-          </Btn>
-          <Btn title="Bulleted list" onClick={() => run((v, s0, e0) => prefixLines(v, s0, e0, "- "))}>
-            <List className="size-4" />
-          </Btn>
-          <Btn title="Numbered list" onClick={() => run((v, s0, e0) => prefixLines(v, s0, e0, (i) => `${i + 1}. `))}>
-            <ListOrdered className="size-4" />
-          </Btn>
-          <Btn title="Quote" onClick={() => run((v, s0, e0) => prefixLines(v, s0, e0, "> "))}>
-            <Quote className="size-4" />
-          </Btn>
-          <Sep />
-          <Btn title="Button (a link drawn as a button)" onClick={() => run((v, s0, e0) => insertBlock(v, e0, `[button: ${v.slice(s0, e0) || "Read the story"}](https://)`))}>
-            <RectangleHorizontal className="size-4" />
-          </Btn>
-          <Btn title="Image spot — click it in the email to upload or pick a frame" onClick={() => run((v, _s0, e0) => insertBlock(v, e0, `*[Screenshot: Image ${(v.match(/\[Screenshot/g)?.length ?? 0) + 1}]*`))}>
-            <Camera className="size-4" />
-          </Btn>
-          <Btn title="Divider" onClick={() => run((v, _s0, e0) => insertBlock(v, e0, "---"))}>
-            <Minus className="size-4" />
-          </Btn>
-          <Sep />
-          <Btn title="First name (HubSpot fills it in; 'there' when unknown)" onClick={() => run((v, _s0, e0) => ({ value: `${v.slice(0, e0)}{{first_name}}${v.slice(e0)}`, start: e0 + 14, end: e0 + 14 }))}>
-            <AtSign className="size-4" />
-          </Btn>
-        </>
-      )}
-    </div>
-  );
-}
-
-/** A draft section open for typing: images as tokens, and the formatting toolbar (marks, links, lists, button, image spot, first name). */
-function DraftTextBox({ markdown, onChange, onDone }: { markdown: string; onChange: (md: string) => void; onDone: () => void }) {
-  // One token map per editing session (the box remounts each time it opens).
-  const [tokens] = useState(() => new Map<string, string>());
-  const text = collapseImages(markdown, tokens);
-  const { ref, apply, edit } = useInlineFormat();
-  const format = (mark: InlineMark) => {
-    const next = apply(text, mark);
-    if (next != null) onChange(expandImages(next, tokens));
-  };
-  return (
-    <div className="relative" onClick={(e) => e.stopPropagation()}>
-      <Toolbar text={text} onChange={(next) => onChange(expandImages(next, tokens))} edit={edit} />
-      <textarea
-        ref={ref}
-        autoFocus
-        value={text}
-        onChange={(e) => onChange(expandImages(e.target.value, tokens))}
-        onKeyDown={(e) => {
-          const mark = formatShortcut(e);
-          if (!mark) return;
-          e.preventDefault();
-          format(mark);
-        }}
-        // The link field in the toolbar takes focus for a moment; only a real click-away finishes.
-        onBlur={(e) => {
-          const to = e.relatedTarget as HTMLElement | null;
-          if (to && e.currentTarget.parentElement?.contains(to)) return;
-          onDone();
-        }}
-        className={TEXTAREA}
-      />
-    </div>
-  );
 }
 
 /** Template editor: who fills this section in each issue. */
