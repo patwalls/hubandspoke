@@ -81,6 +81,14 @@ export function splitStepTitles(md: string): string {
     .join("\n");
 }
 
+/** "- Kevin" / "- Saj" on its own line: the intro's sign-off, not a one-item list. */
+const SIGNOFF = /^-\s+(Saj|Kevin)$/;
+
+/** Markdown with the sign-off escaped ("\\- Kevin") so a Markdown renderer keeps it a line. Pure. */
+export function keepSignoff(md: string): string {
+  return md.replace(new RegExp(SIGNOFF.source, "gm"), "\\- $1");
+}
+
 /**
  * A section's bullets laid out as its template's `bullets` setting says (see
  * sectionSchema): "lines" joins a run of bullets (or ✅-led lines) into one
@@ -165,7 +173,7 @@ export function markdownToBlocks(md: string, opts: { buttons?: boolean; buttonCo
     }
     const bullet = line.match(/^[-*•]\s+(.*)$/);
     // "- Saj" / "- Kevin": the intro's sign-off, not a one-item list.
-    if (bullet && !/^-\s+(Saj|Kevin)$/.test(line)) {
+    if (bullet && !SIGNOFF.test(line)) {
       list.push(inlineRuns(bullet[1]));
       continue;
     }

@@ -3,7 +3,6 @@ import { desc, eq } from "drizzle-orm";
 import { requireFeature } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
 import { formats, newsletterTemplateProposals } from "@/lib/db/schema";
-import { isFeatureEnabled } from "@/lib/feature-flags";
 import { enqueue } from "@/jobs/enqueue";
 import { templateFor } from "@/lib/newsletter-template";
 
@@ -37,7 +36,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
   return NextResponse.json({ proposal: await latest(id) });
 }
 
-/** Learn a template from the format's past issues on the worker (`newsletter-template-learn`). A locked template: admins only. */
+/** Learn a template from the format's past issues on the worker (`newsletter-template-learn`). */
 export async function POST(_request: NextRequest, context: RouteContext) {
   const guard = await requireFeature("newsletterDrafter");
   if (guard.response) return guard.response;
@@ -46,9 +45,6 @@ export async function POST(_request: NextRequest, context: RouteContext) {
   if (!f) return NextResponse.json({ error: "Not found" }, { status: 404 });
   const current = templateFor(f.name, f.saved);
   if (!current) return NextResponse.json({ error: "This format has no newsletter template yet" }, { status: 409 });
-  if (current.locked && !isFeatureEnabled("newsletterTemplateAdmin", guard.session.user)) {
-    return NextResponse.json({ error: "This template is locked. Contact Sam to learn a new one." }, { status: 403 });
-  }
   const cur = await latest(id);
   if (cur?.status === "pending") return NextResponse.json({ proposal: cur }, { status: 200 });
   const [row] = await db

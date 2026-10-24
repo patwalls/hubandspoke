@@ -1,9 +1,11 @@
 // The newsletter as the email that lands in the inbox: Markdown (what the
 // drafter writes and the editor edits) + the format's template → table-based
 // HTML with every style inline, the way mail clients (Gmail, Outlook, Apple
-// Mail, phones) render reliably. No <style> block, no classes, no web fonts:
-// system fonts, fluid 600px tables, bulletproof buttons, images that shrink
-// to the phone's width.
+// Mail, phones) render reliably. No <style> block, no classes: font stacks
+// that fall back to what every client has, fluid 600px tables, bulletproof
+// buttons, images that shrink to the phone's width. A full document links the
+// Google font a style names first (Poppins, Open Sans…) — Apple Mail and iOS
+// use it, Gmail and Outlook fall back down the stack.
 //
 // ONE renderer, three readers, so nothing can drift: the editor's canvas
 // (renderEmailParts — the same HTML, section by section, with click targets
@@ -16,7 +18,8 @@
 import { Marked, type Tokens } from "marked";
 import { replaceScreenshotMarks, screenshotKey, stepsWithoutScreenshots, type ChosenScreenshot, type StepSpot } from "@/lib/newsletter-screenshots";
 import { sponsorBlock, type NewsletterSection, type NewsletterStyle, type NewsletterTemplate, type NewsletterTemplateSection } from "@/lib/newsletter-template";
-import { layoutFor } from "@/lib/newsletter-layout";
+import { beehiivButtonKeys, layoutFor } from "@/lib/newsletter-layout";
+import { keepSignoff, layoutSection } from "@/lib/beehiiv-blocks";
 import { docToMarkdown, type DocNode } from "@/lib/newsletter-rich-doc";
 
 /** The email's width in a desktop client; phones get 100%. */
@@ -85,16 +88,27 @@ export interface RenderEmailArgs {
 // Every visual decision, as inline `style=""` text. Font family repeats on
 // every text element because Outlook doesn't inherit it through tables.
 
+/** A bordered card's soft lift (Apple Mail, iOS; Gmail drops it, harmlessly). */
+const CARD_SHADOW = "0 2px 10px rgba(39,54,83,0.07)";
+
+/** The email's frame: a faint border, unless the email is the page's own color (cards on a page). */
+export function frameBorder(st: NewsletterStyle): string {
+  return st.contentBackground.toLowerCase() === st.pageBackground.toLowerCase() ? "" : "border:1px solid #eaf0f6;";
+}
+
 function tokens(st: NewsletterStyle) {
   const F = `font-family:${st.fontFamily};`;
+  /** Headings, labels and buttons: the heading font when the style has one. */
+  const HF = `font-family:${st.headingFont ?? st.fontFamily};`;
   const text = `${F}font-size:16px;line-height:1.6;color:${st.textColor};`;
   const button = st.buttonColor ?? st.linkColor;
   return {
     F,
+    HF,
     text,
     button,
     p: `margin:0 0 16px 0;${text}`,
-    h: (level: 1 | 2 | 3) => `margin:${level === 1 ? 24 : 20}px 0 ${level === 3 ? 8 : 10}px 0;${F}font-size:${level === 1 ? 24 : level === 2 ? 21 : 18}px;font-weight:700;line-height:1.3;color:${st.headingColor};`,
+    h: (level: 1 | 2 | 3) => `margin:${level === 1 ? 24 : 20}px 0 ${level === 3 ? 8 : 10}px 0;${HF}font-size:${level === 1 ? 26 : level === 2 ? (st.headingWeight < 700 ? 24 : 21) : 18}px;font-weight:${level === 3 ? 700 : st.headingWeight};line-height:1.3;color:${st.headingColor};`,
     // list-style spelled out: some clients (and the app's own CSS reset) strip bullets otherwise.
     ul: (ordered: boolean) => `margin:0 0 16px 0;padding:0 0 0 24px;list-style-type:${ordered ? "decimal" : "disc"};${text}`,
     li: `margin:0 0 8px 0;${text}`,
@@ -105,12 +119,15 @@ function tokens(st: NewsletterStyle) {
     pre: `margin:0 0 16px 0;padding:14px 16px;background:#f3f4f6;border-radius:8px;font-family:Menlo,Consolas,monospace;font-size:13px;line-height:1.5;color:${st.textColor};white-space:pre-wrap;`,
     hr: `border:0;border-top:1px solid ${RULE};margin:24px 0;`,
     hint: `margin:0 0 16px 0;${F}font-size:15px;line-height:1.5;color:#9ca3af;font-style:italic;`,
-    pill: (color: string) => `background:${color};border-radius:8px;padding:8px 14px;${F}font-size:19px;font-weight:700;line-height:1.2;color:${st.headingColor};`,
-    plainHeading: (level: 2 | 3) => `margin:0 0 12px 0;${F}font-size:${level === 2 ? 22 : 18}px;font-weight:700;line-height:1.3;color:${st.headingColor};`,
+    pill: (color: string) => `background:${color};border-radius:8px;padding:8px 14px;${HF}font-size:19px;font-weight:700;line-height:1.2;color:${st.headingColor};`,
+    plainHeading: (level: 2 | 3, color?: string | null) => `margin:0 0 12px 0;${HF}font-size:${level === 2 ? (st.headingWeight < 700 ? 24 : 22) : 18}px;font-weight:${level === 2 ? st.headingWeight : 700};line-height:1.3;color:${color ?? st.headingColor};`,
+    /** A card's small label ("ChatGPT Work Guide", "Free Resource"). */
+    eyebrow: (color?: string | null) => `margin:0 0 8px 0;${HF}font-size:14px;font-weight:700;line-height:1.3;letter-spacing:0.01em;color:${color ?? st.linkColor};`,
     label: (color: string) => `background:${color};border-radius:6px;padding:6px 10px;${F}font-size:13px;font-weight:700;line-height:1.2;color:${st.headingColor};`,
-    box: (color: string) => `background:${color};border-radius:12px;padding:20px 22px 6px 22px;`,
+    box: (color: string, border?: string | null) =>
+      border ? `background:${color};border:2px solid ${border};border-radius:10px;padding:22px 24px 8px 24px;box-shadow:${CARD_SHADOW};` : `background:${color};border-radius:12px;padding:20px 22px 6px 22px;`,
     buttonCell: `background:${button};border-radius:8px;`,
-    buttonLink: `display:inline-block;padding:13px 26px;${F}font-size:16px;font-weight:700;line-height:1.2;color:#ffffff;text-decoration:none;border-radius:8px;`,
+    buttonLink: `display:inline-block;padding:13px 26px;${HF}font-size:16px;font-weight:700;line-height:1.2;color:#ffffff;text-decoration:none;border-radius:8px;`,
     masthead: `background:${st.mastheadBackground ?? "transparent"};border-radius:12px;text-align:center;padding:0;`,
     mastheadImg: `display:block;width:100%;max-width:${CONTENT_WIDTH}px;height:auto;border:0;border-radius:12px;margin:0 auto;`,
     body: bodyStyle(st),
@@ -278,7 +295,7 @@ export interface EmailSectionPart {
 export type EmailBlock =
   | { kind: "fixed"; html: string; node: string; path: number[] }
   | ({ kind: "slot" } & EmailSectionPart)
-  | { kind: "box"; color: string; children: EmailBlock[] };
+  | { kind: "box"; color: string; border: string | null; children: EmailBlock[] };
 
 export interface EmailParts {
   blocks: EmailBlock[];
@@ -288,15 +305,20 @@ export interface EmailParts {
 }
 
 /** A tinted box (a layout `callout`), as React style for the canvas. */
-export function boxStyle(color: string): Record<string, string> {
-  return { background: color, borderRadius: "12px", padding: "20px 22px 6px 22px", marginBottom: "16px" };
+export function boxStyle(color: string, border?: string | null): Record<string, string> {
+  return border
+    ? { background: color, border: `2px solid ${border}`, borderRadius: "10px", padding: "22px 24px 8px 24px", marginBottom: "20px", boxShadow: CARD_SHADOW }
+    : { background: color, borderRadius: "12px", padding: "20px 22px 6px 22px", marginBottom: "16px" };
 }
 
 /** One section's slot content. */
 function slotPart(args: RenderEmailArgs, sec: NewsletterTemplateSection, t: ReturnType<typeof tokens>): EmailSectionPart {
   const st = args.template.style;
-  const md = sectionMarkdown(args, sec);
-  let content = md ? markdownToEmailHtml(md, st, { buttons: sec.linkButtons, canvas: args.canvas, inline: sec.look === "label", personalization: args.personalization }) : "";
+  const raw = sectionMarkdown(args, sec);
+  // beehiiv-style templates lay their bullets / step titles out the way the Kevin/Saj emails do.
+  const md = raw && args.template.beehiiv ? keepSignoff(layoutSection(raw, sec.bullets)) : raw;
+  const buttons = sec.linkButtons || beehiivButtonKeys(args.template).has(sec.key);
+  let content = md ? markdownToEmailHtml(md, st, { buttons, canvas: args.canvas, inline: sec.look === "label", personalization: args.personalization }) : "";
   if (!content && args.showHints) {
     const sample = (title: string, body: string) =>
       `<div style="margin:4px 0 16px 0;padding:22px 24px;border:2px dashed #c7d2dc;border-radius:10px;background:#f7fafc;text-align:center;${t.F}font-size:13px;line-height:1.5;color:#6b7280;"><strong>${title}</strong><br>${body}</div>`;
@@ -307,6 +329,18 @@ function slotPart(args: RenderEmailArgs, sec: NewsletterTemplateSection, t: Retu
   }
   if (content && sec.look === "label") content = `${TABLE("margin:0 0 16px 0;")}<tr><td style="${t.label(sec.boxColor ?? "#e2e8f0")}">${content}</td></tr></table>`;
   return { key: sec.key, content, empty: !md, addPoints: args.canvas && sec.screenshots && sec.kind !== "sponsor" ? stepsWithoutScreenshots(md) : [] };
+}
+
+/**
+ * Variables a designed part can use: {tool} = the tool the issue's "Why …
+ * Works" section names (Futurepedia's "{tool} Guide" label), else "AI".
+ */
+function applyVars(textHtml: string, args: RenderEmailArgs): string {
+  if (!textHtml.includes("{tool}")) return textHtml;
+  const why = args.sections.find((s) => s.key === "why")?.markdown ?? "";
+  const m = why.match(/Why\s+(.+?)\s+Works/i);
+  const tool = m ? m[1].replace(/[*_#]/g, "").trim() : null;
+  return textHtml.split("{tool}").join(esc(tool || (args.showHints ? "{tool}" : "AI")));
 }
 
 /** A fixed (designed) layout node as email HTML. */
@@ -327,8 +361,11 @@ function fixedHtml(node: DocNode, args: RenderEmailArgs, t: ReturnType<typeof to
       }).join("")), args.personalization ?? "sample");
       if (!label.trim()) return "";
       const pill = typeof node.attrs?.pill === "string" ? node.attrs.pill : null;
-      const level = Number(node.attrs?.level) === 3 ? 3 : 2;
-      return pill ? `${TABLE("margin:0 0 14px 0;")}<tr><td style="${t.pill(pill)}">${label}</td></tr></table>` : `<p style="${t.plainHeading(level)}">${label}</p>`;
+      const color = typeof node.attrs?.color === "string" ? node.attrs.color : null;
+      const level = Number(node.attrs?.level);
+      const filled = applyVars(label, args);
+      if (level === 4) return `<p style="${t.eyebrow(color)}">${filled}</p>`;
+      return pill ? `${TABLE("margin:0 0 14px 0;")}<tr><td style="${t.pill(pill)}">${filled}</td></tr></table>` : `<p style="${t.plainHeading(level === 3 ? 3 : 2, color)}">${filled}</p>`;
     }
     case "horizontalRule":
       return divider(true);
@@ -350,7 +387,8 @@ export function renderEmailParts(args: RenderEmailArgs): EmailParts {
         const sec = byKey.get(String(node.attrs?.key ?? ""));
         return sec ? [{ kind: "slot", ...slotPart(args, sec, t) }] : [];
       }
-      if (node.type === "callout") return [{ kind: "box", color: typeof node.attrs?.color === "string" ? node.attrs.color : "#f1f5f9", children: build(node.content ?? [], path) }];
+      if (node.type === "callout")
+        return [{ kind: "box", color: typeof node.attrs?.color === "string" ? node.attrs.color : "#f1f5f9", border: typeof node.attrs?.border === "string" ? node.attrs.border : null, children: build(node.content ?? [], path) }];
       const html = fixedHtml(node, args, t);
       // An empty paragraph left by an edit still gets a (thin) block on the canvas, so it can be clicked and removed.
       return html || args.canvas ? [{ kind: "fixed", html: html || "<p style=\"margin:0 0 8px 0;\">&nbsp;</p>", node: node.type, path }] : [];
@@ -392,7 +430,7 @@ export function pruneForSend(blocks: EmailBlock[], top = true): EmailBlock[] {
 
 function blocksHtml(blocks: EmailBlock[], t: ReturnType<typeof tokens>): string {
   return blocks
-    .map((b) => (b.kind === "fixed" ? b.html : b.kind === "slot" ? b.content : `${TABLE("margin:0 0 16px 0;", true)}<tr><td style="${t.box(b.color)}">${blocksHtml(b.children, t)}</td></tr></table>`))
+    .map((b) => (b.kind === "fixed" ? b.html : b.kind === "slot" ? b.content : `${TABLE(`margin:0 0 ${b.border ? 20 : 16}px 0;`, true)}<tr><td style="${t.box(b.color, b.border)}">${blocksHtml(b.children, t)}</td></tr></table>`))
     .join("");
 }
 
@@ -410,20 +448,38 @@ export function renderEmailBody(args: RenderEmailArgs): string {
 /**
  * The email as a complete document, for the exact preview (desktop / phone)
  * and the format page's thumbnail: the body on the page background, 600px
- * wide, with the faint border HubSpot's own wrapper draws. `footerNote`: a
+ * wide, with the faint border HubSpot's own wrapper draws (none when the
+ * email is the page's own color, Futurepedia's cards on blue). `footerNote`: a
  * grey line under the email standing in for the footer the email tool adds.
  */
+/** Google Fonts this renderer will link when a style names one first. */
+const GOOGLE_FONTS: Record<string, string> = {
+  poppins: "Poppins:wght@400;500;600;700",
+  "open sans": "Open+Sans:ital,wght@0,400;0,600;0,700;1,400",
+  inter: "Inter:wght@400;500;600;700",
+  montserrat: "Montserrat:wght@400;500;600;700",
+  lato: "Lato:ital,wght@0,400;0,700;1,400",
+  roboto: "Roboto:ital,wght@0,400;0,500;0,700;1,400",
+};
+
+/** The <link> for the style's web fonts (the first family of each stack, when it's a known Google font), or "". Pure; exported for tests. */
+export function webFontLink(st: NewsletterStyle): string {
+  const first = (stack: string | null) => stack?.split(",")[0]?.trim().replace(/^['"]|['"]$/g, "").toLowerCase() ?? "";
+  const fams = [...new Set([first(st.fontFamily), first(st.headingFont)].map((f) => GOOGLE_FONTS[f]).filter(Boolean))];
+  return fams.length ? `<link href="https://fonts.googleapis.com/css2?${fams.map((f) => `family=${f}`).join("&amp;")}&amp;display=swap" rel="stylesheet">` : "";
+}
+
 export function renderEmailHtml(args: RenderEmailArgs & { footerNote?: string | null }): string {
   const st = args.template.style;
   const t = tokens(st);
   const footer = args.footerNote
     ? `<p style="margin:14px 0 0 0;${t.F}font-size:12px;line-height:1.5;color:#9ca3af;text-align:center;">${esc(args.footerNote)}</p>`
     : "";
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><title>${esc(args.subject ?? "")}</title></head>
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light">${webFontLink(st)}<title>${esc(args.subject ?? "")}</title></head>
 <body style="margin:0;padding:0;background:${st.pageBackground};-webkit-text-size-adjust:100%;">
 ${args.previewText ? `<div style="display:none;max-height:0;overflow:hidden;font-size:1px;line-height:1px;color:${st.pageBackground};">${esc(args.previewText)}</div>` : ""}
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;width:100%;background:${st.pageBackground};"><tr><td align="center" style="padding:24px 12px;">
-<table role="presentation" width="${EMAIL_WIDTH}" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;width:100%;max-width:${EMAIL_WIDTH}px;margin:0 auto;background:${st.contentBackground};border:1px solid #eaf0f6;border-radius:12px;overflow:hidden;"><tr><td style="padding:0;">
+<table role="presentation" width="${EMAIL_WIDTH}" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;width:100%;max-width:${EMAIL_WIDTH}px;margin:0 auto;background:${st.contentBackground};${frameBorder(st)}border-radius:12px;overflow:hidden;"><tr><td style="padding:0;">
 ${renderEmailBody(args)}
 </td></tr></table>
 ${footer}

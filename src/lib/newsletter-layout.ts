@@ -40,6 +40,44 @@ export function layoutFromSections(template: NewsletterTemplate): LayoutDoc {
 }
 
 /**
+ * The layout a beehiiv card template implies (Futurepedia's How-To, before it
+ * was redesigned in the builder): the masthead image, then each card as a
+ * box with its border and background holding its small colored label
+ * ({tool} filled from the Why section) and its sections (each one's heading
+ * when the card shows it), then the outro image. The feedback poll is a
+ * beehiiv-only element and is left out. Pure; exported for tests.
+ */
+export function layoutFromBeehiiv(template: NewsletterTemplate): LayoutDoc | null {
+  const bl = template.beehiiv?.layout;
+  if (!bl) return null;
+  const byKey = new Map(template.sections.map((s) => [s.key, s]));
+  const placed = new Set(bl.cards.flatMap((c) => c.sections.map((x) => x.key)));
+  const cards = [...bl.cards];
+  const unplaced = template.sections.filter((s) => !placed.has(s.key)).map((s) => ({ key: s.key, showHeading: !!s.heading, linkButtons: false }));
+  if (unplaced.length) cards.push({ label: "", border: "#273653", background: "#FFFFFF", sections: unplaced });
+  const content: DocNode[] = [];
+  if (bl.mastheadImageUrl) content.push({ type: "image", attrs: { src: bl.mastheadImageUrl, alt: "Futurepedia", href: null, background: null } });
+  for (const card of cards) {
+    const inner: DocNode[] = [];
+    if (card.label.trim()) inner.push({ type: "heading", attrs: { level: 4, pill: null, color: bl.labelColor }, content: [text(card.label)] });
+    for (const s of card.sections) {
+      const sec = byKey.get(s.key);
+      if (!sec) continue;
+      if (s.showHeading && sec.heading) inner.push({ type: "heading", attrs: { level: 3, pill: null, color: null }, content: [text(sec.heading)] });
+      inner.push({ type: "slot", attrs: { key: s.key } });
+    }
+    if (inner.some((n) => n.type === "slot")) content.push({ type: "callout", attrs: { color: card.background, border: card.border }, content: inner });
+  }
+  if (bl.outroImageUrl) content.push({ type: "image", attrs: { src: bl.outroImageUrl, alt: "Futurepedia", href: null, background: null } });
+  return { type: "doc", content };
+}
+
+/** Sections a beehiiv card turned into buttons ("links on their own line become buttons"), by key. Pure. */
+export function beehiivButtonKeys(template: NewsletterTemplate): Set<string> {
+  return new Set((template.beehiiv?.layout?.cards ?? []).flatMap((c) => c.sections.filter((s) => s.linkButtons).map((s) => s.key)));
+}
+
+/**
  * The template's layout: the saved one, else the one its sections imply. A
  * section the saved layout has no slot for (added by the template learner,
  * or by an older editor) is appended at the end with its heading, so no
@@ -48,7 +86,7 @@ export function layoutFromSections(template: NewsletterTemplate): LayoutDoc {
 export function layoutFor(template: NewsletterTemplate, override?: LayoutDoc | null): LayoutDoc {
   // A draft's own design (the editor changed a designed part in that issue) beats the template's.
   const saved = (override ?? template.layout) as LayoutDoc | null | undefined;
-  if (!(saved?.type === "doc" && Array.isArray(saved.content))) return layoutFromSections(template);
+  if (!(saved?.type === "doc" && Array.isArray(saved.content))) return layoutFromBeehiiv(template) ?? layoutFromSections(template);
   const have = new Set(slotKeys(saved));
   const missing = template.sections.filter((sec) => !have.has(sec.key));
   if (!missing.length) return saved;
@@ -83,7 +121,8 @@ export function slotHeadings(layout: LayoutDoc): Record<string, { text: string; 
     (parent.content ?? []).forEach((n, i, arr) => {
       const prev = i > 0 ? arr[i - 1] : before;
       if (n.type === "slot" && typeof n.attrs?.key === "string") {
-        out[n.attrs.key] = prev?.type === "heading" && plain(prev).trim() ? { text: plain(prev).trim(), level: Number(prev.attrs?.level) === 3 ? 3 : 2 } : null;
+        // A small card label (level 4, "Free Resource") isn't the section's name.
+        out[n.attrs.key] = prev?.type === "heading" && Number(prev.attrs?.level) !== 4 && plain(prev).trim() ? { text: plain(prev).trim(), level: Number(prev.attrs?.level) === 3 ? 3 : 2 } : null;
       }
       // A box's first child takes the heading just above the box.
       if (n.content && n.type !== "heading") walk(n, prev);

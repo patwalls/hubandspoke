@@ -2,19 +2,18 @@
 
 // One section of a newsletter preview on the editor's canvas: hover outlines
 // it, click selects it (its controls show in the editor's side panel) and, for
-// a text section, opens its Markdown for typing right where it is. Shared by
-// both previews (HubSpot templates and the beehiiv card layout) so every
-// newsletter edits the same way. The editor owns all state (PreviewEditing).
+// a text section, opens its Markdown for typing right where it is. Every
+// newsletter (HubSpot and beehiiv) edits the same way. The editor owns all state (PreviewEditing).
 // The same canvas serves the template editor (mode "template"): clicking a
 // section edits its instructions instead of its text. Fixed parts of the
 // email (masthead, footer, labels and headings the template sets) render
-// through FixedPart: locked with a note in a draft, selectable in the
-// template editor when the template owns them. A draft section opens in a
+// through FixedPart: a note on hover in a draft (it comes from the design),
+// selectable in the template editor. A draft section opens in a
 // WYSIWYG editor (rich-section-editor.tsx) that looks like the email — no
 // Markdown on screen.
 
 import { useLayoutEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
-import { Loader2, Lock, Sparkles } from "lucide-react";
+import { LayoutTemplate, Loader2, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toggleInline, type Edited, type InlineMark } from "@/lib/markdown-format";
 import { screenshotKey } from "@/lib/newsletter-screenshots";
@@ -44,11 +43,6 @@ export interface PreviewEditing {
   addingShot?: string | null;
   /** Draft: the picked image for a screenshot spot (the in-place editor shows it). */
   shotUrl?: (sectionKey: string, label: string) => string | null;
-  /** Template editor: the template is locked (structure can't change; FixedParts show a lock). */
-  structureLocked?: boolean;
-  /** Template editor: a beehiiv card, or the email's look (masthead, images, poll), was clicked. */
-  onSelectCard?: (index: number) => void;
-  onSelectLook?: () => void;
   /** Draft: open the format's template (clicking a designed, fixed part). */
   onEditTemplate?: () => void;
   /** Draft: replace `count` designed nodes at `path` of this issue's layout with `nodes` (an edit to a designed part, this issue only). */
@@ -182,30 +176,25 @@ function FillBadge({ isSponsor }: { isSponsor: boolean }) {
 }
 
 /**
- * A fixed part of the email. Draft: locked, with `reason` on hover (it comes
- * from the template or the email tool, not the draft). Template editor: with
- * `onSelect` it's selectable (the template owns it); without, locked too.
- * `lockedInTemplate`: selectable in the template editor (to see its settings)
- * but its settings are locked there too — the lock shows on hover with why.
+ * A fixed part of the email. Draft: `reason` on hover (it comes from the
+ * template or the email tool, not the draft); with `onSelect`, a click opens
+ * the template. Template editor: with `onSelect` it's selectable.
  */
 export function FixedPart({
   edit,
   reason,
   onSelect,
-  lockedInTemplate,
   block = true,
   children,
 }: {
   edit?: PreviewEditing;
   reason: string;
   onSelect?: () => void;
-  lockedInTemplate?: string | null;
   block?: boolean;
   children: ReactNode;
 }) {
   if (!edit) return <>{children}</>;
   const Tag = block ? "div" : "span";
-  const templateLock = edit.mode === "template" ? (lockedInTemplate ?? (edit.structureLocked ? "Locked template: contact Sam to change this" : null)) : null;
   if (edit.mode === "template" && onSelect) {
     return (
       <Tag
@@ -216,26 +205,24 @@ export function FixedPart({
           onSelect();
         }}
         onKeyDown={(e) => e.key === "Enter" && onSelect()}
-        title={templateLock ?? undefined}
         className={cn("group/fixed relative cursor-pointer rounded-md hover:outline-2 hover:outline-dashed hover:outline-[#49adff]/60", !block && "inline-block")}
       >
         {children}
-        {templateLock && <LockChip text={templateLock} />}
       </Tag>
     );
   }
   return (
     <Tag title={reason} onClick={(e) => e.stopPropagation()} className={cn("group/fixed relative cursor-default", !block && "inline-block")}>
       {children}
-      <LockChip text={reason} />
+      <DesignChip text={reason} />
     </Tag>
   );
 }
 
-function LockChip({ text }: { text: string }) {
+function DesignChip({ text }: { text: string }) {
   return (
     <span className="pointer-events-none absolute right-1 top-1 z-10 hidden max-w-[80%] items-center gap-1 rounded bg-white/95 px-1.5 py-0.5 text-[10px] font-normal leading-normal text-[#6b7280] shadow group-hover/fixed:flex">
-      <Lock className="size-3 shrink-0" /> {text}
+      <LayoutTemplate className="size-3 shrink-0" /> {text}
     </span>
   );
 }

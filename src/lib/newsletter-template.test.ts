@@ -40,7 +40,7 @@ describe("newsletter templates", () => {
 
   it("uses a saved template, else the built-in default for the format name, else none", () => {
     expect(templateFor("Anything", T)).toEqual(parseNewsletterTemplate(T));
-    expect(templateFor(" Sunday Breakfast ", null)).toBe(DEFAULT_TEMPLATES["sunday breakfast"]);
+    expect(templateFor(" Sunday Breakfast ", null)).toEqual(DEFAULT_TEMPLATES["sunday breakfast"]);
     expect(templateFor("Playbook", { junk: true })).toBeNull();
   });
 
@@ -62,21 +62,20 @@ describe("newsletter templates", () => {
 });
 
 describe("templateChangeProblem", () => {
-  it("on a locked template allows only instruction changes (anything structural needs a template admin)", () => {
+  it("templates aren't locked any more: a saved locked flag changes nothing, and templateFor hands every template out unlocked", () => {
     const locked = { ...T, locked: true };
-    const hintsOnly = { ...locked, sections: locked.sections.map((x) => ({ ...x, hint: `${x.hint} (shorter)` })) };
-    expect(templateChangeProblem(locked, hintsOnly)).toBeNull();
-    expect(templateChangeProblem(locked, { ...locked, sections: locked.sections.slice(1) })).toMatch(/locked/);
-    expect(templateChangeProblem(locked, { ...locked, sections: locked.sections.map((x, i) => (i === 0 ? { ...x, heading: "New" } : x)) })).toMatch(/locked/);
-    expect(templateChangeProblem(locked, { ...locked, locked: false })).toMatch(/locked/);
-    // The built-in Futurepedia template (locked) vs the same template after a round trip through the API's validation.
+    expect(templateChangeProblem(locked, { ...locked, sections: locked.sections.slice(1) })).toBeNull();
+    expect(templateChangeProblem(locked, { ...locked, locked: false })).toBeNull();
     const fp = DEFAULT_TEMPLATES["futurepedia newsletter"];
-    const saved = parseNewsletterTemplate(JSON.parse(JSON.stringify({ ...fp, sections: fp.sections.map((x) => ({ ...x, hint: `${x.hint}!` })) })))!;
-    expect(fp.locked).toBe(true);
-    expect(templateChangeProblem(fp, saved)).toBeNull();
-    expect(templateChangeProblem(fp, { ...saved, beehiiv: { ...saved.beehiiv!, layout: { ...saved.beehiiv!.layout, poll: false } } })).toMatch(/locked/);
-    // Unlocked templates: anything goes.
-    expect(templateChangeProblem(T, { ...T, sections: T.sections.slice(1) })).toBeNull();
+    expect(templateFor("Futurepedia Newsletter", null)!.locked).toBe(false);
+    expect(templateFor("Futurepedia Newsletter", { ...fp, locked: true })!.locked).toBe(false);
+  });
+
+  it("a beehiiv template not yet redesigned takes the Futurepedia look; a redesigned one keeps its own", () => {
+    const fp = DEFAULT_TEMPLATES["futurepedia newsletter"];
+    expect(templateFor("Futurepedia Newsletter", null)!.style).toMatchObject({ pageBackground: "#f4f9fc", buttonColor: "#273653" });
+    const mine = { ...fp, layout: { type: "doc" as const, content: [] }, style: { ...fp.style, buttonColor: "#ff0000" } };
+    expect(templateFor("Futurepedia Newsletter", mine)!.style.buttonColor).toBe("#ff0000");
   });
 
   it("HubSpot formats: the look is Hub & Spoke's now — names, colors and order change freely; only which HubSpot email the drafts are made from is fixed", () => {

@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { markdownToEmailHtml, pruneForSend, renderEmailBody, renderEmailHtml, renderEmailParts, sectionMarkdown, type EmailBlock, type EmailParts } from "./newsletter-email-html";
+import { markdownToEmailHtml, pruneForSend, renderEmailBody, renderEmailHtml, renderEmailParts, sectionMarkdown, webFontLink, type EmailBlock, type EmailParts } from "./newsletter-email-html";
 
 /** Every slot in the layout's blocks (boxes opened), and all the fixed HTML. */
 const flat = (blocks: EmailBlock[]): EmailBlock[] => blocks.flatMap((b) => (b.kind === "box" ? [b, ...flat(b.children)] : [b]));
 const slots = (p: EmailParts) => flat(p.blocks).filter((b): b is Extract<EmailBlock, { kind: "slot" }> => b.kind === "slot");
 const fixedHtml = (p: EmailParts) => flat(p.blocks).map((b) => (b.kind === "fixed" ? b.html : "")).join("");
-import { DEFAULT_TEMPLATES, styleSchema } from "./newsletter-template";
+import { DEFAULT_TEMPLATES, styleSchema, templateFor } from "./newsletter-template";
 
 const style = styleSchema.parse({});
 const sb = DEFAULT_TEMPLATES["sunday breakfast"];
@@ -151,7 +151,7 @@ describe("renderEmailParts / renderEmailBody / renderEmailHtml", () => {
     const h = (t: string): EmailBlock => ({ kind: "fixed", html: t, node: "heading", path: [] });
     const hr: EmailBlock = { kind: "fixed", html: "<hr>", node: "horizontalRule", path: [] };
     const s = (key: string, content: string): EmailBlock => ({ kind: "slot", key, content, empty: !content, addPoints: [] });
-    const out = pruneForSend([hr, h("A"), s("a", ""), hr, h("B"), s("b", "B text"), hr, { kind: "box", color: "#eee", children: [h("C"), s("c", "")] }, hr]);
+    const out = pruneForSend([hr, h("A"), s("a", ""), hr, h("B"), s("b", "B text"), hr, { kind: "box", color: "#eee", border: null, children: [h("C"), s("c", "")] }, hr]);
     expect(out).toEqual([h("B"), s("b", "B text")]);
   });
 
@@ -161,6 +161,21 @@ describe("renderEmailParts / renderEmailBody / renderEmailHtml", () => {
     const how = DEFAULT_TEMPLATES["futurepedia newsletter"];
     const steps = slots(renderEmailParts({ template: how, sections: [], showHints: true })).find((s) => s.key === "steps")!;
     expect(steps.content).toContain("Screenshots go here");
+  });
+
+  it("a full document links the Google fonts the style names first, and none for system stacks", () => {
+    const link = webFontLink(templateFor("Futurepedia Newsletter", null)!.style);
+    expect(link).toContain("family=Open+Sans");
+    expect(link).toContain("family=Poppins");
+    expect(webFontLink(sb.style)).toBe("");
+    expect(renderEmailHtml({ template: templateFor("Futurepedia Newsletter", null)!, sections: [] })).toContain("fonts.googleapis.com");
+  });
+
+  it("a Futurepedia intro's '- Kevin' sign-off stays a sign-off line, not a one-item list", () => {
+    const how = DEFAULT_TEMPLATES["futurepedia newsletter"];
+    const intro = slots(renderEmailParts({ template: how, sections: [{ key: "intro", markdown: "Claude makes videos now.\n\n- Kevin\n\n[See the bundle](https://x.example) →" }] })).find((s) => s.key === "intro")!;
+    expect(intro.content).not.toContain("<li");
+    expect(intro.content).toContain("- Kevin");
   });
 
   it("escapes template text, and the document carries the preheader, the page background and the 600px frame", () => {

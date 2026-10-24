@@ -28,6 +28,10 @@ export const styleSchema = z.object({
   mastheadBackground: color.nullable().default(null),
   /** A system stack: what every mail client has, no web-font gamble. */
   fontFamily: z.string().max(200).default("-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"),
+  /** Headings, card labels and buttons (e.g. Futurepedia's Poppins); null = the body font. */
+  headingFont: z.string().max(200).nullable().default(null),
+  /** Weight of titles (the big headings); smaller headings stay bold. Futurepedia's Poppins titles are 500. */
+  headingWeight: z.number().int().min(300).max(900).default(700),
   textColor: color.default("#222222"),
   headingColor: color.default("#111111"),
   linkColor: color.default("#197bbd"),
@@ -397,8 +401,7 @@ export const DEFAULT_TEMPLATES: Record<string, NewsletterTemplate> = {
         style: NEUTRAL_STYLE,
         hubspot: null,
         beehiiv: { author, layout: DEFAULT_BEEHIIV_LAYOUT },
-        // The beehiiv build depends on this exact structure: changes go through a template admin.
-        locked: true,
+        locked: false,
         styleNotes: null,
         layout: null,
         learnedAt: null,
@@ -418,9 +421,36 @@ export const DEFAULT_TEMPLATES: Record<string, NewsletterTemplate> = {
   ),
 };
 
-/** The format's saved template, else its default, else null (free-form body). */
+/**
+ * The Futurepedia emails' look, read off the sent How-To issues (Oct 2026):
+ * light blue-grey page, Open Sans body, Poppins headings / labels / buttons,
+ * navy buttons, Futurepedia-blue links. Applied to a beehiiv template that
+ * hasn't been redesigned in the builder yet (no `layout`).
+ */
+export const FUTUREPEDIA_LOOK: Partial<NewsletterStyle> = {
+  fontFamily: "'Open Sans', 'Segoe UI', Helvetica, Arial, sans-serif",
+  headingFont: "'Poppins', 'Segoe UI', Helvetica, Arial, sans-serif",
+  headingWeight: 500,
+  textColor: "#222222",
+  headingColor: "#273653",
+  linkColor: "#00AEEF",
+  buttonColor: "#273653",
+  pageBackground: "#f4f9fc",
+  contentBackground: "#f4f9fc",
+  dividers: false,
+};
+
+/**
+ * The format's saved template, else its default, else null (free-form body).
+ * Templates are never locked any more (one builder for every newsletter,
+ * Pat 2026-10-23); a beehiiv template not yet redesigned takes the
+ * Futurepedia look so the builder shows it as the real emails look.
+ */
 export function templateFor(formatName: string, saved: unknown): NewsletterTemplate | null {
-  return parseNewsletterTemplate(saved) ?? DEFAULT_TEMPLATES[formatName.trim().toLowerCase()] ?? null;
+  const t = parseNewsletterTemplate(saved) ?? DEFAULT_TEMPLATES[formatName.trim().toLowerCase()] ?? null;
+  if (!t) return null;
+  const unlocked = { ...t, locked: false };
+  return t.beehiiv && !t.layout ? { ...unlocked, style: { ...t.style, ...FUTUREPEDIA_LOOK } } : unlocked;
 }
 
 /**
@@ -477,21 +507,14 @@ export function composeIssue(
 }
 
 /**
- * Why a template change isn't allowed for a non-admin, or null when it's
- * fine. A locked template: only section instructions (hints) may change.
- * Any template: which HubSpot email the drafts are made from (sender, lists,
- * footer) doesn't change here. Pure; exported for tests.
+ * Why a template change isn't allowed, or null when it's fine: only which
+ * HubSpot email the drafts are made from (sender, lists, footer) can't change
+ * here. Pure; exported for tests.
  */
 export function templateChangeProblem(current: NewsletterTemplate, next: NewsletterTemplate): string | null {
-  if (current.hubspot && JSON.stringify(current.hubspot) !== JSON.stringify(next.hubspot)) return "The HubSpot template link can't be changed here. Contact Sam.";
-  if (!current.locked) return null;
-  // Compare both as the schema shapes them (field order and defaults), so only real differences count.
-  const norm = (x: NewsletterTemplate) => JSON.stringify(newsletterTemplateSchema.parse(x));
-  const hints = new Map(next.sections.map((s) => [s.key, s.hint]));
-  const sameButHints = { ...current, sections: current.sections.map((s) => ({ ...s, hint: hints.get(s.key) ?? s.hint })) };
-  return norm(sameButHints) === norm(next)
-    ? null
-    : "This template is locked: only section instructions can change. Contact Sam for other adjustments.";
+  // Templates aren't locked any more (one builder for every newsletter, 2026-10-23): only the HubSpot link is fixed.
+  if (current.hubspot && JSON.stringify(current.hubspot) !== JSON.stringify(next.hubspot)) return "The HubSpot template link can't be changed here.";
+  return null;
 }
 
 /** The HubSpot email name from the mapping's pattern + the send date (today when unset). Pure. */

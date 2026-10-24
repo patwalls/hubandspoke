@@ -29,7 +29,7 @@ async function load(id: string) {
   return f ?? null;
 }
 
-/** The format's newsletter template: saved, else the built-in default (isDefault: true), else null. canUnlock: the viewer is a template admin. */
+/** The format's newsletter template: saved, else the built-in default (isDefault: true), else null. */
 export async function GET(_request: NextRequest, context: RouteContext) {
   const guard = await requireFeature("newsletterDrafter");
   if (guard.response) return guard.response;
@@ -42,12 +42,11 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     isDefault: !parseNewsletterTemplate(f.saved),
     /** Where the HubSpot-owned parts (masthead, course names, colors, footer) are changed. */
     hubspotTemplateUrl: template?.hubspot ? emailEditUrl(template.hubspot.templateEmailId) : null,
-    canUnlock: isFeatureEnabled("newsletterTemplateAdmin", guard.session.user),
     ...storyContext(f),
   });
 }
 
-/** Save the format's template (validated). Applies to the next draft / section regenerate. A locked template: instructions only, unless you're a template admin. */
+/** Save the format's template (validated). Applies to the next draft / section regenerate. Only a template admin can repoint the HubSpot template email. */
 export async function PUT(request: NextRequest, context: RouteContext) {
   const guard = await requireFeature("newsletterDrafter");
   if (guard.response) return guard.response;
@@ -70,10 +69,6 @@ export async function DELETE(_request: NextRequest, context: RouteContext) {
   const guard = await requireFeature("newsletterDrafter");
   if (guard.response) return guard.response;
   const { id } = await context.params;
-  const f = await load(id);
-  if (f && templateFor(f.name, f.saved)?.locked && !isFeatureEnabled("newsletterTemplateAdmin", guard.session.user)) {
-    return NextResponse.json({ error: "This template is locked. Contact Sam to reset it." }, { status: 403 });
-  }
   const [row] = await db.update(formats).set({ newsletterTemplate: null }).where(eq(formats.id, id)).returning({ name: formats.name });
   if (!row) return NextResponse.json({ error: "Not found" }, { status: 404 });
   return NextResponse.json({ template: templateFor(row.name, null), isDefault: true });

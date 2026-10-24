@@ -54,3 +54,22 @@ describe("layoutFor with a saved layout", () => {
     expect(layoutFor({ ...sb, layout, sections: [sb.sections[0]] })).toBe(layout);
   });
 });
+
+describe("layoutFromBeehiiv (Futurepedia's cards → a designed layout)", () => {
+  it("turns each card into a bordered box with its label and sections, between the masthead and outro images", async () => {
+    const { layoutFromBeehiiv } = await import("./newsletter-layout");
+    const fp = DEFAULT_TEMPLATES["futurepedia newsletter"];
+    const l = layoutFromBeehiiv(fp)!;
+    expect(l.content![0]).toMatchObject({ type: "image", attrs: { alt: "Futurepedia" } });
+    expect(l.content![l.content!.length - 1]).toMatchObject({ type: "image" });
+    const guide = l.content!.find((n) => n.type === "callout" && n.content?.[0]?.content?.[0]?.text === "{tool} Guide")!;
+    expect(guide.attrs).toEqual({ color: "#FCFCFC", border: "#00AEEF" });
+    expect(guide.content![0]).toMatchObject({ type: "heading", attrs: { level: 4, color: "#00AEEF" } });
+    expect(guide.content!.map((n) => n.type)).toEqual(["heading", "slot", "slot", "heading", "slot"]); // label, article, why, "How We Did It", steps
+    expect(slotKeys(l)).toEqual(fp.sections.map((s) => s.key));
+    // A label isn't a section's name; the "How We Did It" heading is.
+    const heads = slotHeadings(l);
+    expect(heads.article).toBeNull();
+    expect(heads.steps).toEqual({ text: "How We Did It", level: 3 });
+  });
+});

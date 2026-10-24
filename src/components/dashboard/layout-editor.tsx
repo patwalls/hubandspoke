@@ -15,7 +15,7 @@ import { EditorContent, Node, NodeViewWrapper, ReactNodeViewRenderer, mergeAttri
 import StarterKit from "@tiptap/starter-kit";
 import Heading from "@tiptap/extension-heading";
 import Image from "@tiptap/extension-image";
-import { Bold, Heading2, Heading3, ImagePlus, Italic, Link2, List, ListOrdered, Minus, Palette, RectangleHorizontal, Sparkles, SquareDashed, Unlink } from "lucide-react";
+import { Bold, Heading2, Heading3, ImagePlus, Italic, Link2, List, ListOrdered, Minus, Palette, RectangleHorizontal, Sparkles, SquareDashed, Tag, Unlink } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { BlockHandle, Btn, CtaButton, FirstName, Sep } from "@/components/dashboard/rich-section-editor";
 import type { LayoutDoc } from "@/lib/newsletter-layout";
@@ -32,7 +32,11 @@ interface LayoutHooks {
 
 // ── Nodes ───────────────────────────────────────────────────────────────
 
-/** A heading that can be a colored pill (Sunday Breakfast's course names). */
+/**
+ * A heading that can be a colored pill (Sunday Breakfast's course names), have
+ * its own text color, or be a small card label (level 4: Futurepedia's
+ * "ChatGPT Work Guide").
+ */
 const PillHeading = Heading.extend({
   addAttributes() {
     return {
@@ -42,6 +46,11 @@ const PillHeading = Heading.extend({
         parseHTML: (el: HTMLElement) => el.getAttribute("data-pill"),
         renderHTML: (attrs: { pill?: string | null }) =>
           attrs.pill ? { "data-pill": attrs.pill, style: `background:${attrs.pill};display:inline-block;padding:8px 14px;border-radius:8px;font-size:19px;line-height:1.2;margin:0 0 14px` } : {},
+      },
+      color: {
+        default: null,
+        parseHTML: (el: HTMLElement) => el.getAttribute("data-color"),
+        renderHTML: (attrs: { color?: string | null }) => (attrs.color ? { "data-color": attrs.color, style: `color:${attrs.color}` } : {}),
       },
     };
   },
@@ -57,11 +66,21 @@ const Callout = Node.create({
     color: {
       default: "#f1f5f9",
       parseHTML: (el: HTMLElement) => el.getAttribute("data-color"),
-      renderHTML: (attrs: { color?: string }) => ({ "data-color": attrs.color, style: `background:${attrs.color};border-radius:12px;padding:20px 22px 6px;margin:0 0 16px` }),
+    },
+    border: {
+      default: null,
+      parseHTML: (el: HTMLElement) => el.getAttribute("data-border"),
     },
   }),
+  // One style from both attributes (the renderer's box: newsletter-email-html.ts → boxStyle).
+  renderHTML: ({ node, HTMLAttributes }) => {
+    const { color, border } = node.attrs as { color: string; border: string | null };
+    const style = border
+      ? `background:${color};border:2px solid ${border};border-radius:10px;padding:22px 24px 8px;margin:0 0 20px`
+      : `background:${color};border-radius:12px;padding:20px 22px 6px;margin:0 0 16px`;
+    return ["div", mergeAttributes(HTMLAttributes, { "data-callout": "", "data-color": color, ...(border ? { "data-border": border } : {}), style }), 0];
+  },
   parseHTML: () => [{ tag: "div[data-callout]" }],
-  renderHTML: ({ HTMLAttributes }) => ["div", mergeAttributes(HTMLAttributes, { "data-callout": "" }), 0],
 });
 
 function SlotView({ node, extension, selected }: NodeViewProps) {
@@ -160,26 +179,32 @@ const DesignImage = Image.extend({
 
 // ── Toolbar ─────────────────────────────────────────────────────────────
 
-function Swatches({ value, onPick, onNone }: { value: string | null; onPick: (c: string) => void; onNone: () => void }) {
+function SwatchRow({ title, value, onPick, onNone, noneLabel = "None" }: { title: string; value: string | null; onPick: (c: string) => void; onNone?: () => void; noneLabel?: string }) {
   return (
-    <div className="absolute right-0 top-9 z-30 flex w-56 flex-wrap items-center gap-1.5 rounded-md border bg-white p-2 shadow-lg" onMouseDown={(e) => e.preventDefault()}>
-      {SWATCHES.map((c) => (
-        <button key={c} type="button" title={c} onClick={() => onPick(c)} className={cn("size-6 rounded-full border", value?.toLowerCase() === c.toLowerCase() && "ring-2 ring-[#49adff] ring-offset-1")} style={{ background: c }} />
-      ))}
-      <label className="flex size-6 cursor-pointer items-center justify-center rounded-full border text-[10px] text-[#6b7280]" title="Any color">
-        +
-        <input type="color" className="sr-only" value={value ?? "#ffffff"} onChange={(e) => onPick(e.target.value)} />
-      </label>
-      <button type="button" onClick={onNone} className="ml-auto text-[11px] text-[#6b7280] underline">
-        None
-      </button>
+    <div className="flex flex-col gap-1">
+      <span className="text-[10px] font-semibold uppercase tracking-wide text-[#6b7280]">{title}</span>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {[...SWATCHES, "#273653", "#00AEEF", "#222222"].map((c) => (
+          <button key={c} type="button" title={c} onClick={() => onPick(c)} className={cn("size-5 rounded-full border", value?.toLowerCase() === c.toLowerCase() && "ring-2 ring-[#49adff] ring-offset-1")} style={{ background: c }} />
+        ))}
+        <label className="flex size-5 cursor-pointer items-center justify-center rounded-full border text-[10px] text-[#6b7280]" title="Any color">
+          +
+          <input type="color" className="sr-only" value={value ?? "#ffffff"} onChange={(e) => onPick(e.target.value)} />
+        </label>
+        {onNone && (
+          <button type="button" onClick={onNone} className="ml-auto text-[11px] text-[#6b7280] underline">
+            {noneLabel}
+          </button>
+        )}
+      </div>
     </div>
   );
 }
 
+
 function LayoutToolbar({ editor, onAddSlot }: { editor: Editor; onAddSlot?: () => string }) {
   const [linkUrl, setLinkUrl] = useState<string | null>(null);
-  const [colors, setColors] = useState<"pill" | "box" | null>(null);
+  const [colors, setColors] = useState<"heading" | "box" | null>(null);
   const [, force] = useState(0);
   useEffect(() => {
     const on = () => force((n) => n + 1);
@@ -233,7 +258,14 @@ function LayoutToolbar({ editor, onAddSlot }: { editor: Editor; onAddSlot?: () =
       <Btn title="Small heading" active={editor.isActive("heading", { level: 3 })} onClick={() => chain().toggleHeading({ level: 3 }).run()}>
         <Heading3 className="size-4" />
       </Btn>
-      <Btn title={inHeading ? "Pill color for this heading" : "Click into a heading to make it a colored pill"} active={!!editor.getAttributes("heading").pill} onClick={() => inHeading && setColors(colors === "pill" ? null : "pill")}>
+      <Btn title="Label (a card's small colored title)" active={editor.isActive("heading", { level: 4 })} onClick={() => chain().toggleHeading({ level: 4 }).run()}>
+        <Tag className="size-4" />
+      </Btn>
+      <Btn
+        title={inHeading ? "Heading color: text color or a colored pill" : "Click into a heading to color it"}
+        active={!!editor.getAttributes("heading").pill || !!editor.getAttributes("heading").color}
+        onClick={() => inHeading && setColors(colors === "heading" ? null : "heading")}
+      >
         <Palette className={cn("size-4", !inHeading && "opacity-40")} />
       </Btn>
       <Btn title="Bulleted list" active={editor.isActive("bulletList")} onClick={() => chain().toggleBulletList().run()}>
@@ -242,7 +274,7 @@ function LayoutToolbar({ editor, onAddSlot }: { editor: Editor; onAddSlot?: () =
       <Btn title="Numbered list" active={editor.isActive("orderedList")} onClick={() => chain().toggleOrderedList().run()}>
         <ListOrdered className="size-4" />
       </Btn>
-      <Btn title={inBox ? "Box color / remove the box" : "Put this in a tinted box"} active={inBox} onClick={() => (inBox ? setColors(colors === "box" ? null : "box") : chain().wrapIn("callout", { color: "#f1f5f9" }).run())}>
+      <Btn title={inBox ? "Box fill, border / remove the box" : "Put this in a box"} active={inBox} onClick={() => (inBox ? setColors(colors === "box" ? null : "box") : chain().wrapIn("callout", { color: "#FFFFFF", border: "#273653" }).run())}>
         <SquareDashed className="size-4" />
       </Btn>
       <Sep />
@@ -265,19 +297,26 @@ function LayoutToolbar({ editor, onAddSlot }: { editor: Editor; onAddSlot?: () =
       >
         <Sparkles className="size-3.5" /> AI section
       </button>}
-      {colors === "pill" && (
-        <Swatches
-          value={(editor.getAttributes("heading").pill as string | null) ?? null}
-          onPick={(c) => (chain().updateAttributes("heading", { pill: c }).run(), setColors(null))}
-          onNone={() => (chain().updateAttributes("heading", { pill: null }).run(), setColors(null))}
-        />
-      )}
-      {colors === "box" && (
-        <Swatches
-          value={(editor.getAttributes("callout").color as string | null) ?? null}
-          onPick={(c) => (chain().updateAttributes("callout", { color: c }).run(), setColors(null))}
-          onNone={() => (chain().lift("callout").run(), setColors(null))}
-        />
+      {colors && (
+        <div className="absolute right-0 top-9 z-30 flex w-64 flex-col gap-2.5 rounded-md border bg-white p-2.5 shadow-lg" onMouseDown={(e) => e.preventDefault()}>
+          {colors === "heading" ? (
+            <>
+              <SwatchRow title="Text color" value={(editor.getAttributes("heading").color as string | null) ?? null} onPick={(c) => chain().updateAttributes("heading", { color: c }).run()} onNone={() => chain().updateAttributes("heading", { color: null }).run()} noneLabel="Default" />
+              <SwatchRow title="Pill" value={(editor.getAttributes("heading").pill as string | null) ?? null} onPick={(c) => chain().updateAttributes("heading", { pill: c }).run()} onNone={() => chain().updateAttributes("heading", { pill: null }).run()} />
+            </>
+          ) : (
+            <>
+              <SwatchRow title="Fill" value={(editor.getAttributes("callout").color as string | null) ?? null} onPick={(c) => chain().updateAttributes("callout", { color: c }).run()} />
+              <SwatchRow title="Border" value={(editor.getAttributes("callout").border as string | null) ?? null} onPick={(c) => chain().updateAttributes("callout", { border: c }).run()} onNone={() => chain().updateAttributes("callout", { border: null }).run()} />
+              <button type="button" onClick={() => (chain().lift("callout").run(), setColors(null))} className="self-start text-[11px] text-[#b91c1c] underline">
+                Remove the box
+              </button>
+            </>
+          )}
+          <button type="button" onClick={() => setColors(null)} className="self-end text-[11px] font-medium text-[#2563eb]">
+            Done
+          </button>
+        </div>
       )}
     </div>
   );
@@ -326,7 +365,7 @@ export function LayoutEditor({
     extensions: [
       // In place in a draft there is no empty line added after the part being edited (typing lands in it).
       StarterKit.configure({ heading: false, code: false, codeBlock: false, strike: false, underline: false, link: { openOnClick: false, autolink: true }, ...(inline ? { trailingNode: false } : {}) }),
-      PillHeading.configure({ levels: [2, 3] }),
+      PillHeading.configure({ levels: [2, 3, 4] }),
       Callout,
       DesignImage,
       Slot.configure(hooks),

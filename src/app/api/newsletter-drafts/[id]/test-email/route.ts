@@ -35,7 +35,7 @@ export async function POST(_request: NextRequest, context: RouteContext) {
     previewText: draft.previewText,
     screenshots: { chosen: draft.screenshots, urlFor: (_c, markKey) => previews[markKey] ?? null },
     layout: draft.layout as DocNode | null,
-    footerNote: "Test send from Hub & Spoke. HubSpot adds the real footer (unsubscribe link, address) when it sends.",
+    footerNote: `Test send from Hub & Spoke. ${draft.template.beehiiv ? "beehiiv" : "HubSpot"} adds the real footer (unsubscribe link, address) when it sends.`,
   });
   try {
     await sendNewsletterTestEmail({ to, subject: draft.subject || "(no subject)", html, text: composeIssue(draft.template, draft.sections, sponsor) });

@@ -8,14 +8,20 @@
 // shrinks it into a thumbnail (the format page's template card). With `edit`
 // it is the newsletter editor's canvas: click text to edit it in place
 // (EditableSection), click a screenshot spot or an image for its panel, drop
-// an image file on either. beehiiv formats keep their own card preview.
+// an image file on either. beehiiv formats (Futurepedia) draw the same way.
 
+// The fonts designed emails use (Futurepedia: Poppins headings, Open Sans
+// body), self-hosted so the canvas matches the inbox; see src/app/layout.tsx.
+import "@fontsource-variable/open-sans/wght.css";
+import "@fontsource-variable/open-sans/wght-italic.css";
+import "@fontsource/poppins/400.css";
+import "@fontsource/poppins/600.css";
+import "@fontsource/poppins/700.css";
 import { useMemo, useState, type CSSProperties, type DragEvent, type MouseEvent } from "react";
 import { Loader2, Plus } from "lucide-react";
-import { BeehiivPreview } from "@/components/dashboard/beehiiv-preview";
 import { EditableSection, emptySectionHint, FixedPart, type PreviewEditing } from "@/components/dashboard/editable-section";
 import type { PreviewScreenshots } from "@/components/dashboard/preview-screenshots";
-import { boxStyle, EMAIL_WIDTH, renderEmailParts, type EmailBlock } from "@/lib/newsletter-email-html";
+import { boxStyle, EMAIL_WIDTH, frameBorder, renderEmailParts, type EmailBlock } from "@/lib/newsletter-email-html";
 import { LayoutEditor } from "@/components/dashboard/layout-editor";
 import { layoutFor, nodeAtPath } from "@/lib/newsletter-layout";
 import type { DocNode } from "@/lib/newsletter-rich-doc";
@@ -56,10 +62,6 @@ export function EmailPreview({
   /** This issue's own design (a draft whose designed parts were changed). */
   layout?: DocNode | null;
 }) {
-  // beehiiv formats (Futurepedia): draw the card layout the push builds.
-  if (template.beehiiv?.layout) {
-    return <BeehiivPreview template={template} sections={sections} sponsor={sponsor} showHints={showHints} scale={scale} clipHeight={clipHeight} className={className} edit={edit} screenshots={screenshots} />;
-  }
   return <HtmlEmailPreview template={template} sections={sections} sponsor={sponsor} showHints={showHints} scale={scale} clipHeight={clipHeight} className={className} edit={edit} screenshots={screenshots} width={width} layout={layout ?? null} />;
 }
 
@@ -189,7 +191,7 @@ function HtmlEmailPreview({
       b.kind === "slot" ? (
         <div key={`s-${b.key}`}>{slot(b)}</div>
       ) : b.kind === "box" ? (
-        <div key={`b-${i}`} style={boxStyle(b.color) as CSSProperties}>
+        <div key={`b-${i}`} style={boxStyle(b.color, b.border) as CSSProperties}>
           {render(b.children)}
         </div>
       ) : canEditDesign ? (
@@ -246,12 +248,12 @@ function HtmlEmailPreview({
         `}</style>
       )}
       <div
-        style={{ width, maxWidth: "100%", margin: "0 auto", background: parts.background, border: "1px solid #eaf0f6", borderRadius: 12, overflow: "visible", transition: "width .2s ease" }}
+        style={{ width, maxWidth: "100%", margin: "0 auto", background: parts.background, border: frameBorder(st) ? "1px solid #eaf0f6" : undefined, borderRadius: 12, overflow: "visible", transition: "width .2s ease" }}
       >
         <div
           className="nlc-canvas"
           // The in-place editor (rich-section-editor.tsx) draws links, headings and buttons in the email's colors.
-          style={{ ...(parts.bodyStyle as CSSProperties), ["--nl-link" as string]: st.linkColor, ["--nl-heading" as string]: st.headingColor, ["--nl-button" as string]: st.buttonColor ?? st.linkColor }}
+          style={{ ...(parts.bodyStyle as CSSProperties), ["--nl-link" as string]: st.linkColor, ["--nl-heading" as string]: st.headingColor, ["--nl-heading-font" as string]: st.headingFont ?? st.fontFamily, ["--nl-heading-weight" as string]: String(st.headingWeight), ["--nl-button" as string]: st.buttonColor ?? st.linkColor }}
         >
           {render(parts.blocks)}
         </div>

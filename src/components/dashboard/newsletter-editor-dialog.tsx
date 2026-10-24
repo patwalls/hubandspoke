@@ -529,7 +529,7 @@ function Workspace({
         </span>
       </div>
       <div className="flex items-center justify-center">
-        {draft.status === "ready" && draft.template && view === "visual" && !draft.template.beehiiv && <DeviceToggle device={device} onChange={setDevice} />}
+        {draft.status === "ready" && draft.template && view === "visual" && <DeviceToggle device={device} onChange={setDevice} />}
       </div>
       <div className="flex items-center justify-end gap-1.5 pr-8">
         <span className="hidden max-w-[260px] min-w-12 truncate text-right text-xs text-muted-foreground sm:inline" title={message ?? undefined}>
@@ -549,7 +549,7 @@ function Workspace({
                 AI review
               </Button>
             )}
-            {draft.template && !draft.template.beehiiv && (
+            {draft.template && (
               <Button variant="ghost" size="sm" onClick={() => setPreviewOpen(true)} title="The exact email that is sent, on desktop and on a phone">
                 <Eye />
                 Preview
@@ -593,12 +593,10 @@ function Workspace({
                       <SpellCheck className="size-4" />
                       Proofread
                     </DropdownMenuItem>
-                    {!draft.template.beehiiv && (
-                      <DropdownMenuItem onClick={sendTest} disabled={busyAction !== null} className="cursor-pointer gap-2">
+                                          <DropdownMenuItem onClick={sendTest} disabled={busyAction !== null} className="cursor-pointer gap-2">
                         <Mail className="size-4" />
                         Send test to me
                       </DropdownMenuItem>
-                    )}
                   </>
                 )}
                 {pushUrl && (
@@ -792,11 +790,11 @@ function Workspace({
   );
 
   const exactHtml = useMemo(
-    () => (draft.template && !draft.template.beehiiv ? renderEmailHtml({ template: draft.template, sections, sponsor: sponsorArg, subject, previewText, screenshots: previewShots, footerNote: FOOTER_NOTE, layout }) : ""),
+    () => (draft.template ? renderEmailHtml({ template: draft.template, sections, sponsor: sponsorArg, subject, previewText, screenshots: previewShots, footerNote: draft.template.beehiiv ? null : FOOTER_NOTE, layout }) : ""),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- previewShots is rebuilt each render; its parts are what matters
     [draft.template, sections, sponsorArg, subject, previewText, shots.chosen, shots.urlFor, layout],
   );
-  const canvasWidth = device === "mobile" && !draft.template?.beehiiv ? MOBILE_WIDTH : EMAIL_WIDTH;
+  const canvasWidth = device === "mobile" ? MOBILE_WIDTH : EMAIL_WIDTH;
   const visual = draft.template ? (
     <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_400px]">
       <div className="min-h-0 overflow-y-auto bg-muted/40">
@@ -819,8 +817,8 @@ function Workspace({
             </span>
           </button>
         </div>
-        <div className={cn(device === "mobile" && !draft.template.beehiiv && "flex justify-center px-5 py-5")}>
-          <div className={cn(device === "mobile" && !draft.template.beehiiv && "overflow-hidden rounded-[32px] border-[10px] border-[#1f2937] bg-[#1f2937] shadow-xl")} style={device === "mobile" && !draft.template.beehiiv ? { width: MOBILE_WIDTH + 20 } : undefined}>
+        <div className={cn(device === "mobile" && "flex justify-center px-5 py-5")}>
+          <div className={cn(device === "mobile" && "overflow-hidden rounded-[32px] border-[10px] border-[#1f2937] bg-[#1f2937] shadow-xl")} style={device === "mobile" ? { width: MOBILE_WIDTH + 20 } : undefined}>
             <EmailPreview
               template={draft.template}
               sections={sections}
@@ -981,7 +979,7 @@ function Workspace({
             fixes={fixes}
             busy={busyAction}
             sections={draft.template?.sections ?? []}
-            canSendTest={!draft.template?.beehiiv}
+            canSendTest
             onChecks={runChecks}
             onProofread={proofread}
             onSendTest={sendTest}
@@ -1026,12 +1024,10 @@ function Workspace({
                     {busyAction === "proofread" ? <Loader2 className="animate-spin" /> : <SpellCheck />}
                     Proofread
                   </Button>
-                  {!draft.template.beehiiv && (
-                    <Button size="xs" variant="outline" onClick={sendTest} disabled={busyAction !== null} title="Emails the exact email to you (only you)">
+                                      <Button size="xs" variant="outline" onClick={sendTest} disabled={busyAction !== null} title="Emails the exact email to you (only you)">
                       {busyAction === "test-email" ? <Loader2 className="animate-spin" /> : <Mail />}
                       Send test to me
                     </Button>
-                  )}
                 </div>
               </div>
             )}
@@ -1052,13 +1048,12 @@ function Workspace({
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
       {header}
-      {previewOpen && exactHtml && <ExactPreview html={exactHtml} device={device} onDevice={setDevice} onClose={() => setPreviewOpen(false)} />}
+      {previewOpen && exactHtml && <ExactPreview html={exactHtml} device={device} onDevice={setDevice} onClose={() => setPreviewOpen(false)} beehiiv={!!draft.template?.beehiiv} />}
       {templateCtx && draft.formatId && templateCtx.template && (
         <TemplateEditorDialog
           formatId={draft.formatId}
           initial={templateCtx.template}
           storyCtx={{ singleVideoNote: templateCtx.singleVideoNote, caseStudies: templateCtx.caseStudies }}
-          canUnlock={!!templateCtx.canUnlock}
           hubspotUrl={templateCtx.hubspotTemplateUrl ?? null}
           onClose={() => setTemplateCtx(null)}
           onSaved={() => {
@@ -1216,7 +1211,6 @@ type Device = "desktop" | "mobile";
 /** What the format's template route returns (GET /api/formats/[id]/newsletter-template). */
 interface TemplateCtx {
   template: NewsletterTemplate | null;
-  canUnlock?: boolean;
   hubspotTemplateUrl?: string | null;
   singleVideoNote: string | null;
   caseStudies: boolean;
@@ -1252,16 +1246,18 @@ function DeviceToggle({ device, onChange }: { device: Device; onChange: (d: Devi
 }
 
 /** The exact email — the HTML that is sent — in a sandboxed frame, at desktop or phone width. */
-function ExactPreview({ html, device, onDevice, onClose }: { html: string; device: Device; onDevice: (d: Device) => void; onClose: () => void }) {
+function ExactPreview({ html, device, onDevice, onClose, beehiiv }: { html: string; device: Device; onDevice: (d: Device) => void; onClose: () => void; beehiiv: boolean }) {
   const mobile = device === "mobile";
   return (
     <div className="absolute inset-0 z-20 flex flex-col bg-background">
       <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 border-b px-4 py-2.5">
         <div className="flex min-w-0 flex-col">
           <span className="flex items-center gap-1.5 text-sm font-semibold">
-            <Eye className="size-4" /> Exactly what lands in the inbox
+            <Eye className="size-4" /> {beehiiv ? "The email as designed" : "Exactly what lands in the inbox"}
           </span>
-          <span className="truncate text-xs text-muted-foreground">The HTML that goes to HubSpot, rendered as-is. HubSpot adds the footer.</span>
+          <span className="truncate text-xs text-muted-foreground">
+            {beehiiv ? "Rendered as-is. Create draft in beehiiv still builds the beehiiv post from its own blocks." : "The HTML that goes to HubSpot, rendered as-is. HubSpot adds the footer."}
+          </span>
         </div>
         <DeviceToggle device={device} onChange={onDevice} />
         <div className="flex justify-end pr-8">
