@@ -89,10 +89,12 @@ function NextCard({
   const { next, remaining, sameSource } = data;
   const done = published ? "Published." : "Sent on.";
   return (
+    // bottom-24: above the toast stack (bottom-right), so the "Published"
+    // toast doesn't cover Open next.
     <div
       role="status"
       data-testid="up-next-card"
-      className="fixed bottom-6 right-6 z-50 w-80 rounded-lg border bg-background p-3 shadow-lg"
+      className="fixed bottom-24 right-6 z-50 w-80 rounded-lg border bg-background p-3 shadow-lg"
     >
       <div className="flex items-start gap-2">
         <CheckIcon className="mt-0.5 size-4 shrink-0 text-emerald-600" />
