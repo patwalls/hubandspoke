@@ -215,6 +215,16 @@ export const newsletterTemplateSchema = z
      * issue. Goes into the drafter's system prompt next to the Skill.
      */
     styleNotes: z.string().max(6000).nullable().default(null),
+    /**
+     * The email's DESIGN as a document (newsletter-layout.ts): masthead,
+     * headings, pills, boxes, dividers, fixed text and one `slot` per section.
+     * Null on templates saved before 2026-10-23 (`layoutFor` builds it from
+     * the sections' old look settings). Not used by beehiiv templates.
+     */
+    layout: z
+      .custom<{ type: "doc"; content?: unknown[] }>((v) => !!v && typeof v === "object" && (v as { type?: unknown }).type === "doc", "layout must be a document")
+      .nullable()
+      .default(null),
     /** When / from how many issues `styleNotes` and the sections were learned. */
     learnedAt: z.string().nullable().default(null),
     learnedFrom: z.number().int().min(0).nullable().default(null),
@@ -296,6 +306,7 @@ export const DEFAULT_TEMPLATES: Record<string, NewsletterTemplate> = {
     version: 1,
     locked: false,
     styleNotes: null,
+    layout: null,
     learnedAt: null,
     learnedFrom: null,
     style: STARTER_STORY_STYLE,
@@ -339,6 +350,7 @@ export const DEFAULT_TEMPLATES: Record<string, NewsletterTemplate> = {
     version: 1,
     locked: false,
     styleNotes: null,
+    layout: null,
     learnedAt: null,
     learnedFrom: null,
     style: { ...STARTER_STORY_STYLE, dividers: false },
@@ -388,6 +400,7 @@ export const DEFAULT_TEMPLATES: Record<string, NewsletterTemplate> = {
         // The beehiiv build depends on this exact structure: changes go through a template admin.
         locked: true,
         styleNotes: null,
+        layout: null,
         learnedAt: null,
         learnedFrom: null,
         sections: [

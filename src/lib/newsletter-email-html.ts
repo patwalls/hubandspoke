@@ -16,6 +16,8 @@
 import { Marked, type Tokens } from "marked";
 import { replaceScreenshotMarks, screenshotKey, stepsWithoutScreenshots, type ChosenScreenshot, type StepSpot } from "@/lib/newsletter-screenshots";
 import { sponsorBlock, type NewsletterSection, type NewsletterStyle, type NewsletterTemplate, type NewsletterTemplateSection } from "@/lib/newsletter-template";
+import { layoutFor } from "@/lib/newsletter-layout";
+import { docToMarkdown, type DocNode } from "@/lib/newsletter-rich-doc";
 
 /** The email's width in a desktop client; phones get 100%. */
 export const EMAIL_WIDTH = 600;
@@ -262,9 +264,7 @@ export function sectionMarkdown(args: RenderEmailArgs, sec: NewsletterTemplateSe
 
 export interface EmailSectionPart {
   key: string;
-  /** The template heading (pill or plain), or null. */
-  heading: string | null;
-  /** The section's content (box / label applied), "" when there is none. */
+  /** The section's content (label applied), "" when there is none. */
   content: string;
   /** Nothing drafted here yet. */
   empty: boolean;
@@ -272,63 +272,135 @@ export interface EmailSectionPart {
   addPoints: StepSpot[];
 }
 
+/** The email as the layout draws it: fixed design, the sections' slots, and boxes holding either. */
+export type EmailBlock =
+  | { kind: "fixed"; html: string; node: string }
+  | ({ kind: "slot" } & EmailSectionPart)
+  | { kind: "box"; color: string; children: EmailBlock[] };
+
 export interface EmailParts {
-  /** The masthead block, or null. */
-  masthead: string | null;
-  sections: EmailSectionPart[];
-  /** What goes between two sections. */
-  divider: string;
+  blocks: EmailBlock[];
   /** The email body cell's style (padding, font, color). */
   bodyStyle: Record<string, string>;
   background: string;
 }
 
-/** The email in pieces — the editor's canvas puts click-to-edit around each one. */
+/** A tinted box (a layout `callout`), as React style for the canvas. */
+export function boxStyle(color: string): Record<string, string> {
+  return { background: color, borderRadius: "12px", padding: "20px 22px 6px 22px", marginBottom: "16px" };
+}
+
+/** One section's slot content. */
+function slotPart(args: RenderEmailArgs, sec: NewsletterTemplateSection, t: ReturnType<typeof tokens>): EmailSectionPart {
+  const st = args.template.style;
+  const md = sectionMarkdown(args, sec);
+  let content = md ? markdownToEmailHtml(md, st, { buttons: sec.linkButtons, canvas: args.canvas, inline: sec.look === "label", personalization: args.personalization }) : "";
+  if (!content && args.showHints) {
+    const sample = (title: string, body: string) =>
+      `<div style="margin:4px 0 16px 0;padding:22px 24px;border:2px dashed #c7d2dc;border-radius:10px;background:#f7fafc;text-align:center;${t.F}font-size:13px;line-height:1.5;color:#6b7280;"><strong>${title}</strong><br>${body}</div>`;
+    content =
+      (sec.thumbnail && sec.kind !== "sponsor" ? sample("Video thumbnail", "Pulled from the video each draft. Swap or upload in the draft editor.") : "") +
+      `<p style="${t.hint}">${esc(sec.hint || "(content)")}</p>` +
+      (sec.screenshots && sec.kind !== "sponsor" ? sample("Screenshots go here in each draft", "AI marks the right moments in the video; Hub &amp; Spoke grabs those frames.") : "");
+  }
+  if (content && sec.look === "label") content = `${TABLE("margin:0 0 16px 0;")}<tr><td style="${t.label(sec.boxColor ?? "#e2e8f0")}">${content}</td></tr></table>`;
+  return { key: sec.key, content, empty: !md, addPoints: args.canvas && sec.screenshots && sec.kind !== "sponsor" ? stepsWithoutScreenshots(md) : [] };
+}
+
+/** A fixed (designed) layout node as email HTML. */
+function fixedHtml(node: DocNode, args: RenderEmailArgs, t: ReturnType<typeof tokens>): string {
+  const st = args.template.style;
+  switch (node.type) {
+    case "image": {
+      const src = safeUrl(String(node.attrs?.src ?? ""));
+      if (!src) return "";
+      const bg = typeof node.attrs?.background === "string" ? node.attrs.background : null;
+      const img = `<img src="${esc(src)}" width="${CONTENT_WIDTH}" alt="${esc(String(node.attrs?.alt ?? ""))}" style="${t.mastheadImg}">`;
+      const link = safeUrl(typeof node.attrs?.href === "string" ? node.attrs.href : null);
+      return `${TABLE("margin:0 0 24px 0;", true)}<tr><td style="background:${bg ?? "transparent"};border-radius:12px;text-align:center;padding:0;">${link ? `<a href="${esc(link)}" target="_blank" style="display:block;">${img}</a>` : img}</td></tr></table>`;
+    }
+    case "heading": {
+      const label = applyPersonalization(esc((node.content ?? []).map(function plain(n: DocNode): string {
+        return (n.text ?? "") + (n.content ?? []).map(plain).join("");
+      }).join("")), args.personalization ?? "sample");
+      if (!label.trim()) return "";
+      const pill = typeof node.attrs?.pill === "string" ? node.attrs.pill : null;
+      const level = Number(node.attrs?.level) === 3 ? 3 : 2;
+      return pill ? `${TABLE("margin:0 0 14px 0;")}<tr><td style="${t.pill(pill)}">${label}</td></tr></table>` : `<p style="${t.plainHeading(level)}">${label}</p>`;
+    }
+    case "horizontalRule":
+      return divider(true);
+    default:
+      return markdownToEmailHtml(docToMarkdown({ type: "doc", content: [node] }), st, { personalization: args.personalization });
+  }
+}
+
+/** The email in blocks, from the template's layout — the editor's canvas puts click-to-edit around each slot. */
 export function renderEmailParts(args: RenderEmailArgs): EmailParts {
   const { template } = args;
   const st = template.style;
   const t = tokens(st);
-  const sections: EmailSectionPart[] = template.sections.map((sec) => {
-    const md = sectionMarkdown(args, sec);
-    let content = md ? markdownToEmailHtml(md, st, { buttons: sec.linkButtons, canvas: args.canvas, inline: sec.look === "label", personalization: args.personalization }) : "";
-    if (!content && args.showHints) {
-      const sample = (title: string, body: string) =>
-        `<div style="margin:4px 0 16px 0;padding:22px 24px;border:2px dashed #c7d2dc;border-radius:10px;background:#f7fafc;text-align:center;${t.F}font-size:13px;line-height:1.5;color:#6b7280;"><strong>${title}</strong><br>${body}</div>`;
-      content =
-        (sec.thumbnail && sec.kind !== "sponsor" ? sample("Video thumbnail", "Pulled from the video each draft. Swap or upload in the draft editor.") : "") +
-        `<p style="${t.hint}">${esc(sec.hint || "(content)")}</p>` +
-        (sec.screenshots && sec.kind !== "sponsor" ? sample("Screenshots go here in each draft", "AI marks the right moments in the video; Hub &amp; Spoke grabs those frames.") : "");
-    }
-    if (content && sec.look === "label") content = `${TABLE("margin:0 0 16px 0;")}<tr><td style="${t.label(sec.boxColor ?? "#e2e8f0")}">${content}</td></tr></table>`;
-    else if (content && sec.boxColor) content = `${TABLE("margin:0 0 16px 0;", true)}<tr><td style="${t.box(sec.boxColor)}">${content}</td></tr></table>`;
-    let heading: string | null = null;
-    if (sec.heading) {
-      heading = sec.pillColor
-        ? `${TABLE("margin:0 0 14px 0;")}<tr><td style="${t.pill(sec.pillColor)}">${esc(sec.heading)}</td></tr></table>`
-        : `<p style="${t.plainHeading(sec.headingLevel)}">${esc(sec.heading)}</p>`;
-    }
-    return { key: sec.key, heading, content, empty: !md, addPoints: args.canvas && sec.screenshots && sec.kind !== "sponsor" ? stepsWithoutScreenshots(md) : [] };
-  });
-
-  let masthead: string | null = null;
-  if (st.mastheadImageUrl) {
-    const img = `<img src="${esc(st.mastheadImageUrl)}" width="${CONTENT_WIDTH}" alt="" style="${t.mastheadImg}">`;
-    const link = safeUrl(st.mastheadLinkUrl);
-    masthead = `${TABLE("margin:0 0 24px 0;", true)}<tr><td style="${t.masthead}">${link ? `<a href="${esc(link)}" target="_blank" style="display:block;">${img}</a>` : img}</td></tr></table>`;
-  }
-  return { masthead, sections, divider: divider(st.dividers), bodyStyle: t.body, background: st.contentBackground };
+  const byKey = new Map(template.sections.map((s) => [s.key, s]));
+  const build = (nodes: DocNode[]): EmailBlock[] =>
+    nodes.flatMap((node): EmailBlock[] => {
+      if (node.type === "slot") {
+        const sec = byKey.get(String(node.attrs?.key ?? ""));
+        return sec ? [{ kind: "slot", ...slotPart(args, sec, t) }] : [];
+      }
+      if (node.type === "callout") return [{ kind: "box", color: typeof node.attrs?.color === "string" ? node.attrs.color : "#f1f5f9", children: build(node.content ?? []) }];
+      const html = fixedHtml(node, args, t);
+      return html ? [{ kind: "fixed", html, node: node.type }] : [];
+    });
+  return { blocks: build(layoutFor(template).content ?? []), bodyStyle: bodyStyle(st), background: st.contentBackground };
 }
 
 /**
- * The email body as one fragment: masthead, then each section with a break
- * between them. What fills the HubSpot email's rich-text block (HubSpot adds
- * the footer under it) and what the full document wraps.
+ * The blocks the sent email keeps: an empty slot goes, and so does the
+ * heading right above it; a box left with nothing but headings goes; dividers
+ * never stack or sit at the very top / bottom. Pure; exported for tests.
+ */
+export function pruneForSend(blocks: EmailBlock[], top = true): EmailBlock[] {
+  const kept: EmailBlock[] = [];
+  for (const b of blocks) {
+    if (b.kind === "slot" && !b.content) {
+      if (kept.length && kept[kept.length - 1].kind === "fixed" && (kept[kept.length - 1] as { node: string }).node === "heading") kept.pop();
+      continue;
+    }
+    if (b.kind === "box") {
+      const children = pruneForSend(b.children, false);
+      if (!children.some((c) => !(c.kind === "fixed" && (c.node === "heading" || c.node === "horizontalRule")))) {
+        if (kept.length && kept[kept.length - 1].kind === "fixed" && (kept[kept.length - 1] as { node: string }).node === "heading") kept.pop();
+        continue;
+      }
+      kept.push({ ...b, children });
+      continue;
+    }
+    kept.push(b);
+  }
+  const isRule = (b: EmailBlock | undefined) => b?.kind === "fixed" && b.node === "horizontalRule";
+  const out = kept.filter((b, i) => !(isRule(b) && isRule(kept[i - 1])));
+  if (top) {
+    while (isRule(out[0])) out.shift();
+    while (isRule(out[out.length - 1])) out.pop();
+  }
+  return out;
+}
+
+function blocksHtml(blocks: EmailBlock[], t: ReturnType<typeof tokens>): string {
+  return blocks
+    .map((b) => (b.kind === "fixed" ? b.html : b.kind === "slot" ? b.content : `${TABLE("margin:0 0 16px 0;", true)}<tr><td style="${t.box(b.color)}">${blocksHtml(b.children, t)}</td></tr></table>`))
+    .join("");
+}
+
+/**
+ * The email body as one fragment: the layout, empty sections (and their
+ * headings) left out. What fills the HubSpot email's rich-text block (HubSpot
+ * adds the footer under it) and what the full document wraps.
  */
 export function renderEmailBody(args: RenderEmailArgs): string {
   const parts = renderEmailParts({ ...args, canvas: false });
-  // A section with nothing in it leaves no heading behind (the canvas still shows it, to click and write).
-  const blocks = parts.sections.filter((s) => s.content).map((s) => (s.heading ?? "") + s.content);
-  return `${TABLE(`background:${parts.background};`, true)}<tr><td style="${cssText(parts.bodyStyle)}">${parts.masthead ?? ""}${blocks.join(parts.divider)}</td></tr></table>`;
+  const t = tokens(args.template.style);
+  return `${TABLE(`background:${parts.background};`, true)}<tr><td style="${cssText(parts.bodyStyle)}">${blocksHtml(pruneForSend(parts.blocks), t)}</td></tr></table>`;
 }
 
 /**

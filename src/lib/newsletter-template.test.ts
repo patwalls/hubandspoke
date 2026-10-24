@@ -21,6 +21,7 @@ const T: NewsletterTemplate = {
   version: 1,
   locked: false,
   styleNotes: null,
+  layout: null,
   learnedAt: null,
   learnedFrom: null,
   style: styleSchema.parse({}),

@@ -26,6 +26,7 @@ import { EmailPreview, FOOTER_NOTE, MOBILE_WIDTH } from "@/components/dashboard/
 import { EMAIL_WIDTH, renderEmailHtml } from "@/lib/newsletter-email-html";
 import { formatShortcut, useInlineFormat } from "@/components/dashboard/editable-section";
 import { RichSectionEditor } from "@/components/dashboard/rich-section-editor";
+import { TemplateEditorDialog } from "@/components/dashboard/newsletter-template-section";
 import { ImagePanel, ScreenshotMarkPanel, ScreenshotPicker, useScreenshots } from "@/components/dashboard/newsletter-screenshot-picker";
 import { isVideoThumbnail } from "@/components/dashboard/preview-screenshots";
 import { formatTimestamp, insertStepScreenshot, parseScreenshotMarks, removeScreenshotMark, screenshotKey, stepsWithoutScreenshots, type ScreenshotMark } from "@/lib/newsletter-screenshots";
@@ -37,6 +38,7 @@ import { DRAFT_PHASES, draftProgress, type DraftPhaseName } from "@/lib/estimate
 
 export interface EditorDraft {
   id: string;
+  formatId?: string;
   status: "idea" | "drafting" | "ready" | "failed";
   formatName: string;
   kind: "roundup" | "single_video";
@@ -237,6 +239,8 @@ function Workspace({
   const [subjectAngles, setSubjectAngles] = useState<Record<string, string>>({});
   /** The review panel is open in the side panel. */
   const [reviewOpen, setReviewOpen] = useState(false);
+  /** The format's template, opened from here (its editor, in place). */
+  const [templateCtx, setTemplateCtx] = useState<TemplateCtx | null>(null);
   /** "Before you send": the checks' results, the proofread's fixes, the panel. */
   const [sendPanel, setSendPanel] = useState(false);
   const [checks, setChecks] = useState<PreSendCheck[] | null>(null);
@@ -399,6 +403,16 @@ function Workspace({
       await regenerate(f.sectionKey, f.instruction);
     }
   }
+  /** Open the format's template editor right here; saving it redraws this issue with the new design. */
+  async function openTemplate() {
+    if (!draft.formatId) return;
+    if (dirty && !(await save())) return;
+    const res = await fetch(`/api/formats/${draft.formatId}/newsletter-template`);
+    const j = (await res.json().catch(() => null)) as (TemplateCtx & { template: NewsletterTemplate | null }) | null;
+    if (!res.ok || !j?.template) return setMessage("Couldn't open the template");
+    setTemplateCtx(j);
+  }
+
   /** Pre-send checks (content + every link fetched); the panel shows them. */
   async function runChecks() {
     if (dirty && !(await save())) return;
@@ -485,7 +499,14 @@ function Workspace({
   const header = (
     <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 border-b px-4 py-2.5">
       <div className="flex min-w-0 flex-col">
-        <span className="truncate text-sm font-semibold">{draft.formatName}</span>
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="truncate text-sm font-semibold">{draft.formatName}</span>
+          {draft.template && draft.formatId && (
+            <button type="button" onClick={openTemplate} className="flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground" title="Open this newsletter's template: its design and what AI writes in each section">
+              <LayoutTemplate className="size-3" /> Template
+            </button>
+          )}
+        </span>
         <span className="truncate text-xs text-muted-foreground">
           {draft.sendDate ? `Sends ${fmtDate(draft.sendDate)}` : "No send date"}
           {pushUrl ? ` · draft in ${tool}` : draft.status === "ready" ? " · draft" : ""}
@@ -528,6 +549,12 @@ function Workspace({
                   <DropdownMenuItem onClick={() => setView("visual")} className="cursor-pointer gap-2">
                     <LayoutTemplate className="size-4" />
                     Visual view
+                  </DropdownMenuItem>
+                )}
+                {draft.template && draft.formatId && (
+                  <DropdownMenuItem onClick={openTemplate} className="cursor-pointer gap-2">
+                    <LayoutTemplate className="size-4" />
+                    Edit template
                   </DropdownMenuItem>
                 )}
                 <DropdownMenuItem onClick={redraft} disabled={busyAction !== null} className="cursor-pointer gap-2">
@@ -814,6 +841,7 @@ function Workspace({
                 },
                 onAddShot: (key, n) => void addShot(key, n),
                 addingShot,
+                onEditTemplate: draft.formatId ? () => void openTemplate() : undefined,
                 shotUrl: (sectionKey, label) => {
                   const k = screenshotKey(sectionKey, label);
                   const c = shots.chosen[k];
@@ -1001,6 +1029,20 @@ function Workspace({
     <div className="relative flex min-h-0 flex-1 flex-col">
       {header}
       {previewOpen && exactHtml && <ExactPreview html={exactHtml} device={device} onDevice={setDevice} onClose={() => setPreviewOpen(false)} />}
+      {templateCtx && draft.formatId && templateCtx.template && (
+        <TemplateEditorDialog
+          formatId={draft.formatId}
+          initial={templateCtx.template}
+          storyCtx={{ singleVideoNote: templateCtx.singleVideoNote, caseStudies: templateCtx.caseStudies }}
+          canUnlock={!!templateCtx.canUnlock}
+          hubspotUrl={templateCtx.hubspotTemplateUrl ?? null}
+          onClose={() => setTemplateCtx(null)}
+          onSaved={() => {
+            setTemplateCtx(null);
+            void reload();
+          }}
+        />
+      )}
       {draft.kind === "single_video" && <VideoBar draft={draft} disabled={draft.status === "drafting" || busyAction !== null} onPick={(itemId) => post(`/api/newsletter-drafts/${draft.id}/video`, { itemId }, "video")} />}
       {draft.kind === "roundup" && draft.sourceItemId && (
         <div className="flex flex-wrap items-center gap-2 border-b px-5 py-2 text-sm">
@@ -1149,6 +1191,15 @@ function Workspace({
 }
 
 type Device = "desktop" | "mobile";
+
+/** What the format's template route returns (GET /api/formats/[id]/newsletter-template). */
+interface TemplateCtx {
+  template: NewsletterTemplate | null;
+  canUnlock?: boolean;
+  hubspotTemplateUrl?: string | null;
+  singleVideoNote: string | null;
+  caseStudies: boolean;
+}
 
 /** Desktop / phone, for the canvas and the exact preview. */
 function DeviceToggle({ device, onChange }: { device: Device; onChange: (d: Device) => void }) {

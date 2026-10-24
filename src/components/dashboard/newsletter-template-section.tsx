@@ -10,7 +10,8 @@
 // allows instruction edits only, unless a template admin unlocks it; the API
 // enforces the same rule. Flag `newsletterDrafter`.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { Editor } from "@tiptap/react";
 import { ArrowDown, ArrowUp, ExternalLink, GraduationCap, LayoutTemplate, Loader2, Lock, LockOpen, MousePointerClick, Pencil, Plus, RotateCcw, Sparkles, Trash2 } from "lucide-react";
 import { startVisibleInterval } from "@/lib/visible-interval";
 import { Button } from "@/components/ui/button";
@@ -19,6 +20,9 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useFeatureFlags } from "@/components/clip-editor/use-feature-flags";
 import { EmailPreview } from "@/components/dashboard/email-preview";
+import { LayoutEditor, removeSlot } from "@/components/dashboard/layout-editor";
+import { defaultSection, layoutFor, newSlotKey, withLayout, type LayoutDoc } from "@/lib/newsletter-layout";
+import { bodyStyle } from "@/lib/newsletter-email-html";
 import { cn } from "@/lib/utils";
 import {
   STORY_KIND_LABELS,
@@ -278,7 +282,7 @@ export function NewsletterTemplateSection({ formatId }: { formatId: string }) {
   );
 }
 
-function TemplateEditorDialog({
+export function TemplateEditorDialog({
   formatId,
   initial,
   proposalNote,
@@ -299,6 +303,9 @@ function TemplateEditorDialog({
   onSaved: (t: NewsletterTemplate) => void;
 }) {
   const [t, setT] = useState<NewsletterTemplate>(initial);
+  /** The design (non-beehiiv): the layout document the canvas edits. */
+  const [design, setDesign] = useState<LayoutDoc>(() => layoutFor(initial));
+  const layoutEditor = useRef<Editor | null>(null);
   /** Canvas selection: a section key, `card:<i>`, `look`, or null (the overview). */
   const [selected, setSelected] = useState<string | null>(null);
   const [editingSection, setEditingSection] = useState<string | null>(null);
@@ -321,7 +328,7 @@ function TemplateEditorDialog({
       const r = await fetch(`/api/formats/${formatId}/newsletter-template`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ template: t }),
+        body: JSON.stringify({ template: t.beehiiv ? t : withLayout(t, design) }),
       });
       const j = (await r.json().catch(() => ({}))) as { template?: NewsletterTemplate; error?: string };
       if (!r.ok || !j.template) throw new Error(j.error ?? "Couldn't save");
@@ -371,6 +378,38 @@ function TemplateEditorDialog({
           </div>
         </div>
         <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_400px]">
+          {!t.beehiiv ? (
+            <div className="min-h-0 overflow-y-auto bg-muted/40">
+              <div className="mx-auto px-5 py-6" style={{ maxWidth: 640 }}>
+                <div
+                  className="rounded-xl border bg-white"
+                  style={{ ...(bodyStyle(t.style) as React.CSSProperties), background: t.style.contentBackground, ["--nl-link" as string]: t.style.linkColor, ["--nl-heading" as string]: t.style.headingColor, ["--nl-button" as string]: t.style.buttonColor ?? t.style.linkColor }}
+                >
+                  <LayoutEditor
+                    layout={design}
+                    sections={t.sections}
+                    selected={selSection?.key ?? null}
+                    editorRef={layoutEditor}
+                    onChange={(l) => {
+                      setDesign(l);
+                      setT((cur) => withLayout(cur, l));
+                    }}
+                    onSelectSlot={(key) => setSelected(key)}
+                    onAddSlot={() => {
+                      const key = newSlotKey(t);
+                      setT((cur) => ({ ...cur, sections: [...cur.sections, defaultSection(key)] }));
+                      setSelected(key);
+                      return key;
+                    }}
+                  />
+                </div>
+                {t.hubspot && <p className="mt-2 text-center text-xs text-muted-foreground">HubSpot adds the footer under the email: unsubscribe link, address.</p>}
+              </div>
+              <p className="flex items-center justify-center gap-1.5 pb-6 text-center text-xs text-muted-foreground">
+                <MousePointerClick className="size-3.5" /> This is the email: design it right here. Click an AI section to edit what the drafter writes there · hover a block for + and ⋮
+              </p>
+            </div>
+          ) : (
           <div className="min-h-0 overflow-y-auto bg-muted/40" onClick={deselect}>
             <EmailPreview
               template={t}
@@ -404,6 +443,7 @@ function TemplateEditorDialog({
               {t.beehiiv?.layout ? " · click a card's label or edge for its settings" : ""} · click the masthead for the look
             </p>
           </div>
+          )}
 
           <div className="flex min-h-0 flex-col gap-4 overflow-y-auto border-l p-4">
             {proposalNote && (
@@ -447,7 +487,9 @@ function TemplateEditorDialog({
                   setT({ ...t, sections: next });
                 }}
                 onDelete={() => {
-                  setT({ ...t, sections: t.sections.filter((s) => s.key !== selSection.key) });
+                  // A designed template: the slot leaves the email (its section goes with it on the next sync).
+                  if (!t.beehiiv && layoutEditor.current) removeSlot(layoutEditor.current, selSection.key);
+                  else setT({ ...t, sections: t.sections.filter((s) => s.key !== selSection.key) });
                   deselect();
                 }}
               />
@@ -468,6 +510,15 @@ function TemplateEditorDialog({
                 storyCtx={storyCtx}
                 frozen={frozen}
                 onAddSection={() => {
+                  if (!t.beehiiv && layoutEditor.current) {
+                    // A designed template: the new AI section goes at the end of the email.
+                    const key = newSlotKey(t);
+                    setT((cur) => ({ ...cur, sections: [...cur.sections, defaultSection(key)] }));
+                    const ed = layoutEditor.current;
+                    ed.chain().insertContentAt(ed.state.doc.content.size, { type: "slot", attrs: { key } }).run();
+                    setSelected(key);
+                    return;
+                  }
                   const key = `section_${t.sections.length + 1}`;
                   setT({ ...t, sections: [...t.sections, { key, heading: "New section", headingLevel: 2, kind: "text", hint: "", pillColor: null, boxColor: null, screenshots: false, look: "text", thumbnail: false, bullets: "list", linkButtons: false, optional: false }] });
                   setSelected(key);
@@ -526,8 +577,8 @@ function OverviewPanel({
         />
       </label>
       <p className="rounded-md bg-muted/60 p-3 text-xs text-muted-foreground">
-        Click any section in the email to edit its instructions right there: what AI writes in it every draft. Its settings show here.
-        {t.hubspot ? " The look (masthead, colors, headings, buttons) is set here — click the masthead or “Look” — and the whole email is sent to HubSpot as one block; HubSpot adds the footer." : ""}
+        {t.beehiiv ? "Click any section in the email to edit its instructions right there: what AI writes in it every draft. Its settings show here." : "Click an AI section in the email to edit what the drafter writes there; everything else on the canvas is the design — type, click, restyle."}
+        {t.hubspot ? " The email is designed right on the canvas — masthead, headings, pills, boxes, dividers, fixed text — and sent to HubSpot as one block; HubSpot adds the footer. “Look” sets the colors and font." : ""}
         {t.beehiiv?.layout ? " Fonts and the footer come from the “Hub & Spoke” template in beehiiv." : ""}
       </p>
       <p className="rounded-md bg-muted/60 p-3 text-xs text-muted-foreground">
@@ -589,24 +640,15 @@ function SectionPanel({
         <span className="text-muted-foreground">Instructions: what the drafter picks and writes here</span>
         <Textarea className="min-h-28 text-xs" value={sec.hint} onChange={(e) => onChange({ hint: e.target.value })} />
       </label>
-      <label className="flex flex-col gap-1 text-xs">
-        <FieldLabel text="Section name (empty = the section writes its own headline)" lock={lock()} />
-        <Input className="h-8 text-xs" value={sec.heading ?? ""} disabled={!!lock()} onChange={(e) => onChange({ heading: e.target.value || null })} />
-      </label>
-      {!t.beehiiv && sec.look !== "label" && (
-        <div className="flex flex-wrap items-center gap-3">
-          <ColorToggle label="Name as a colored pill" value={sec.pillColor} fallback="#fed7aa" disabled={frozen} onChange={(v) => onChange({ pillColor: v })} />
-          <ColorToggle label="Tinted box behind the text" value={sec.boxColor} fallback="#EBECFC" disabled={frozen} onChange={(v) => onChange({ boxColor: v })} />
-        </div>
-      )}
-      {!t.beehiiv && (
-        <label className={cn("flex items-center gap-2 text-xs", frozen && "opacity-60")}>
-          <input type="checkbox" checked={sec.linkButtons} disabled={frozen} onChange={(e) => onChange({ linkButtons: e.target.checked })} />
-          <span>
-            Links on their own line become buttons
-            <span className="block text-muted-foreground">A CTA like “Grab the free guide” draws as a button in the brand color.</span>
-          </span>
+      {t.beehiiv ? (
+        <label className="flex flex-col gap-1 text-xs">
+          <FieldLabel text="Section name (empty = the section writes its own headline)" lock={lock()} />
+          <Input className="h-8 text-xs" value={sec.heading ?? ""} disabled={!!lock()} onChange={(e) => onChange({ heading: e.target.value || null })} />
         </label>
+      ) : (
+        <p className="rounded-md bg-muted/60 p-2.5 text-xs text-muted-foreground">
+          Its look — the heading above it, a pill, a box around it — is designed right in the email. Click the heading to change its text or color.
+        </p>
       )}
       {sec.kind !== "sponsor" && (
         <label className={cn("flex items-center gap-2 text-xs", frozen && "opacity-60")}>
@@ -618,10 +660,12 @@ function SectionPanel({
         </label>
       )}
       <div className="flex flex-wrap gap-2">
-        <label className="flex flex-col gap-1 text-xs">
-          <FieldLabel text="Key" lock={lock()} />
-          <Input className="h-8 w-36 font-mono text-xs" value={sec.key} disabled={frozen} onChange={(e) => onChange({ key: e.target.value })} />
-        </label>
+        {t.beehiiv && (
+          <label className="flex flex-col gap-1 text-xs">
+            <FieldLabel text="Key" lock={lock()} />
+            <Input className="h-8 w-36 font-mono text-xs" value={sec.key} disabled={frozen} onChange={(e) => onChange({ key: e.target.value })} />
+          </label>
+        )}
         <label className="flex flex-col gap-1 text-xs">
           <FieldLabel text="Type" lock={lock()} />
           <select
@@ -677,30 +721,25 @@ function SectionPanel({
           </span>
         </label>
       )}
-      <div className="flex items-center gap-1">
-        <Button size="icon-xs" variant="ghost" onClick={() => onMove(-1)} disabled={frozen || index === 0} aria-label="Move up">
-          <ArrowUp />
+      {t.beehiiv ? (
+        <div className="flex items-center gap-1">
+          <Button size="icon-xs" variant="ghost" onClick={() => onMove(-1)} disabled={frozen || index === 0} aria-label="Move up">
+            <ArrowUp />
+          </Button>
+          <Button size="icon-xs" variant="ghost" onClick={() => onMove(1)} disabled={frozen || index === t.sections.length - 1} aria-label="Move down">
+            <ArrowDown />
+          </Button>
+          <Button size="icon-xs" variant="ghost" onClick={onDelete} disabled={frozen || t.sections.length === 1} aria-label="Remove section">
+            <Trash2 />
+          </Button>
+          {lock() && <FieldLabel text="" lock={`Order and removal: ${lock()}`} />}
+        </div>
+      ) : (
+        <Button size="sm" variant="ghost" className="self-start text-destructive" onClick={onDelete} disabled={t.sections.length === 1}>
+          <Trash2 /> Remove this AI section from the email
         </Button>
-        <Button size="icon-xs" variant="ghost" onClick={() => onMove(1)} disabled={frozen || index === t.sections.length - 1} aria-label="Move down">
-          <ArrowDown />
-        </Button>
-        <Button size="icon-xs" variant="ghost" onClick={onDelete} disabled={frozen || t.sections.length === 1} aria-label="Remove section">
-          <Trash2 />
-        </Button>
-        {lock() && <FieldLabel text="" lock={`Order and removal: ${lock()}`} />}
-      </div>
+      )}
     </div>
-  );
-}
-
-/** An optional color (a section's pill or box): off, or a swatch + text field. */
-function ColorToggle({ label, value, fallback, disabled, onChange }: { label: string; value: string | null; fallback: string; disabled?: boolean; onChange: (v: string | null) => void }) {
-  return (
-    <label className={cn("flex items-center gap-2 text-xs", disabled && "opacity-60")}>
-      <input type="checkbox" checked={value !== null} disabled={disabled} onChange={(e) => onChange(e.target.checked ? fallback : null)} />
-      <span className="text-muted-foreground">{label}</span>
-      {value !== null && <input type="color" className="h-6 w-8 cursor-pointer rounded border" value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)} />}
-    </label>
   );
 }
 
@@ -726,16 +765,7 @@ function LookPanel({ template: t, frozen, canLock, onChange }: { template: Newsl
       <PanelTitle>Look</PanelTitle>
       {!layout ? (
         <>
-          <p className="text-xs text-muted-foreground">The whole email is drawn from these settings, in the preview and in the inbox alike.</p>
-          <label className="flex flex-col gap-1 text-xs">
-            <span className="text-muted-foreground">Masthead image URL</span>
-            <Input className="h-8 text-xs" value={st.mastheadImageUrl ?? ""} disabled={frozen} placeholder="https://… (empty = none)" onChange={(e) => setStyle({ mastheadImageUrl: e.target.value || null })} />
-          </label>
-          <label className="flex flex-col gap-1 text-xs">
-            <span className="text-muted-foreground">Masthead links to</span>
-            <Input className="h-8 text-xs" value={st.mastheadLinkUrl ?? ""} disabled={frozen} placeholder="https://… (empty = no link)" onChange={(e) => setStyle({ mastheadLinkUrl: e.target.value || null })} />
-          </label>
-          <HexField label="Masthead bg" value={st.mastheadBackground ?? "#ffffff"} disabled={frozen} onChange={(v) => setStyle({ mastheadBackground: v })} />
+          <p className="text-xs text-muted-foreground">The email&apos;s colors and font. The masthead, headings, pills, boxes and dividers are designed right in the email.</p>
           <HexField label="Text" value={st.textColor} disabled={frozen} onChange={(v) => setStyle({ textColor: v })} />
           <HexField label="Headings" value={st.headingColor} disabled={frozen} onChange={(v) => setStyle({ headingColor: v })} />
           <HexField label="Links" value={st.linkColor} disabled={frozen} onChange={(v) => setStyle({ linkColor: v })} />
@@ -744,10 +774,6 @@ function LookPanel({ template: t, frozen, canLock, onChange }: { template: Newsl
           <label className="flex flex-col gap-1 text-xs">
             <span className="text-muted-foreground">Font (a system stack every mail client has)</span>
             <Input className="h-8 text-xs" value={st.fontFamily} disabled={frozen} onChange={(e) => setStyle({ fontFamily: e.target.value })} />
-          </label>
-          <label className={cn("flex items-center gap-2 text-xs", frozen && "opacity-60")}>
-            <input type="checkbox" checked={st.dividers} disabled={frozen} onChange={(e) => setStyle({ dividers: e.target.checked })} />
-            <span>Faint rule between sections</span>
           </label>
         </>
       ) : null}

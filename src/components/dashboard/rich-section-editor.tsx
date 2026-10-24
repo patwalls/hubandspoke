@@ -123,7 +123,7 @@ function ButtonView({ node, updateAttributes, selected }: NodeViewProps) {
   );
 }
 
-const CtaButton = Node.create({
+export const CtaButton = Node.create({
   name: "ctaButton",
   group: "block",
   atom: true,
@@ -144,7 +144,7 @@ function FirstNameView() {
   );
 }
 
-const FirstName = Node.create({
+export const FirstName = Node.create({
   name: "firstName",
   group: "inline",
   inline: true,
@@ -178,7 +178,7 @@ function ImageView({ node, extension, getPos, editor }: NodeViewProps) {
 
 // ── Toolbar ─────────────────────────────────────────────────────────────
 
-function Btn({ title, active, onClick, children }: { title: string; active?: boolean; onClick: () => void; children: ReactNode }) {
+export function Btn({ title, active, onClick, children }: { title: string; active?: boolean; onClick: () => void; children: ReactNode }) {
   return (
     <button
       type="button"
@@ -192,7 +192,7 @@ function Btn({ title, active, onClick, children }: { title: string; active?: boo
     </button>
   );
 }
-const Sep = () => <span className="mx-0.5 h-4 w-px bg-[#e5e7eb]" />;
+export const Sep = () => <span className="mx-0.5 h-4 w-px bg-[#e5e7eb]" />;
 
 function Toolbar({ editor, className }: { editor: Editor; className?: string }) {
   const [linkUrl, setLinkUrl] = useState<string | null>(null);
@@ -319,7 +319,7 @@ function newBlock(editor: Editor, kind: BlockInsert): Record<string, unknown> {
   return { type: "screenshot", attrs: { label: `Image ${n}`, sec: null } };
 }
 
-function MenuItem({ icon, label, onClick, danger }: { icon: ReactNode; label: string; onClick: () => void; danger?: boolean }) {
+export function MenuItem({ icon, label, onClick, danger }: { icon: ReactNode; label: string; onClick: () => void; danger?: boolean }) {
   return (
     <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={onClick} className={cn("flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] hover:bg-[#f3f4f6]", danger ? "text-[#b91c1c]" : "text-[#222]")}>
       {icon}
@@ -328,7 +328,14 @@ function MenuItem({ icon, label, onClick, danger }: { icon: ReactNode; label: st
   );
 }
 
-function BlockHandle({ editor, container }: { editor: Editor; container: HTMLDivElement | null }) {
+/** An extra "+" menu entry: what it inserts below the hovered block. */
+export interface ExtraInsert {
+  label: string;
+  icon: ReactNode;
+  make: (editor: Editor) => Record<string, unknown>;
+}
+
+export function BlockHandle({ editor, container, extraInserts = [] }: { editor: Editor; container: HTMLDivElement | null; extraInserts?: ExtraInsert[] }) {
   const [hover, setHover] = useState<{ index: number; top: number } | null>(null);
   const [menu, setMenu] = useState<"add" | "more" | null>(null);
   useEffect(() => {
@@ -408,6 +415,17 @@ function BlockHandle({ editor, container }: { editor: Editor; container: HTMLDiv
               <MenuItem icon={<Camera className="size-3.5" />} label="Photo" onClick={() => insert("photo")} />
               <MenuItem icon={<RectangleHorizontal className="size-3.5" />} label="Button" onClick={() => insert("button")} />
               <MenuItem icon={<Minus className="size-3.5" />} label="Divider" onClick={() => insert("divider")} />
+              {extraInserts.map((x) => (
+                <MenuItem
+                  key={x.label}
+                  icon={x.icon}
+                  label={x.label}
+                  onClick={() => {
+                    editor.chain().insertContentAt(at.pos + at.size, x.make(editor)).focus().run();
+                    done();
+                  }}
+                />
+              ))}
             </>
           ) : (
             <>

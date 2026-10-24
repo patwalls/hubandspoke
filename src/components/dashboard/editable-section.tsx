@@ -49,6 +49,8 @@ export interface PreviewEditing {
   /** Template editor: a beehiiv card, or the email's look (masthead, images, poll), was clicked. */
   onSelectCard?: (index: number) => void;
   onSelectLook?: () => void;
+  /** Draft: open the format's template (clicking a designed, fixed part). */
+  onEditTemplate?: () => void;
 }
 
 export function EditableSection({

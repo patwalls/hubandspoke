@@ -15,7 +15,7 @@ import { Loader2, Plus } from "lucide-react";
 import { BeehiivPreview } from "@/components/dashboard/beehiiv-preview";
 import { EditableSection, emptySectionHint, FixedPart, type PreviewEditing } from "@/components/dashboard/editable-section";
 import type { PreviewScreenshots } from "@/components/dashboard/preview-screenshots";
-import { EMAIL_WIDTH, renderEmailParts } from "@/lib/newsletter-email-html";
+import { boxStyle, EMAIL_WIDTH, renderEmailParts, type EmailBlock } from "@/lib/newsletter-email-html";
 import type { NewsletterSection, NewsletterTemplate } from "@/lib/newsletter-template";
 
 /** What stands in for the footer the email tool adds (never part of what we send). */
@@ -111,62 +111,63 @@ function HtmlEmailPreview({
     else if (el.dataset.img) edit!.onDropImage?.(sectionKey, Number(el.dataset.img), f);
   };
 
-  const blocks = parts.sections
-    .map((part) => {
-      const sec = template.sections.find((s) => s.key === part.key)!;
-      let content: React.ReactNode = part.content ? (
-        <div
-          className="nlc-section"
-          onClick={onClick(sec.key)}
-          onDragOver={draftCanvas ? (e) => target(e) && e.preventDefault() : undefined}
-          onDrop={onDrop(sec.key)}
-          dangerouslySetInnerHTML={{ __html: part.content }}
-        />
-      ) : null;
-      if (edit) {
-        content = (
-          <EditableSection sectionKey={sec.key} markdown={edit.mode === "template" ? sec.hint : (byKey.get(sec.key) ?? "")} isSponsor={sec.kind === "sponsor"} edit={edit}>
-            {content ?? emptySectionHint(sec.hint)}
-            {part.addPoints.length > 0 && (
-              <span className="mb-3 flex flex-wrap items-center justify-center gap-1.5">
-                {part.addPoints.map((p) => {
-                  const busy = edit.addingShot === `${sec.key}:${p.n}`;
-                  return (
-                    <button
-                      key={p.n}
-                      type="button"
-                      disabled={!!edit.addingShot}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        edit.onAddShot?.(sec.key, p.n);
-                      }}
-                      title={`Add a screenshot of step ${p.n}, picked from the video`}
-                      className="inline-flex items-center gap-1 rounded-full border border-dashed border-[#c7d2dc] px-2.5 py-0.5 text-[12px] font-medium leading-normal text-[#6b7280] hover:border-[#49adff] hover:text-[#49adff] disabled:opacity-50"
-                    >
-                      {busy ? <Loader2 className="size-3 animate-spin" /> : <Plus className="size-3" />}
-                      {busy ? "Finding the moment…" : `Screenshot for step ${p.n}`}
-                    </button>
-                  );
-                })}
-              </span>
-            )}
-          </EditableSection>
-        );
-      }
-      const heading = part.heading ? (
-        <FixedPart edit={edit} reason="Heading: set in the template" onSelect={edit ? () => edit.onSelectSection(sec.key) : undefined}>
-          <div dangerouslySetInnerHTML={{ __html: part.heading }} />
-        </FixedPart>
-      ) : null;
-      if (!heading && !content) return null;
-      return (
-        <div key={sec.key}>
-          {heading}
-          {content}
-        </div>
+  const slot = (part: Extract<EmailBlock, { kind: "slot" }>) => {
+    const sec = template.sections.find((s) => s.key === part.key)!;
+    let content: React.ReactNode = part.content ? (
+      <div
+        className="nlc-section"
+        onClick={onClick(sec.key)}
+        onDragOver={draftCanvas ? (e) => target(e) && e.preventDefault() : undefined}
+        onDrop={onDrop(sec.key)}
+        dangerouslySetInnerHTML={{ __html: part.content }}
+      />
+    ) : null;
+    if (edit) {
+      content = (
+        <EditableSection sectionKey={sec.key} markdown={edit.mode === "template" ? sec.hint : (byKey.get(sec.key) ?? "")} isSponsor={sec.kind === "sponsor"} edit={edit}>
+          {content ?? emptySectionHint(sec.hint)}
+          {part.addPoints.length > 0 && (
+            <span className="mb-3 flex flex-wrap items-center justify-center gap-1.5">
+              {part.addPoints.map((p) => {
+                const busy = edit.addingShot === `${sec.key}:${p.n}`;
+                return (
+                  <button
+                    key={p.n}
+                    type="button"
+                    disabled={!!edit.addingShot}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      edit.onAddShot?.(sec.key, p.n);
+                    }}
+                    title={`Add a screenshot of step ${p.n}, picked from the video`}
+                    className="inline-flex items-center gap-1 rounded-full border border-dashed border-[#c7d2dc] px-2.5 py-0.5 text-[12px] font-medium leading-normal text-[#6b7280] hover:border-[#49adff] hover:text-[#49adff] disabled:opacity-50"
+                  >
+                    {busy ? <Loader2 className="size-3 animate-spin" /> : <Plus className="size-3" />}
+                    {busy ? "Finding the moment…" : `Screenshot for step ${p.n}`}
+                  </button>
+                );
+              })}
+            </span>
+          )}
+        </EditableSection>
       );
-    })
-    .filter(Boolean);
+    }
+    return content;
+  };
+  const render = (blocks: EmailBlock[]): React.ReactNode[] =>
+    blocks.map((b, i) =>
+      b.kind === "slot" ? (
+        <div key={`s-${b.key}`}>{slot(b)}</div>
+      ) : b.kind === "box" ? (
+        <div key={`b-${i}`} style={boxStyle(b.color) as CSSProperties}>
+          {render(b.children)}
+        </div>
+      ) : (
+        <FixedPart key={`f-${i}`} edit={edit} reason="Part of the template's design — edit the template to change it" onSelect={edit?.onEditTemplate}>
+          <div dangerouslySetInnerHTML={{ __html: b.html }} />
+        </FixedPart>
+      ),
+    );
 
   const selectedShot = edit?.selected?.startsWith("shot:") ? edit.selected.slice(5) : null;
   const selectedImg = edit?.selected?.startsWith("img:") ? edit.selected.slice(4) : null;
@@ -188,17 +189,7 @@ function HtmlEmailPreview({
           // The in-place editor (rich-section-editor.tsx) draws links, headings and buttons in the email's colors.
           style={{ ...(parts.bodyStyle as CSSProperties), ["--nl-link" as string]: st.linkColor, ["--nl-heading" as string]: st.headingColor, ["--nl-button" as string]: st.buttonColor ?? st.linkColor }}
         >
-          {parts.masthead && (
-            <FixedPart edit={edit} reason="Masthead: set in the template's Look" onSelect={edit?.onSelectLook}>
-              <div dangerouslySetInnerHTML={{ __html: parts.masthead }} />
-            </FixedPart>
-          )}
-          {blocks.map((b, i) => (
-            <div key={i}>
-              {i > 0 && <div dangerouslySetInnerHTML={{ __html: parts.divider }} />}
-              {b}
-            </div>
-          ))}
+          {render(parts.blocks)}
         </div>
         {template.hubspot && (
           <FixedPart edit={edit} reason="Footer: HubSpot adds it from the template email (unsubscribe link, address)">

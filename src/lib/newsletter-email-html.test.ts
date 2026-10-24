@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { markdownToEmailHtml, renderEmailBody, renderEmailHtml, renderEmailParts, sectionMarkdown } from "./newsletter-email-html";
+import { markdownToEmailHtml, pruneForSend, renderEmailBody, renderEmailHtml, renderEmailParts, sectionMarkdown, type EmailBlock, type EmailParts } from "./newsletter-email-html";
+
+/** Every slot in the layout's blocks (boxes opened), and all the fixed HTML. */
+const flat = (blocks: EmailBlock[]): EmailBlock[] => blocks.flatMap((b) => (b.kind === "box" ? [b, ...flat(b.children)] : [b]));
+const slots = (p: EmailParts) => flat(p.blocks).filter((b): b is Extract<EmailBlock, { kind: "slot" }> => b.kind === "slot");
+const fixedHtml = (p: EmailParts) => flat(p.blocks).map((b) => (b.kind === "fixed" ? b.html : "")).join("");
 import { DEFAULT_TEMPLATES, styleSchema } from "./newsletter-template";
 
 const style = styleSchema.parse({});
@@ -79,7 +84,7 @@ describe("sectionMarkdown + screenshots", () => {
 
   it("on the canvas an unpicked placeholder is a dashed spot with its handle, and steps without one get an add point", () => {
     const parts = renderEmailParts({ template: { ...sb, sections: [sec] }, sections, canvas: true });
-    const s = parts.sections[0];
+    const s = slots(parts)[0];
     expect(s.content).toContain('data-shot="steps:the skills page"');
     expect(s.content).toContain("border:2px dashed");
     expect(s.content).toContain("@ 4:32");
@@ -99,33 +104,62 @@ describe("renderEmailParts / renderEmailBody / renderEmailHtml", () => {
     previewText: "Starter Story Sunday Breakfast",
   };
 
-  it("renders the masthead, the colored course pills, the tinted sponsor box with a button, and skips empty sections", () => {
+  it("draws the layout an older template implies: masthead, colored course pills, the sponsor's tinted box with a button; the email skips empty sections and their headings", () => {
     const parts = renderEmailParts(args);
-    expect(parts.masthead).toContain(sb.style.mastheadImageUrl!);
-    expect(parts.masthead).toContain("background:#EBECFC");
-    const oj = parts.sections.find((s) => s.key === "orange_juice")!;
-    expect(oj.heading).toContain("background:#fed7aa");
-    expect(oj.heading).toContain("The Orange Juice 🍊");
-    const special = parts.sections.find((s) => s.key === "special")!;
-    expect(special.content).toContain("background:#EBECFC;border-radius:12px");
+    const fixed = fixedHtml(parts);
+    expect(fixed).toContain(sb.style.mastheadImageUrl!);
+    expect(fixed).toContain("background:#EBECFC"); // masthead background
+    expect(fixed).toContain("background:#fed7aa"); // Orange Juice pill
+    expect(fixed).toContain("The Orange Juice 🍊");
+    const box = flat(parts.blocks).find((b) => b.kind === "box")!;
+    expect(box).toMatchObject({ kind: "box", color: "#EBECFC" });
+    const special = slots(parts).find((s) => s.key === "special")!;
     expect(special.content).toContain("Free CRM");
     expect(special.content).toContain('href="https://lp.example"');
     expect(special.content).toContain("background:#6B72C4"); // the CTA is a button
-    expect(parts.sections.find((s) => s.key === "coffee")!.content).toBe("");
-    expect(parts.sections.find((s) => s.key === "coffee")!.empty).toBe(true);
+    expect(slots(parts).find((s) => s.key === "coffee")!).toMatchObject({ content: "", empty: true });
     const body = renderEmailBody(args);
-    // Empty sections leave no heading behind in the sent email.
     expect(body).not.toContain("The Coffee ☕");
     expect(body).toContain("The Orange Juice 🍊");
+    expect(body).toContain("background:#EBECFC;border-radius:12px;padding"); // the sponsor box
     expect(body).not.toContain("nlc-");
     expect(body).not.toContain("<style");
   });
 
+  it("a saved layout is the design: fixed text, a box around a slot, a slot without a heading", () => {
+    const layout = {
+      type: "doc" as const,
+      content: [
+        { type: "paragraph", content: [{ type: "text", text: "Fixed intro line" }] },
+        { type: "heading", attrs: { level: 2, pill: "#dcfce7" }, content: [{ type: "text", text: "The Hook" }] },
+        { type: "callout", attrs: { color: "#fff7ed" }, content: [{ type: "slot", attrs: { key: "intro" } }] },
+        { type: "horizontalRule" },
+        { type: "slot", attrs: { key: "orange_juice" } },
+      ],
+    };
+    const body = renderEmailBody({ ...args, template: { ...sb, layout } });
+    expect(body).toContain("Fixed intro line");
+    expect(body).toContain("background:#dcfce7");
+    expect(body).toContain("The Hook");
+    expect(body).toContain("background:#fff7ed");
+    expect(body.indexOf("Hey!")).toBeGreaterThan(body.indexOf("The Hook"));
+    // Sections not in the layout aren't drawn.
+    expect(body).not.toContain("The Coffee");
+  });
+
+  it("pruneForSend drops an empty slot with its heading, a box left with only a heading, and stacked / edge dividers", () => {
+    const h = (t: string): EmailBlock => ({ kind: "fixed", html: t, node: "heading" });
+    const hr: EmailBlock = { kind: "fixed", html: "<hr>", node: "horizontalRule" };
+    const s = (key: string, content: string): EmailBlock => ({ kind: "slot", key, content, empty: !content, addPoints: [] });
+    const out = pruneForSend([hr, h("A"), s("a", ""), hr, h("B"), s("b", "B text"), hr, { kind: "box", color: "#eee", children: [h("C"), s("c", "")] }, hr]);
+    expect(out).toEqual([h("B"), s("b", "B text")]);
+  });
+
   it("template previews show the instructions where content goes, and the sample boxes", () => {
     const parts = renderEmailParts({ template: sb, sections: [], showHints: true });
-    expect(parts.sections.find((s) => s.key === "orange_juice")!.content).toContain("flagship story");
+    expect(slots(parts).find((s) => s.key === "orange_juice")!.content).toContain("flagship story");
     const how = DEFAULT_TEMPLATES["futurepedia newsletter"];
-    const steps = renderEmailParts({ template: how, sections: [], showHints: true }).sections.find((s) => s.key === "steps")!;
+    const steps = slots(renderEmailParts({ template: how, sections: [], showHints: true })).find((s) => s.key === "steps")!;
     expect(steps.content).toContain("Screenshots go here");
   });
 
@@ -142,7 +176,7 @@ describe("renderEmailParts / renderEmailBody / renderEmailHtml", () => {
 
   it("a label section (Daily Seinfeld's Read Time) is a small inline label, not a paragraph", () => {
     const ds = DEFAULT_TEMPLATES["daily seinfeld"];
-    const part = renderEmailParts({ template: ds, sections: [{ key: "read_time", markdown: "Read Time: 47 sec." }] }).sections[0];
+    const part = slots(renderEmailParts({ template: ds, sections: [{ key: "read_time", markdown: "Read Time: 47 sec." }] }))[0];
     expect(part.content).toContain("font-size:13px");
     expect(part.content).toContain("Read Time: 47 sec.");
     expect(part.content).not.toContain("<p");
