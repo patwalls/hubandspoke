@@ -29,6 +29,16 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-10-24-keep-typed-title",
+    shippedAt: "2026-10-24T09:30:00Z",
+    kind: "fix",
+    title: "Your post title stays put when you re-export a clip",
+    body:
+      "Renamed a clip's post, then exported it again? Before, the title quietly went back to the on-screen hook. " +
+      "Now a title you typed stays, and it only follows the hook while you haven't changed it.",
+    screen: "modal:clip-editor",
+  },
+  {
     id: "2026-10-24-approve-after-editor",
     shippedAt: "2026-10-24T05:15:00Z",
     kind: "fix",

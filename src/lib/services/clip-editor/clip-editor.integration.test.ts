@@ -8,6 +8,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
+  clipEdits,
   clipIdeas,
   clipRenders,
   contentComments,
@@ -55,7 +56,10 @@ async function seedIdea(opts: { status?: string } = {}) {
     hook: "original hook",
     status: opts.status ?? "suggested",
   });
+  // Titled with the idea's hook, like clipIdeaItemValues makes it.
   const queueItem = await createTestProductionItem({
+    title: "original hook",
+    hook: "original hook",
     status: "Idea",
     sourceType: "repurposed",
     sourceClipIdeaId: idea.id,
@@ -131,6 +135,48 @@ describe("exportClipEdit", () => {
     expect(renders.map((r) => r.status)).toEqual(["superseded", "queued"]);
     expect(enqueue).toHaveBeenCalledTimes(1); // render only — no second draft-algorithm-run
     expect(enqueue.mock.calls[0][0]).toBe("clip-render");
+  });
+
+  it("re-export keeps a title someone typed, and still updates the hook", async () => {
+    const userId = await getTestUserId();
+    const { idea, queueItem } = await seedIdea();
+    const edit = await createTestClipEdit({
+      clipIdeaId: idea.id,
+      doc: createDefaultDoc({ startSec: 100, endSec: 130, hook: "first hook" }),
+    });
+    await exportClipEdit({ clipIdeaId: idea.id, actorUserId: userId });
+    await db
+      .update(productionItems)
+      .set({ title: "my post title" })
+      .where(eq(productionItems.id, queueItem.id));
+    await db
+      .update(clipEdits)
+      .set({ doc: createDefaultDoc({ startSec: 100, endSec: 130, hook: "second hook" }) })
+      .where(eq(clipEdits.id, edit.id));
+
+    await exportClipEdit({ clipIdeaId: idea.id, actorUserId: userId });
+
+    const [item] = await db.select().from(productionItems).where(eq(productionItems.id, queueItem.id));
+    expect(item).toMatchObject({ title: "my post title", hook: "second hook" });
+  });
+
+  it("re-export moves an untouched title along with the hook", async () => {
+    const userId = await getTestUserId();
+    const { idea, queueItem } = await seedIdea();
+    const edit = await createTestClipEdit({
+      clipIdeaId: idea.id,
+      doc: createDefaultDoc({ startSec: 100, endSec: 130, hook: "first hook" }),
+    });
+    await exportClipEdit({ clipIdeaId: idea.id, actorUserId: userId });
+    await db
+      .update(clipEdits)
+      .set({ doc: createDefaultDoc({ startSec: 100, endSec: 130, hook: "second hook" }) })
+      .where(eq(clipEdits.id, edit.id));
+
+    await exportClipEdit({ clipIdeaId: idea.id, actorUserId: userId });
+
+    const [item] = await db.select().from(productionItems).where(eq(productionItems.id, queueItem.id));
+    expect(item).toMatchObject({ title: "second hook", hook: "second hook" });
   });
 
   it("refuses an idea that was decided outside the editor", async () => {

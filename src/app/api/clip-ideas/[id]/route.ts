@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { requireSession } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
+import { titleAfterHookChange } from "@/lib/services/title-after-hook-change";
 import {
   accounts,
   clipIdeas,
@@ -178,6 +179,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   const [row] = await db
     .select({
       status: clipIdeas.status,
+      hook: clipIdeas.hook,
       acceptedProductionItemId: clipIdeas.acceptedProductionItemId,
     })
     .from(clipIdeas)
@@ -197,13 +199,23 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 
   // Mirror the hook edit onto the linked production_item so the queue row's
   // title and the prod_item.hook stay in sync. The prod_item is the queue-side
-  // representation of an unaccepted clip idea — the title shown is the hook.
+  // representation of an unaccepted clip idea — the title shown is the hook,
+  // until someone types a title of their own (then it stays).
   if (updates.hook && row.acceptedProductionItemId) {
+    const [item] = await db
+      .select({ title: productionItems.title, hook: productionItems.hook })
+      .from(productionItems)
+      .where(eq(productionItems.id, row.acceptedProductionItemId))
+      .limit(1);
     await db
       .update(productionItems)
       .set({
         hook: updates.hook,
-        title: updates.hook,
+        title: titleAfterHookChange({
+          currentTitle: item?.title ?? null,
+          priorHooks: [item?.hook ?? null, row.hook],
+          newHook: updates.hook,
+        }),
         updatedAt: new Date(),
       })
       .where(eq(productionItems.id, row.acceptedProductionItemId));
