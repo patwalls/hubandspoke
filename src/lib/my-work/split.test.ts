@@ -83,6 +83,15 @@ describe("upNext", () => {
 
   it("is empty when the post you're on was the only one waiting", () => {
     const one = { toReview: [], yourTurn: [row("only", "Assigned")], waitingOnOthers: [] };
-    expect(upNext(one, "only")).toEqual({ next: null, remaining: 0 });
+    expect(upNext(one, "only")).toEqual({ next: null, remaining: 0, currentWaiting: true });
+  });
+
+  it("says whether the post you're on is still waiting on you", () => {
+    expect(upNext(split, "rv-new").currentWaiting).toBe(true);
+    expect(upNext(split, "t-old").currentWaiting).toBe(true);
+    // Sent on (approved, sent to review, handed to someone else): off your plate.
+    expect(upNext(split, "w").currentWaiting).toBe(false);
+    expect(upNext(split, "gone")).toMatchObject({ next: { id: "rv-old" }, remaining: 4, currentWaiting: false });
+    expect(upNext(split, null).currentWaiting).toBe(false);
   });
 });

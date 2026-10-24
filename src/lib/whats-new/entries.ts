@@ -29,6 +29,16 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-10-24-my-work-next-card",
+    shippedAt: "2026-10-24T00:45:00Z",
+    kind: "feature",
+    title: "Done with a post? The next one is one click away",
+    body:
+      "When you approve a post, send it to review or hand it on from its page, a card in the corner shows " +
+      "the next post waiting on you. Click Open next instead of going back to a list.",
+    screen: "my-work:next-card",
+  },
+  {
     id: "2026-10-23-derivatives-assign-all",
     shippedAt: "2026-10-23T20:30:00Z",
     kind: "feature",
