@@ -29,6 +29,17 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-10-24-publish-next-card",
+    shippedAt: "2026-10-24T18:00:00Z",
+    kind: "feature",
+    title: "After you publish, the next cross-post is one click away",
+    body:
+      "Mark a post Published on its page and a card in the corner offers the next post waiting on you, " +
+      "starting with the other cross-posts of the same post (or clips of the same video). No trip back to the production list.",
+    href: "/my-work",
+    screen: "my-work:next-card:same-source",
+  },
+  {
     id: "2026-10-24-my-work-handed-to-you",
     shippedAt: "2026-10-24T13:45:00Z",
     kind: "feature",

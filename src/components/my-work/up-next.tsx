@@ -11,6 +11,8 @@ interface UpNextData {
   remaining: number;
   /** Is the post you're on still waiting on you? */
   currentWaiting: boolean;
+  /** `next` was made from the same post / video as the one you're on. */
+  sameSource?: boolean;
 }
 
 /**
@@ -23,6 +25,8 @@ interface UpNextData {
  * The moment this post leaves your plate (you approved it, sent it to review,
  * handed it on), a card offers the next one: reviewers kept going back to the
  * production list after every approval and never noticed the small link.
+ * After a Publish the card says so, and offers the same post's next
+ * cross-post (or the same video's next clip) first.
  */
 export function UpNext({ itemId, status, editorUserId }: { itemId: string; status: string; editorUserId: string }) {
   const [data, setData] = useState<UpNextData | null>(null);
@@ -45,7 +49,7 @@ export function UpNext({ itemId, status, editorUserId }: { itemId: string; statu
         setData(d);
         if (flipped) {
           setSentOnId(itemId);
-          trackUsage("my-work:next-card", d.next?.brand);
+          trackUsage(d.sameSource ? "my-work:next-card:same-source" : "my-work:next-card", d.next?.brand);
         } else if (d.currentWaiting) {
           setSentOnId(null);
         }
@@ -66,13 +70,24 @@ export function UpNext({ itemId, status, editorUserId }: { itemId: string; statu
   return (
     <>
       <UpNextLink data={data} />
-      {sentOn && data && <NextCard data={data} onClose={() => setSentOnId(null)} />}
+      {sentOn && data && (
+        <NextCard data={data} published={status === "Published"} onClose={() => setSentOnId(null)} />
+      )}
     </>
   );
 }
 
-function NextCard({ data, onClose }: { data: UpNextData; onClose: () => void }) {
-  const { next, remaining } = data;
+function NextCard({
+  data,
+  published,
+  onClose,
+}: {
+  data: UpNextData;
+  published: boolean;
+  onClose: () => void;
+}) {
+  const { next, remaining, sameSource } = data;
+  const done = published ? "Published." : "Sent on.";
   return (
     <div
       role="status"
@@ -85,12 +100,13 @@ function NextCard({ data, onClose }: { data: UpNextData; onClose: () => void }) 
           {next ? (
             <>
               <p className="text-muted-foreground">
-                Sent on. Next waiting on you{remaining > 1 ? ` (${remaining} left)` : ""}:
+                {done} {sameSource ? "Next from the same post" : "Next waiting on you"}
+                {remaining > 1 ? ` (${remaining} left)` : ""}:
               </p>
               <p className="mt-0.5 truncate font-medium">{next.title || "Untitled"}</p>
             </>
           ) : (
-            <p className="font-medium">Sent on. That&apos;s everything waiting on you.</p>
+            <p className="font-medium">{done} That&apos;s everything waiting on you.</p>
           )}
         </div>
         <button
