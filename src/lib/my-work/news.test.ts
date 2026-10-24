@@ -30,6 +30,26 @@ describe("rowNews", () => {
     expect(rowNews({ lastSendBack: { by: "Lauren", at: t(4) }, myLastAt: t(5) })).toBeNull();
   });
 
+  it("shows who handed you the post until you act on it", () => {
+    const n = rowNews({ lastHandedTo: { by: "Evgeny", at: t(6) }, myLastAt: t(5) });
+    expect(n?.handedBy?.by).toBe("Evgeny");
+    expect(n?.isNew).toBe(true);
+    // A batch assignment on a post you never touched is new too.
+    expect(rowNews({ lastHandedTo: { by: "Evgeny", at: t(1) } })?.handedBy?.by).toBe("Evgeny");
+    // You've worked on it since: nothing to flag.
+    expect(rowNews({ lastHandedTo: { by: "Evgeny", at: t(4) }, myLastAt: t(5) })).toBeNull();
+  });
+
+  it("lets a send-back speak for the handoff that came with it", () => {
+    const n = rowNews({
+      lastSendBack: { by: "Andrew", at: t(6) },
+      lastHandedTo: { by: "Andrew", at: t(6) },
+      myLastAt: t(5),
+    });
+    expect(n?.sentBack?.by).toBe("Andrew");
+    expect(n?.handedBy).toBeNull();
+  });
+
   it("ignores blank comments", () => {
     expect(rowNews({ lastComment: { author: "Sam", text: "  \n ", at: t(6) } })).toBeNull();
   });

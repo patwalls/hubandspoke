@@ -45,6 +45,7 @@ function plural(n: number, one: string, many: string) {
 function why(row: DigestRow, section: "turn" | "review", news: RowNews | undefined): string {
   if (news?.sentBack) return `Sent back by ${news.sentBack.by}`;
   if (news?.isNew && news.comment) return `New comment from ${news.comment.author}`;
+  if (news?.handedBy) return `Handed to you by ${news.handedBy.by}`;
   return section === "review" ? "To review" : row.status ?? "Your turn";
 }
 

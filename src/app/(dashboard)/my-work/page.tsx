@@ -381,9 +381,9 @@ function Section({
   );
 }
 
-/** Under the row's title: sent back by whom, and the latest comment from someone else. */
+/** Under the row's title: sent back or handed over by whom, and the latest comment from someone else. */
 function RowNewsLine({ news }: { news: RowNews }) {
-  const { comment, sentBack, isNew } = news;
+  const { comment, sentBack, handedBy, isNew } = news;
   return (
     <div data-my-work-news className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground min-w-0">
       {isNew && (
@@ -396,6 +396,11 @@ function RowNewsLine({ news }: { news: RowNews }) {
       {sentBack && (
         <span className="shrink-0 rounded border border-amber-500/40 bg-amber-500/10 px-1 py-px text-[10px] font-medium text-amber-700 dark:text-amber-400">
           Sent back by {sentBack.by} · {ago(sentBack.at)}
+        </span>
+      )}
+      {handedBy && (
+        <span className="shrink-0 rounded border border-primary/30 bg-primary/10 px-1 py-px text-[10px] font-medium text-primary">
+          From {handedBy.by} · {ago(handedBy.at)}
         </span>
       )}
       {comment && (

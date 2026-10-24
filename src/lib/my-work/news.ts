@@ -11,6 +11,10 @@
  * - **Sent back** = someone else moved it from Review (or Ready To
  *   Publish) back to Assigned after your last action. An old send-back
  *   you already acted on doesn't show.
+ * - **Handed to you** = someone else made you the editor after your last
+ *   action (a curator's batch assignment, a reviewer's "back to you").
+ *   It shows who and when until you act on the item; a send-back already
+ *   says it, so the two never show together (my-day M9).
  */
 
 export interface RowNewsInput {
@@ -18,6 +22,8 @@ export interface RowNewsInput {
   lastComment?: { author: string; text: string; at: Date } | null;
   /** Latest move back to Assigned by someone other than you. */
   lastSendBack?: { by: string; at: Date } | null;
+  /** Latest time someone else made you the item's editor. */
+  lastHandedTo?: { by: string; at: Date } | null;
   /** Your own last action on the item (event or comment). */
   myLastAt?: Date | null;
 }
@@ -25,22 +31,25 @@ export interface RowNewsInput {
 export interface RowNews {
   comment: { author: string; text: string; at: Date } | null;
   sentBack: { by: string; at: Date } | null;
+  handedBy: { by: string; at: Date } | null;
   isNew: boolean;
 }
 
 const PREVIEW_CHARS = 140;
 
-export function rowNews({ lastComment, lastSendBack, myLastAt }: RowNewsInput): RowNews | null {
+export function rowNews({ lastComment, lastSendBack, lastHandedTo, myLastAt }: RowNewsInput): RowNews | null {
   const after = (at: Date) => !myLastAt || at.getTime() > myLastAt.getTime();
   const sentBack = lastSendBack && after(lastSendBack.at) ? lastSendBack : null;
+  const handedBy = !sentBack && lastHandedTo && after(lastHandedTo.at) ? lastHandedTo : null;
   const comment = lastComment && lastComment.text.trim()
     ? { ...lastComment, text: previewText(lastComment.text) }
     : null;
-  if (!comment && !sentBack) return null;
+  if (!comment && !sentBack && !handedBy) return null;
   return {
     comment,
     sentBack,
-    isNew: !!sentBack || (!!comment && after(comment.at)),
+    handedBy,
+    isNew: !!sentBack || !!handedBy || (!!comment && after(comment.at)),
   };
 }
 
