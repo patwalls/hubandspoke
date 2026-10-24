@@ -26,7 +26,7 @@ describe("story settings live on the template", () => {
 
   it("only brands with case studies get the Starter Story tools", () => {
     const names = (brand: string) => sourceToolsFor(brand).map((t) => ("name" in t ? t.name : ""));
-    expect(names("starter-story")).toEqual(expect.arrayContaining(["list_recent_case_studies", "web_fetch"]));
+    expect(names("starter-story")).toEqual(expect.arrayContaining(["list_recent_case_studies", "read_case_study", "web_fetch"]));
     expect(names("futurepedia")).not.toContain("list_recent_case_studies");
     expect(names("futurepedia")).not.toContain("web_fetch");
     expect(names("futurepedia")).toContain("list_recent_videos");

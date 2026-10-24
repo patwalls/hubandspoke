@@ -304,3 +304,49 @@ export async function listOlderVideos(brand: string, before: Date, limit = 120):
 export async function searchCaseStudies(query: string, opts: { all?: boolean } = {}): Promise<ContentResult[]> {
   return (await searchContent({ q: query, limit: 25, all: opts.all })).filter((r) => r.url);
 }
+
+/** A full written case study is long (interview + data panel): plenty, but not a whole context window. */
+export const CASE_STUDY_CHAR_BUDGET = 60_000;
+const CASE_STUDY_FETCH_TIMEOUT_MS = 15_000;
+
+/**
+ * A starterstory.com case study page → its full text: the `<article>` (the
+ * founder interview or breakdown, every section, plus the data panel —
+ * revenue, founders, employees, start date, costs, margins, growth channels,
+ * tools), without the related-stories rail at its end or the "premium
+ * members" note (the full text is in the page either way). Structural
+ * extraction of our own site's markup. Pure; exported for tests.
+ */
+export function extractCaseStudyText(html: string): { title: string | null; text: string } | null {
+  const start = html.search(/<article[\s>]/i);
+  if (start < 0) return null;
+  const end = html.indexOf("</article>", start);
+  const article = html.slice(start, end < 0 ? undefined : end);
+  const title = article.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)?.[1]?.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim() || null;
+  let text = htmlToPlainText(article.replace(/<(script|style|svg|button|form)[\s\S]*?<\/\1>/gi, ""))
+    .replace(/&#39;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&times;/g, "×");
+  const rail = text.search(/More Case Studies Like This|Related case studies/i);
+  if (rail > 0) text = text.slice(0, rail);
+  text = text.replace(/Full article is available for Starter Story premium members\.\s*Unlock it\.?/gi, "").replace(/\n{3,}/g, "\n\n").trim();
+  return text ? { title, text } : null;
+}
+
+/** Fetch a starterstory.com case study and return its full text (≤ CASE_STUDY_CHAR_BUDGET). Starter Story URLs only. */
+export async function getCaseStudy(url: string, fetchFn: typeof fetch = fetch): Promise<{ title: string | null; url: string; text: string; truncated: boolean } | { error: string }> {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return { error: "Not a URL" };
+  }
+  if (!/(^|\.)starterstory\.com$/i.test(u.hostname)) return { error: "Only starterstory.com case studies can be read here" };
+  const res = await fetchFn(u.toString(), { headers: { "user-agent": "Mozilla/5.0 (HubAndSpoke newsletter drafter)", accept: "text/html" }, signal: AbortSignal.timeout(CASE_STUDY_FETCH_TIMEOUT_MS), redirect: "follow" }).catch((err: Error) => err);
+  if (res instanceof Error) return { error: `Couldn't fetch it: ${res.message}` };
+  if (!res.ok) return { error: `The page returned ${res.status}` };
+  const got = extractCaseStudyText(await res.text());
+  if (!got) return { error: "No case study text on that page" };
+  const truncated = got.text.length > CASE_STUDY_CHAR_BUDGET;
+  return { title: got.title, url: u.toString(), text: truncated ? got.text.slice(0, CASE_STUDY_CHAR_BUDGET) : got.text, truncated };
+}

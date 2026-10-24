@@ -25,7 +25,7 @@ import { listLeadMagnets } from "@/lib/services/starter-story-content";
 import { describeStoryPlan, newStoryGuidance, type StoryPlan } from "./story-plan";
 import { describeSectionExamples } from "./exemplars";
 import { brandHasCaseStudies } from "./format-config";
-import { getTimestampedTranscript, getVideoTranscript, listOlderVideos, listRecentCaseStudies, listRecentVideos, searchCaseStudies, TRANSCRIPT_CHAR_BUDGET, type PastIssue } from "./sources";
+import { getCaseStudy, getTimestampedTranscript, getVideoTranscript, listOlderVideos, listRecentCaseStudies, listRecentVideos, searchCaseStudies, TRANSCRIPT_CHAR_BUDGET, type PastIssue } from "./sources";
 import { caseStudyKey, EVERGREEN_MIN_DAYS, isEvergreenOk, RECENT_BLOCK_DAYS, type StoryUsage } from "./usage";
 import { SPECIAL_MARKER } from "./special-compose";
 import { toolWindow, type DraftWindow } from "./window";
@@ -112,7 +112,7 @@ const SOURCE_TOOLS: Anthropic.Beta.BetaToolUnion[] = [
   {
     name: "list_recent_case_studies",
     description:
-      "List Starter Story case studies (founder interviews + breakdowns) published on starterstory.com in the window: title, URL, summary, business. Use web_fetch on a URL to read the full case study.",
+      "List Starter Story case studies (founder interviews + breakdowns) published on starterstory.com in the window: title, URL, summary, business. Read one in full with read_case_study.",
     input_schema: DAYS_SCHEMA,
   },
   {
@@ -122,8 +122,14 @@ const SOURCE_TOOLS: Anthropic.Beta.BetaToolUnion[] = [
   },
   {
     name: "search_case_studies",
-    description: `Search ALL Starter Story case studies (interviews + breakdowns) by topic, business or founder, e.g. "AI app", "ecommerce", "newsletter". For when this week doesn't have enough new case studies. Each result says when this newsletter last ran it; anything run in the last ${RECENT_BLOCK_DAYS} days is blocked.`,
+    description: `Search ALL Starter Story case studies — interviews, breakdowns and written-only case studies — by topic, business or founder, e.g. "AI app", "ecommerce", "newsletter". For when this week doesn't have enough new case studies. Each result says when this newsletter last ran it; anything run in the last ${RECENT_BLOCK_DAYS} days is blocked.`,
     input_schema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
+  },
+  {
+    name: "read_case_study",
+    description:
+      "The FULL text of a starterstory.com case study: the whole founder interview or breakdown, every section, plus its data panel (revenue, founders, employees, start date, starting costs, margins, growth channels, tools). Use it on every case study you write about — written-only case studies included.",
+    input_schema: { type: "object", properties: { url: { type: "string", description: "The case study's starterstory.com URL." } }, required: ["url"] },
   },
   {
     name: "list_lead_magnets",
@@ -139,7 +145,7 @@ const SOURCE_TOOLS: Anthropic.Beta.BetaToolUnion[] = [
 ];
 
 /** Tools that read Starter Story's site / APIs (case studies, lead magnets, page fetches). */
-const STARTER_STORY_TOOLS = new Set(["list_recent_case_studies", "search_case_studies", "list_lead_magnets", "web_fetch"]);
+const STARTER_STORY_TOOLS = new Set(["list_recent_case_studies", "search_case_studies", "read_case_study", "list_lead_magnets", "web_fetch"]);
 
 /** The source tools for a brand: brands without case studies get their own videos only. */
 export function sourceToolsFor(brand: string): Anthropic.Beta.BetaToolUnion[] {
@@ -294,9 +300,13 @@ export function phaseFor(tools: string[], reviewing: boolean): { phase: DraftPha
   const n = (name: string) => tools.filter((t) => t === name).length;
   if (tools.some((t) => t.startsWith("submit_"))) return { phase: "reviewing", detail: reviewing ? "Final pass" : "Reviewing its own draft" };
   if (reviewing) return { phase: "reviewing", detail: "Revising" };
-  const reads = n("get_video_transcript") + n("web_fetch");
+  const reads = n("get_video_transcript") + n("web_fetch") + n("read_case_study");
   if (reads) {
-    const parts = [n("get_video_transcript") && `${n("get_video_transcript")} transcript${n("get_video_transcript") > 1 ? "s" : ""}`, n("web_fetch") && `${n("web_fetch")} page${n("web_fetch") > 1 ? "s" : ""}`].filter(Boolean);
+    const parts = [
+      n("get_video_transcript") && `${n("get_video_transcript")} transcript${n("get_video_transcript") > 1 ? "s" : ""}`,
+      n("read_case_study") && `${n("read_case_study")} case stud${n("read_case_study") > 1 ? "ies" : "y"}`,
+      n("web_fetch") && `${n("web_fetch")} page${n("web_fetch") > 1 ? "s" : ""}`,
+    ].filter(Boolean);
     return { phase: "reading", detail: `Reading ${parts.join(" and ")}` };
   }
   if (tools.length) return { phase: "gathering", detail: "Finding stories" };
@@ -344,7 +354,7 @@ function buildSystem(args: NewsletterAgentArgs): Anthropic.Beta.BetaTextBlockPar
           `You write the ${args.brandLabel} newsletter "${args.formatName}".`,
           "You draft one complete issue that an editor will review, then send from their email tool.",
           brandHasCaseStudies(args.brand)
-            ? "Gather your own material with the tools: the brand's videos published in the window (read the transcripts of the ones you use) and recent case studies on starterstory.com (read the full page with web_fetch before writing about one). Never invent facts, numbers, quotes or links — everything in the issue must come from a transcript, a fetched page, or the lead-magnet list."
+            ? "Gather your own material with the tools: the brand's videos published in the window (read the transcripts of the ones you use) and recent case studies on starterstory.com (read the whole case study with read_case_study before writing about one — it returns the full interview and the business's numbers). Never invent facts, numbers, quotes or links — everything in the issue must come from a transcript, a fetched page, or the lead-magnet list."
             : "Gather your own material with the tools: the brand's videos published in the window (read the transcripts of the ones you use). Never invent facts, numbers, quotes or links — everything in the issue must come from a transcript.",
           "Follow the format Skill below exactly when it says how far back to look, what to include, length and CTA rules. Where the Skill is silent, match the past issues.",
           "Write in Markdown. Link every video and case study you mention with its real URL.",
@@ -405,7 +415,8 @@ async function runClientTool(name: string, input: unknown, args: NewsletterAgent
     }
     case "search_case_studies": {
       const { query } = z.object({ query: z.string().min(2).max(100) }).parse(input);
-      const found = (await searchCaseStudies(query)).map((c) => ({ ...c, ...usageFields(caseStudyKey(c.url), args) }));
+      // Every editorial story, written-only case studies too (matched by business name or title).
+      const found = (await searchCaseStudies(query, { all: true })).map((c) => ({ ...c, ...usageFields(caseStudyKey(c.url), args) }));
       return JSON.stringify({ case_studies: found });
     }
     case "get_video_transcript": {
@@ -421,6 +432,12 @@ async function runClientTool(name: string, input: unknown, args: NewsletterAgent
       const w = toolWindow(args.window, days);
       const studies = (await listRecentCaseStudies(w)).map((c) => ({ ...c, ...usageFields(caseStudyKey(c.url), args) }));
       return JSON.stringify({ window: { start: w.start.toISOString(), end: w.end.toISOString() }, case_studies: studies });
+    }
+    case "read_case_study": {
+      const { url } = z.object({ url: z.string().min(8).max(500) }).parse(input);
+      const cs = await getCaseStudy(url);
+      if ("error" in cs) return cs.error;
+      return `CASE STUDY: ${cs.title ?? ""}\nURL: ${cs.url}\n\n${cs.text}${cs.truncated ? "\n\n[truncated — very long case study]" : ""}`;
     }
     case "list_lead_magnets": {
       const magnets = await listLeadMagnets();
@@ -747,7 +764,7 @@ export interface PinnedStory {
 
 /** The turn's instruction for a story the editor picked. Pure; exported for tests. */
 export function pinnedStoryInstruction(p: PinnedStory, steer?: string | null): string {
-  const how = p.kind === "video" ? `read its transcript with get_video_transcript (production_item_id ${p.productionItemId})` : `read the case study with web_fetch (${p.url})`;
+  const how = p.kind === "video" ? `read its transcript with get_video_transcript (production_item_id ${p.productionItemId})` : `read the whole case study with read_case_study (${p.url})`;
   return `NEW STORY — THE EDITOR PICKED IT: rewrite this section around exactly this ${p.kind === "video" ? "video" : "case study"}: "${p.title ?? "Untitled"}"${p.url ? ` (${p.url})` : ""}. First ${how}; every fact must come from it. Set source to it (kind ${p.kind}${p.kind === "video" ? `, production_item_id ${p.productionItemId}` : `, url ${p.url}`}).${steer?.trim() ? ` The editor's steer: ${steer.trim()}` : ""}`;
 }
 

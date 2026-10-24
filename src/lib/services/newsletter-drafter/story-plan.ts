@@ -166,7 +166,7 @@ export function describeStoryPlan(plan: StoryPlan): string {
   const extraVideos = plan.videos.filter((v) => !picked.has(v.key));
   if (extraCases.length) out.push(`Other usable case studies, newest first:\n${extraCases.slice(0, 5).map((c) => `  - ${line(c)}`).join("\n")}`);
   if (extraVideos.length) out.push(`Other usable recent videos, newest first:\n${extraVideos.slice(0, 5).map((v) => `  - ${line(v)}`).join("\n")}`);
-  out.push("Prefer these recent stories over older ones from list_older_videos. web_fetch a case study before writing about it. Set each section's source to the story it covers.");
+  out.push("Prefer these recent stories over older ones from list_older_videos. Read a case study in full with read_case_study before writing about it. Set each section's source to the story it covers.");
   return out.join("\n");
 }
 

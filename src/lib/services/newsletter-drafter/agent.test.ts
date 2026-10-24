@@ -84,6 +84,6 @@ describe("pinnedStoryInstruction (Find new story → the editor picked one)", ()
     expect(v).toContain("get_video_transcript (production_item_id abc)");
     expect(v).toContain("The editor's steer: shorter");
     const c = pinnedStoryInstruction({ kind: "case_study", key: "case:/stories/x", title: "X", url: "https://www.starterstory.com/stories/x", productionItemId: null });
-    expect(c).toContain("web_fetch (https://www.starterstory.com/stories/x)");
+    expect(c).toContain("read_case_study (https://www.starterstory.com/stories/x)");
   });
 });
