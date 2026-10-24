@@ -354,12 +354,24 @@ export function BlockHandle({ editor, container, extraInserts = [] }: { editor: 
       const host = container.getBoundingClientRect();
       setHover({ index: idx, top: box.top - host.top + Math.min(box.height / 2, 14) - 12 });
     };
-    const onLeave = () => !menu && setHover(null);
+    // A grace period before hiding: the pointer crosses empty margin on its way to the handle.
+    let hideTimer: ReturnType<typeof setTimeout> | null = null;
+    const onLeave = () => {
+      if (menu) return;
+      hideTimer = setTimeout(() => setHover(null), 600);
+    };
+    const onEnter = () => {
+      if (hideTimer) clearTimeout(hideTimer);
+      hideTimer = null;
+    };
     container.addEventListener("mousemove", onMove);
     container.addEventListener("mouseleave", onLeave);
+    container.addEventListener("mouseenter", onEnter);
     return () => {
+      if (hideTimer) clearTimeout(hideTimer);
       container.removeEventListener("mousemove", onMove);
       container.removeEventListener("mouseleave", onLeave);
+      container.removeEventListener("mouseenter", onEnter);
     };
   }, [container, editor, menu]);
   if (!hover) return null;
@@ -400,7 +412,8 @@ export function BlockHandle({ editor, container, extraInserts = [] }: { editor: 
     done();
   };
   return (
-    <div className="absolute z-30 flex items-start gap-0.5" style={{ top: hover.top, left: -60 }} onMouseDown={(e) => e.preventDefault()}>
+    // Spans the whole gutter up to the text, so moving onto the handle never leaves the editor.
+    <div className="absolute z-30 flex items-start gap-0.5 pr-2" style={{ top: hover.top - 6, left: -60, width: 60, paddingTop: 6, paddingBottom: 6 }} onMouseDown={(e) => e.preventDefault()}>
       <button type="button" title="Add a block below" onClick={() => setMenu(menu === "add" ? null : "add")} className="flex size-6 items-center justify-center rounded text-[#9ca3af] hover:bg-[#eef6ff] hover:text-[#2563eb]">
         <Plus className="size-4" />
       </button>
