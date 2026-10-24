@@ -4,8 +4,10 @@ import postgres from "postgres";
 // The content page's one-click handoff: "Send to review → <reviewer>" on your
 // Assigned item moves it to Review AND makes the brand's reviewer the editor;
 // "Approve → back to <sender>" on a Review item moves it to Ready To Publish
-// and hands it back. The reviewer is a second user seeded straight into the
-// DB with one approval on the brand, as in my-work.spec.ts.
+// and hands it back. When the sender already holds it again (the reviewer set
+// the editor first), the button stays as "Approve → Ready To Publish". The
+// reviewer is a second user seeded straight into the DB with one approval on
+// the brand, as in my-work.spec.ts.
 test("hand work to the reviewer and back in one click", async ({ page }) => {
   const sql = postgres(process.env.DATABASE_URL!, { max: 1 });
   try {
@@ -47,6 +49,10 @@ test("hand work to the reviewer and back in one click", async ({ page }) => {
     // Rita sent this one to me for review.
     const reviewId = await create(`E2E handoff review ${stamp}`, "Review");
     await statusEvent(reviewId, reviewer.id, "Assigned", "Review");
+    // Rita sent this one too, and it's already back in her name.
+    const keptId = await create(`E2E handoff kept ${stamp}`, "Review");
+    await statusEvent(keptId, reviewer.id, "Assigned", "Review");
+    await sql`UPDATE production_items SET editor_user_id = ${reviewer.id} WHERE id = ${keptId}`;
 
     const open = async (p: Page, id: string) => {
       await p.goto(`/starter-story/content/${id}`);
@@ -62,7 +68,6 @@ test("hand work to the reviewer and back in one click", async ({ page }) => {
     await open(page, mineId);
     const send = page.getByRole("button", { name: "Send to review → Rita" });
     await expect(send).toBeVisible();
-    if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT });
     await send.click();
     await expect(send).toBeHidden();
 
@@ -73,11 +78,20 @@ test("hand work to the reviewer and back in one click", async ({ page }) => {
     await approve.click();
     await expect(approve).toBeHidden();
 
+    // 3. Editor already Rita → Approve still there, status only.
+    await open(page, keptId);
+    const approveKept = page.getByRole("button", { name: "Approve → Ready To Publish" });
+    await expect(approveKept).toBeVisible();
+    if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT });
+    await approveKept.click();
+    await expect(approveKept).toBeHidden();
+
     const rows = await sql<{ id: string; status: string; editor_user_id: string }[]>`
-      SELECT id, status, editor_user_id FROM production_items WHERE id IN (${mineId}, ${reviewId})`;
+      SELECT id, status, editor_user_id FROM production_items WHERE id IN (${mineId}, ${reviewId}, ${keptId})`;
     const byId = Object.fromEntries(rows.map((r) => [r.id, r]));
     expect(byId[mineId]).toMatchObject({ status: "Review", editor_user_id: reviewer.id });
     expect(byId[reviewId]).toMatchObject({ status: "Ready To Publish", editor_user_id: reviewer.id });
+    expect(byId[keptId]).toMatchObject({ status: "Ready To Publish", editor_user_id: reviewer.id });
   } finally {
     await sql.end();
   }

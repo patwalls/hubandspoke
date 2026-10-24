@@ -37,9 +37,14 @@ describe("pickHandoff", () => {
     expect(h).toEqual({ kind: "approve", to: "Ready To Publish", person: john, others: [] });
   });
 
-  it("is a plain status change when the sender still holds it or is me", () => {
-    expect(pickHandoff({ me: "andrew", status: "Review", editorUserId: "john", brandStatuses: all, reviewers: [], sentToReviewBy: john })).toBeNull();
+  it("still offers Approve when the editor is already the sender (set back by hand first)", () => {
+    const h = pickHandoff({ me: "andrew", status: "Review", editorUserId: "john", brandStatuses: all, reviewers: [], sentToReviewBy: john });
+    expect(h).toEqual({ kind: "approve", to: "Ready To Publish", person: john, others: [] });
+  });
+
+  it("offers nothing on a post I sent to review myself", () => {
     expect(pickHandoff({ me: "john", status: "Review", editorUserId: "andrew", brandStatuses: all, reviewers: [], sentToReviewBy: john })).toBeNull();
+    expect(pickHandoff({ me: "john", status: "Review", editorUserId: "john", brandStatuses: all, reviewers: [], sentToReviewBy: john })).toBeNull();
   });
 
   it("offers nothing in Review without a known sender, or in other statuses", () => {
