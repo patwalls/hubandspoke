@@ -19,6 +19,8 @@ export const myWorkColumns = {
   thumbnail: productionItems.thumbnail,
   editorUserId: productionItems.editorUserId,
   updatedAt: productionItems.updatedAt,
+  repostedFromItemId: productionItems.repostedFromItemId,
+  pillarContentItemId: productionItems.pillarContentItemId,
 };
 
 export type MyWorkItem = {
@@ -32,6 +34,9 @@ export type MyWorkItem = {
   thumbnail: string | null;
   editorUserId: string | null;
   updatedAt: Date;
+  /** What it was made from (Up next offers siblings first). */
+  repostedFromItemId?: string | null;
+  pillarContentItemId?: string | null;
 };
 
 /** Brands where this person moved an item out of Review in the last 30 days. */

@@ -83,7 +83,7 @@ describe("upNext", () => {
 
   it("is empty when the post you're on was the only one waiting", () => {
     const one = { toReview: [], yourTurn: [row("only", "Assigned")], waitingOnOthers: [] };
-    expect(upNext(one, "only")).toEqual({ next: null, remaining: 0, currentWaiting: true });
+    expect(upNext(one, "only")).toEqual({ next: null, remaining: 0, currentWaiting: true, sameSource: false });
   });
 
   it("says whether the post you're on is still waiting on you", () => {
@@ -93,5 +93,25 @@ describe("upNext", () => {
     expect(upNext(split, "w").currentWaiting).toBe(false);
     expect(upNext(split, "gone")).toMatchObject({ next: { id: "rv-old" }, remaining: 4, currentWaiting: false });
     expect(upNext(split, null).currentWaiting).toBe(false);
+  });
+
+  it("offers the next cross-post of the same post before anything else", () => {
+    const xp = (id: string, from: string) => ({ ...row(id, "Ready To Publish"), repostedFromItemId: from });
+    const mixed = {
+      toReview: [row("rv-old", "Review")],
+      // Newest first: the unrelated one is the oldest of all.
+      yourTurn: [xp("xp-b", "src"), xp("xp-a", "src"), xp("other", "elsewhere"), row("t-old", "Assigned")],
+      waitingOnOthers: [],
+    };
+    // You just published xp-a (it's gone from the list): xp-b is next, not rv-old.
+    const after = upNext(mixed, "xp-a-published", { repostedFromItemId: "src" });
+    expect(after).toMatchObject({ next: { id: "xp-a" }, sameSource: true, remaining: 5 });
+    expect(upNext(mixed, "xp-a", { repostedFromItemId: "src" })).toMatchObject({ next: { id: "xp-b" }, sameSource: true });
+    // Clips of the same video count too.
+    const clips = { toReview: [], yourTurn: [{ ...row("c2", "Assigned"), pillarContentItemId: "vid" }, row("t", "Assigned")], waitingOnOthers: [] };
+    expect(upNext(clips, "c1", { pillarContentItemId: "vid" })).toMatchObject({ next: { id: "c2" }, sameSource: true });
+    // No links on the post you're on (or no sibling waiting): the usual order.
+    expect(upNext(mixed, "xp-a", { repostedFromItemId: null, pillarContentItemId: null })).toMatchObject({ next: { id: "rv-old" }, sameSource: false });
+    expect(upNext(mixed, "xp-a", { repostedFromItemId: "nope" })).toMatchObject({ next: { id: "rv-old" }, sameSource: false });
   });
 });

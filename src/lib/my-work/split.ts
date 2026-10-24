@@ -69,6 +69,21 @@ export function waitingCount(split: MyWorkSplit<MyWorkRow>): number {
   return split.yourTurn.length + split.toReview.length;
 }
 
+/** Which post a row was made from: the post it cross-posts / reposts, or the
+ *  video it is a derivative of. Two rows with a shared link are siblings. */
+export interface SourceLinks {
+  repostedFromItemId?: string | null;
+  pillarContentItemId?: string | null;
+}
+
+export function isSibling(row: SourceLinks, of: SourceLinks | null): boolean {
+  if (!of) return false;
+  return (
+    (!!of.repostedFromItemId && row.repostedFromItemId === of.repostedFromItemId) ||
+    (!!of.pillarContentItemId && row.pillarContentItemId === of.pillarContentItemId)
+  );
+}
+
 /**
  * What the content page's "Up next" link points at: the next post waiting on
  * you, other than the one you're looking at. To review first (oldest first, as
@@ -77,16 +92,26 @@ export function waitingCount(split: MyWorkSplit<MyWorkRow>): number {
  * `currentWaiting` says whether the post you're on is still waiting on you:
  * when it flips to false you just sent it on, which is the moment the page
  * offers the next one.
+ *
+ * `siblingsOf` = the post you're on: its siblings that are waiting on you
+ * (the other cross-posts of the same post, the other clips of the same video)
+ * jump the line, because a curator publishing five cross-posts went back to
+ * the production list to find each next one. `sameSource` says the next one
+ * is a sibling.
  */
-export function upNext<R extends MyWorkRow>(
+export function upNext<R extends MyWorkRow & SourceLinks>(
   split: MyWorkSplit<R>,
   currentId: string | null,
-): { next: R | null; remaining: number; currentWaiting: boolean } {
+  siblingsOf: SourceLinks | null = null,
+): { next: R | null; remaining: number; currentWaiting: boolean; sameSource: boolean } {
   const all = [...split.toReview, ...[...split.yourTurn].reverse()];
   const queue = all.filter((r) => r.id !== currentId);
+  const sibling = queue.find((r) => isSibling(r, siblingsOf)) ?? null;
+  const next = sibling ?? queue[0] ?? null;
   return {
-    next: queue[0] ?? null,
+    next,
     remaining: queue.length,
     currentWaiting: currentId !== null && queue.length < all.length,
+    sameSource: sibling !== null,
   };
 }

@@ -482,6 +482,8 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     [pathname, router, searchParams],
   );
   const [loading, setLoading] = useState(true);
+  // Set once the first load (or the SSR hydrate) has applied the item.
+  const [loadedOnce, setLoadedOnce] = useState(false);
   const [data, setData] = useState<DetailResponse | null>(initialData ?? null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -1590,6 +1592,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
       setData(null);
     } finally {
       setLoading(false);
+      setLoadedOnce(true);
     }
   }, [contentId, applyItem]);
 
@@ -1603,6 +1606,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
       // exactly as load() would, without refetching.
       applyItem(initialData.item, initialData.pillar ?? null, initialData.repostedFrom ?? null);
       setLoading(false);
+      setLoadedOnce(true);
       return;
     }
     load();
@@ -1982,7 +1986,11 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     }
   }
 
-  if (loading) {
+  // Only the first load blanks the page. A refetch (after Publish, a
+  // cross-post, a TikTok draft…) keeps it mounted: swapping in "Loading…"
+  // unmounted every child, so the scroll jumped to the top and the Up next
+  // card never saw the post leave your plate (it never showed after Publish).
+  if (loading && !loadedOnce) {
     return (
       <div className="flex items-center justify-center py-20">
         <div className="text-muted-foreground text-sm">Loading…</div>
