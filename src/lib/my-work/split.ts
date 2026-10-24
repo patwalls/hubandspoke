@@ -74,13 +74,19 @@ export function waitingCount(split: MyWorkSplit<MyWorkRow>): number {
  * you, other than the one you're looking at. To review first (oldest first, as
  * fetched), then your turn oldest-touched first — the order fetched is newest
  * first, so it's reversed here. `remaining` counts everything else waiting.
+ * `currentWaiting` says whether the post you're on is still waiting on you:
+ * when it flips to false you just sent it on, which is the moment the page
+ * offers the next one.
  */
 export function upNext<R extends MyWorkRow>(
   split: MyWorkSplit<R>,
   currentId: string | null,
-): { next: R | null; remaining: number } {
-  const queue = [...split.toReview, ...[...split.yourTurn].reverse()].filter(
-    (r) => r.id !== currentId,
-  );
-  return { next: queue[0] ?? null, remaining: queue.length };
+): { next: R | null; remaining: number; currentWaiting: boolean } {
+  const all = [...split.toReview, ...[...split.yourTurn].reverse()];
+  const queue = all.filter((r) => r.id !== currentId);
+  return {
+    next: queue[0] ?? null,
+    remaining: queue.length,
+    currentWaiting: currentId !== null && queue.length < all.length,
+  };
 }
