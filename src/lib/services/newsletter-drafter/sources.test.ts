@@ -51,3 +51,12 @@ describe("extractCaseStudyText (read_case_study)", () => {
     expect(nf).toEqual({ error: "The page returned 404" });
   });
 });
+
+
+describe("isCaseStudyType (story search keeps case studies only)", () => {
+  it("keeps interviews, written case studies, follow-ups, starters and breakdowns; drops blogs, roundups, guides and SEO pages", async () => {
+    const { isCaseStudyType } = await import("./sources");
+    for (const t of ["story", "follow_up", "starter", "breakdown"]) expect(isCaseStudyType(t)).toBe(true);
+    for (const t of ["blog", "roundup", "breakdown_tools", "idea_show", "database_item", "guide", "tool_wiki", null]) expect(isCaseStudyType(t)).toBe(false);
+  });
+});

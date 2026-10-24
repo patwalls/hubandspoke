@@ -296,13 +296,24 @@ export async function listOlderVideos(brand: string, before: Date, limit = 120):
 }
 
 /**
- * Search the Starter Story catalog by topic / business / founder (the content
- * API matches business names and titles). `all`: every editorial story, not
- * only interview + breakdown episodes — written case studies too (the
- * editor's Find new story search).
+ * Search Starter Story case studies by topic / business / founder (the content
+ * API matches business names and titles). `all`: ask across every editorial
+ * type so update interviews and "starter" stories come back too; only
+ * case-study types are kept (CASE_STUDY_TYPES).
  */
 export async function searchCaseStudies(query: string, opts: { all?: boolean } = {}): Promise<ContentResult[]> {
-  return (await searchContent({ q: query, limit: 25, all: opts.all })).filter((r) => r.url);
+  return (await searchContent({ q: query, limit: 25, all: opts.all })).filter((r) => r.url && isCaseStudyType(r.contentType));
+}
+
+/**
+ * Starter Story content types that are case studies a newsletter can feature:
+ * founder interviews (incl. written-only ones), update interviews, "starter"
+ * interviews and breakdowns. Not blog posts, roundups, guides, idea / tool /
+ * name pages or database items (Pat, 2026-10-23). Exported for tests.
+ */
+export const CASE_STUDY_TYPES = new Set(["story", "follow_up", "starter", "breakdown"]);
+export function isCaseStudyType(contentType: string | null | undefined): boolean {
+  return !!contentType && CASE_STUDY_TYPES.has(contentType);
 }
 
 /** A full written case study is long (interview + data panel): plenty, but not a whole context window. */
