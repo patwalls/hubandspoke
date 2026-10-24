@@ -34,6 +34,7 @@ import {
 } from "@/lib/services/promote-clip-idea";
 import { findHookLayer, isSourceSection, parseDoc, type ClipEditDoc } from "@/lib/clip-editor/doc";
 import { compileRenderPlan } from "@/lib/clip-editor/plan";
+import { titleAfterHookChange } from "@/lib/services/title-after-hook-change";
 
 export class ClipEditNotFoundError extends Error {
   constructor() {
@@ -90,6 +91,17 @@ export async function exportClipEdit(args: {
 
   const brand = row.sourceBrand ?? "starter-story";
   const hook = findHookLayer(doc)?.text.trim() || row.hook;
+  // The title follows the hook only until someone types their own.
+  const [current] = await db
+    .select({ title: productionItems.title, hook: productionItems.hook })
+    .from(productionItems)
+    .where(eq(productionItems.id, productionItemId))
+    .limit(1);
+  const title = titleAfterHookChange({
+    currentTitle: current?.title ?? null,
+    priorHooks: [current?.hook ?? null, row.hook],
+    newHook: hook,
+  });
 
   // Anything still queued/rendering for this edit is now stale.
   await db
@@ -117,7 +129,7 @@ export async function exportClipEdit(args: {
       .update(productionItems)
       .set({
         status: "Assigned",
-        title: hook,
+        title,
         hook,
         contentBody: buildContentBody({ ...row, hook }),
         editorUserId: args.actorUserId,
@@ -127,7 +139,7 @@ export async function exportClipEdit(args: {
   } else {
     await db
       .update(productionItems)
-      .set({ title: hook, hook, updatedAt: new Date() })
+      .set({ title, hook, updatedAt: new Date() })
       .where(eq(productionItems.id, productionItemId));
   }
 
