@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { WHATS_NEW } from "../../src/lib/whats-new/entries";
 
 // The What's new list is reachable from the user menu on every dashboard page,
 // whether or not the pop-up already showed (it pops once per user).
@@ -15,6 +16,10 @@ test("user menu opens the What's new list", async ({ page }) => {
   const list = page.getByRole("dialog", { name: "What's new" });
   await expect(list).toBeVisible();
   await expect(list.getByText("New improvements, every few days")).toBeVisible();
+  // Newest first: the card that shipped last is the first thing you see.
+  const newest = list.getByText(WHATS_NEW[0].title, { exact: true });
+  await newest.scrollIntoViewIfNeeded();
+  await expect(newest).toBeVisible();
   // The product loop's visual check (scripts/loop-e2e.sh) passes a path to look at.
   // The modal hides the closing menu from the a11y tree, so wait on the DOM.
   await expect(page.locator("[role=menu]")).toHaveCount(0);
