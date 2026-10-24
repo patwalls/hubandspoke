@@ -77,15 +77,20 @@ export function HandoffButton({
   async function go(person: HandoffPerson) {
     if (!handoff) return;
     setBusy(true);
-    trackUsage(`handoff:${handoff.kind}`, brand);
+    trackUsage(keepsEditor ? "handoff:approve-kept-editor" : `handoff:${handoff.kind}`, brand);
     await onHandoff({ status: handoff.to, editorUserId: person.id });
     setBusy(false);
   }
 
+  // Approve on a post the sender already holds again (the reviewer set the
+  // editor first): only the status moves.
+  const keepsEditor = handoff.kind === "approve" && handoff.person.id === editorUserId;
   const label =
     handoff.kind === "send-to-review"
       ? `Send to review → ${firstName(handoff.person.name)}`
-      : `Approve → back to ${firstName(handoff.person.name)}`;
+      : keepsEditor
+        ? `Approve → ${handoff.to}`
+        : `Approve → back to ${firstName(handoff.person.name)}`;
   const hasMore = handoff.others.length > 0;
 
   return (
@@ -97,7 +102,9 @@ export function HandoffButton({
         title={
           handoff.kind === "send-to-review"
             ? `Moves it to ${handoff.to} and makes ${handoff.person.name} the editor`
-            : `Moves it to ${handoff.to} and gives it back to ${handoff.person.name}`
+            : keepsEditor
+              ? `Moves it to ${handoff.to}; ${handoff.person.name} stays the editor`
+              : `Moves it to ${handoff.to} and gives it back to ${handoff.person.name}`
         }
         className={cn(BTN, hasMore ? "rounded-l-md" : "rounded-md")}
       >

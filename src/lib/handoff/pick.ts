@@ -5,7 +5,7 @@
  * AND moving its status, two clicks every time (~200 a month):
  * - the editor finishes → editor = the brand's reviewer, status Review;
  * - the reviewer approves → editor = whoever sent it to review, status Ready
- *   To Publish.
+ *   To Publish (if they're already the editor, only the status moves).
  * Nobody is assigned as a reviewer in the data, so the history is the
  * assignment: a brand's reviewer is whoever moved its posts out of Review most
  * in the last 30 days (same rule as My Work's To review).
@@ -53,9 +53,11 @@ export function pickHandoff(input: {
   }
 
   if (status === REVIEW && has(READY) && sentToReviewBy) {
-    // Sent by the person who'd approve it (or still with them): plain status
-    // change, nothing to hand back.
-    if (sentToReviewBy.id === me || sentToReviewBy.id === editorUserId) return null;
+    // My own post: nothing for me to approve.
+    if (sentToReviewBy.id === me) return null;
+    // Still offered when the sender already holds it: the daily reviewer
+    // sets the editor back first, and the approve click must survive that
+    // (it then only moves the status; the button says so).
     return { kind: "approve", to: READY, person: sentToReviewBy, others: [] };
   }
 

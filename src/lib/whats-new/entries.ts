@@ -29,6 +29,16 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-10-24-approve-after-editor",
+    shippedAt: "2026-10-24T05:15:00Z",
+    kind: "fix",
+    title: "Approve stays one click, even after you set the editor",
+    body:
+      "Reviewing a post that's already back in its editor's name? The Approve button next to its status no longer " +
+      "disappears. It now reads Approve → Ready To Publish and moves it in one click.",
+    screen: "/[brand]/content/[id]",
+  },
+  {
     id: "2026-10-24-my-work-next-card",
     shippedAt: "2026-10-24T00:45:00Z",
     kind: "feature",
