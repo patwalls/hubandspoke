@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
+import { AlertTriangle } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -15,6 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { trackUsage } from "@/lib/usage/track";
+import { validatePublishedLinkPlatform } from "@/lib/published-link-validation";
 
 // The one and only path to status='Published' / status='Scheduled'. The
 // generic PUT /api/production-items route rejects those status values
@@ -49,6 +51,9 @@ interface Props {
   /** Current status string ("Ready To Publish" / "Published" / etc.) —
    *  drives default tab + button label. */
   currentStatus?: string | null;
+  /** The item's post type: a link from another platform is caught before
+   *  Publish, same as the Publish screen's rows. */
+  postType?: string | null;
   /** Fires after a successful save so the parent can refetch. */
   onSuccess?: () => void;
   /** Other posts from the same video waiting in Ready To Publish: the
@@ -81,6 +86,7 @@ export function PublishScheduleDialog({
   initialExpectedPublishAt,
   initialNoDate,
   currentStatus,
+  postType,
   onSuccess,
   publishTab,
 }: Props) {
@@ -130,8 +136,12 @@ export function PublishScheduleDialog({
     }
   }, [link]);
 
+  const mismatch = linkValid
+    ? validatePublishedLinkPlatform(link.trim(), postType)
+    : null;
+
   const saveDisabled =
-    submitting || (mode === "publish" && !linkValid);
+    submitting || (mode === "publish" && (!linkValid || !!mismatch));
 
   async function handleSave() {
     if (saveDisabled) return;
@@ -246,11 +256,22 @@ export function PublishScheduleDialog({
                 value={link}
                 onChange={(e) => setLink(e.target.value)}
                 autoFocus
+                aria-invalid={!!mismatch}
               />
-              <p className="text-[11px] text-muted-foreground">
-                The live URL of the post. Required — pasting an invalid
-                URL keeps Save disabled.
-              </p>
+              {mismatch ? (
+                <p
+                  className="flex items-center gap-1.5 text-[11px] text-amber-600 dark:text-amber-400"
+                  data-testid="publish-link-mismatch"
+                >
+                  <AlertTriangle className="size-3 shrink-0" />
+                  {mismatch}
+                </p>
+              ) : (
+                <p className="text-[11px] text-muted-foreground">
+                  The live URL of the post. Required — pasting an invalid
+                  URL keeps Save disabled.
+                </p>
+              )}
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="publish-date">Published date</Label>

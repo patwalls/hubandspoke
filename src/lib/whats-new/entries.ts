@@ -29,6 +29,17 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-10-25-publish-link-platform",
+    shippedAt: "2026-10-25T01:30:00Z",
+    kind: "fix",
+    title: "Publish catches a link from the wrong platform",
+    body:
+      "Paste a TikTok link into an Instagram Reel's Publish box (or any other mix-up) and the post's page now says so " +
+      "and keeps Publish off until the link matches, the same check the Publish tab already had. Views keep syncing from the right post.",
+    href: "/[brand]/publish",
+    screen: "/[brand]/content/[id]",
+  },
+  {
     id: "2026-10-24-publish-next-card",
     shippedAt: "2026-10-24T18:00:00Z",
     kind: "feature",
