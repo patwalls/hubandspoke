@@ -13,6 +13,7 @@ test("publish dialog and route refuse a link from another platform", async ({ pa
         title: `E2E reel ${stamp}`,
         platform: ["instagram_reel"],
         postType: "instagram_reel",
+        publishedDate: new Date().toISOString().slice(0, 10),
         brand: "starter-story",
       },
     });
