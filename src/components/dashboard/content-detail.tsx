@@ -4816,6 +4816,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
         initialExpectedPublishAt={item.expectedPublishAt ?? null}
         initialNoDate={item.scheduledNoDate ?? false}
         currentStatus={item.status ?? null}
+        postType={item.postType ?? null}
         publishTab={
           pillarReadyCount > 1
             ? { href: `/${brand}/publish?focus=${item.id}`, others: pillarReadyCount - 1 }

@@ -8,6 +8,7 @@ import {
   type ContentChange,
 } from "@/lib/services/content-revisions";
 import { scheduleVelocitySnapshots } from "@/jobs/tasks/capture-velocity-snapshot";
+import { validatePublishedLinkPlatform } from "@/lib/published-link-validation";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -69,6 +70,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       publishedAt: productionItems.publishedAt,
       expectedPublishAt: productionItems.expectedPublishAt,
       scheduledNoDate: productionItems.scheduledNoDate,
+      postType: productionItems.postType,
     })
     .from(productionItems)
     .where(eq(productionItems.id, id))
@@ -101,6 +103,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
         { error: `"${linkRaw}" is not a valid URL.` },
         { status: 400 },
       );
+    }
+    // Same platform guard as the generic PUT: a TikTok link on an Instagram
+    // Reel row is refused, whichever screen sent it (until 2026-10-25 this
+    // route skipped it, so the content page's Publish dialog let them in).
+    const linkMismatch = validatePublishedLinkPlatform(linkRaw, existing.postType);
+    if (linkMismatch) {
+      return NextResponse.json({ error: linkMismatch }, { status: 400 });
     }
     nextStatus = "Published";
     updates.status = "Published";
