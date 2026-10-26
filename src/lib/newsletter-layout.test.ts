@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_TEMPLATES } from "./newsletter-template";
-import { layoutFor, layoutFromSections, layoutText, newSlotKey, slotHeadings, slotKeys, withLayout } from "./newsletter-layout";
+import { layoutFor, layoutFromSections, layoutText, newSlotKey, slotHeadings, slotKeys, withLayout, type LayoutDoc } from "./newsletter-layout";
 
 const sb = DEFAULT_TEMPLATES["sunday breakfast"];
 
@@ -85,7 +85,7 @@ describe("layoutText", () => {
         { type: "callout", attrs: { color: "#fff" }, content: [{ type: "paragraph", content: [{ type: "text", text: "Fixed " }, { type: "text", text: "line", marks: [{ type: "bold" }] }] }, { type: "slot", attrs: { key: "a" } }] },
         { type: "bulletList", content: [{ type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "Item {x}" }] }] }] },
       ],
-    };
+    } as LayoutDoc;
     expect(layoutText(layout)).toEqual(["{tool} Guide", "Fixed line", "Item {x}"]);
     expect(layoutText(layoutFor(DEFAULT_TEMPLATES["futurepedia newsletter"]))).toEqual(["{tool} Guide", "{steps_heading}", "Free Resource", "{tool} Guide Continued", "{closer_1}", "{closer_2}"]);
   });
