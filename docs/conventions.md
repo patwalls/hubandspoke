@@ -298,6 +298,10 @@ task that takes longer than ~20s:
   lock that blocks its whole serial queue (2026-10-15). The worker's lock
   reconciler is the safety net, not the plan — see `docs/automation.md` →
   Queue health and lock reconciliation.
+- **An SDK call allowed more than 5 minutes passes `longRequestOptions(ms)`**
+  (`src/lib/long-request.ts`) instead of a bare `timeout`. Node's built-in
+  fetch has its own 300 s clock for response headers and body gaps that the
+  OpenAI and Anthropic SDKs' `timeout` does not lift (2026-10-26, diarize).
 - **Serial queues (`queueName: "media-heavy"`, `"diarize"`) are a shared
   resource.** One hung job stops every job behind it. Put a task on one only
   when two of them running at once would actually hurt (memory), and keep

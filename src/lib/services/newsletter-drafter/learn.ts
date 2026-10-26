@@ -20,6 +20,7 @@ import { newsletterTemplateSchema, STORY_KINDS, templateFor, type NewsletterTemp
 import { newsletterModel } from "./agent";
 import { brandHasCaseStudies } from "./format-config";
 import { getPastIssues, type PastIssue } from "./sources";
+import { longRequestOptions } from "@/lib/long-request";
 
 /** How many issues the learner reads, and how much of each. */
 export const LEARN_ISSUES = 12;
@@ -198,7 +199,7 @@ export async function learnTemplate(proposalId: string, opts: { signal?: AbortSi
           tools: [PROPOSE_TOOL],
           messages,
         },
-        { signal: opts.signal, timeout: REQUEST_TIMEOUT_MS },
+        { signal: opts.signal, ...longRequestOptions(REQUEST_TIMEOUT_MS) },
       );
       const use = message.content.find((b): b is Anthropic.Beta.BetaToolUseBlock => b.type === "tool_use");
       const parsed = use ? Proposal.safeParse(use.input) : null;

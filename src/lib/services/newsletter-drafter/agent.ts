@@ -30,6 +30,7 @@ import { getCaseStudy, getTimestampedTranscript, getVideoTranscript, listOlderVi
 import { caseStudyKey, EVERGREEN_MIN_DAYS, isEvergreenOk, RECENT_BLOCK_DAYS, type StoryUsage } from "./usage";
 import { SPECIAL_MARKER } from "./special-compose";
 import { toolWindow, type DraftWindow } from "./window";
+import { longRequestOptions } from "@/lib/long-request";
 
 export const NEWSLETTER_MODEL = "claude-opus-5-5";
 
@@ -703,7 +704,7 @@ async function runLoop<T>(spec: LoopSpec<T>): Promise<{ value: T; model: string;
         tools: spec.tools,
         messages,
       },
-      { signal: args.signal, timeout: REQUEST_TIMEOUT_MS },
+      { signal: args.signal, ...longRequestOptions(REQUEST_TIMEOUT_MS) },
     );
 
     if (message.stop_reason === "refusal") {
