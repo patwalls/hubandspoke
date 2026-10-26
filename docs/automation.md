@@ -2180,7 +2180,7 @@ The `worker-heartbeat` task now also publishes the live pool id
 
 | check | red when | why that number |
 |---|---|---|
-| oldest due, unlocked, retryable job | waited > 15 min | hourly crons tolerate it; a stuck serial queue trips it within one render's worth of waiting |
+| oldest due, unlocked, retryable job | waited > 15 min | hourly crons tolerate it; a stuck serial queue trips it within one render's worth of waiting. **A job behind a serial queue the live pool holds is timed from that queue's `locked_at`** (when it took its current job), not its own `run_at` — a diarize backlog draining one ~5-min chunk at a time is moving (2026-10-26 paged on a "51-min wait" that was exactly that). One job holding a serial queue > 15 min with others behind it is still red |
 | lock held by a pool ≠ `worker_heartbeat.pool_id` | > 5 min | the worker reconciles within 60 s of boot; 5 min means the self-heal itself is broken |
 | `clip_renders` stalled (render-status.ts rules) | any | `queued` > 20 min or `rendering` with no heartbeat > 5 min |
 
