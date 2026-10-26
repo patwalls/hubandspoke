@@ -29,6 +29,16 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-10-26-notification-platform",
+    shippedAt: "2026-10-26T23:40:00Z",
+    kind: "feature",
+    title: "Notifications say which platform the post is for",
+    body:
+      "When you're assigned or mentioned on a cross-post, the bell now shows its platform before the title (Instagram Reel, TikTok, Threads…), " +
+      "so posts with the same title no longer look alike. Open the bell at the top of any page.",
+    screen: "notifications:bell",
+  },
+  {
     id: "2026-10-26-my-work-platform",
     shippedAt: "2026-10-26T18:29:00Z",
     kind: "feature",

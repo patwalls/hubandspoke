@@ -105,7 +105,7 @@ removing, or deprecating anything.
 
 | Feature | Status | Entry points | Backing tables | Notes |
 |---|---|---|---|---|
-| Notification inbox | Active | `/(dashboard)/notifications`, `GET /api/notifications`, `POST /api/notifications/mark-read` | `notifications` | |
+| Notification inbox | Active | `/(dashboard)/notifications`, header bell (`src/components/notifications/notification-bell.tsx`), `GET /api/notifications`, `POST /api/notifications/mark-read` | `notifications` | **2026-10-26 (build loop, polish):** each bell row names the post's platform before its title (`item.postType`, shaped by `src/lib/notifications/to-item.ts`); cross-posts share their post's title, so same-titled notifications read alike without it. Opening the bell marks `notifications:bell`. |
 | Email notifications (assignment, comment, mention) | Active | `notification-send` task, enqueued from comments / clip-idea triage / item create | `notifications` (emailedAt stamp) | Skips self-notifications and uninvited contractors. **Comment-recipient model (2026-05-14, GitHub-style thread participation):** a new comment notifies the current `editorUserId` plus every distinct prior `content_comments.userId` on that item, minus anyone already pinged via `kind:"mention"`. Producer role removed in the same change — the editor is the single owner across the pipeline. |
 
 ---
