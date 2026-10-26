@@ -8,7 +8,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { brands, formats, newsletterDrafts } from "@/lib/db/schema";
-import { composeIssue, templateFor, type NewsletterSection } from "@/lib/newsletter-template";
+import { composeIssue, sectionHeadings, templateFor, type NewsletterSection } from "@/lib/newsletter-template";
 import { NewsletterCancelledError, regenerateSection, storyKeyOf, type PinnedStory } from "./agent";
 import { blockedKeys, loadUsage, usageGroupFor, withInferredSources } from "./usage";
 import { formatConfigFor } from "./format-config";
@@ -73,6 +73,7 @@ export async function regenerateDraftSection(
       sendDate: newsletterDrafts.sendDate,
       notes: newsletterDrafts.notes,
       sections: newsletterDrafts.sections,
+      variables: newsletterDrafts.variables,
       sources: newsletterDrafts.sources,
       regenerating: newsletterDrafts.regenerating,
       sourceItemId: newsletterDrafts.sourceItemId,
@@ -123,7 +124,7 @@ export async function regenerateDraftSection(
       row.brand,
       row.formatName,
       video ? (voiceForChannel(row.formatName, video.channelHandle)?.voiceName ?? null) : null,
-      template.sections.map((s) => s.heading ?? "").filter(Boolean),
+      sectionHeadings(template),
     ).catch(() => []);
     const result = await regenerateSection({
       brand: row.brand,
@@ -142,6 +143,7 @@ export async function regenerateDraftSection(
       model: config.model,
       template,
       sections: row.sections,
+      variables: row.variables,
       sectionKey,
       instruction,
       usage,

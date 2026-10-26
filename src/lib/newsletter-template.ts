@@ -189,9 +189,36 @@ export const DEFAULT_BEEHIIV_LAYOUT: BeehiivLayout = {
     },
     { label: "Free Resource", border: NAVY, background: "#FFFFFF", sections: [{ key: "free_resource", showHeading: false, linkButtons: true }] },
     { label: "{tool} Guide Continued", border: BLUE, background: "#FFFFFF", sections: [{ key: "steps_continued", showHeading: false, linkButtons: true }] },
-    { label: "Use Cases", border: NAVY, background: "#FFFFFF", sections: [{ key: "use_cases", showHeading: false, linkButtons: false }] },
-    { label: "Bonus Tips", border: BLUE, background: "#FFFFFF", sections: [{ key: "bonus_tips", showHeading: false, linkButtons: false }] },
+    { label: "{closer_1}", border: NAVY, background: "#FFFFFF", sections: [{ key: "use_cases", showHeading: false, linkButtons: false }] },
+    { label: "{closer_2}", border: BLUE, background: "#FFFFFF", sections: [{ key: "bonus_tips", showHeading: false, linkButtons: false }] },
   ],
+};
+
+/**
+ * The fields the How-To drafter fills each issue: the tool the issue is about
+ * (the guide card labels), what the walkthrough is called, and what the two
+ * closing cards are. Read off the sent issues: "Nano Banana Guide" /
+ * "ChatGPT Work Guide Continued", "How We Did It" in every issue so far, and
+ * closers that have been "Use Cases" / "Bonus Tips" since Oct 2026 ("Other
+ * Use Cases" / "💡 Bonus Pro Tips" before).
+ */
+export const FUTUREPEDIA_VARIABLES: Record<string, NewsletterVariable> = {
+  tool: {
+    hint: "The tool's short name as readers know it, for the guide card labels ('Nano Banana Guide', 'ChatGPT Work Guide Continued'): the product the reader opens, with the version only when the issue leans on it; two tools working together can be 'NotebookLM + ChatGPT'.",
+    sample: "ChatGPT Work",
+  },
+  steps_heading: {
+    hint: "The walkthrough's heading. 'How We Did It' when the issue walks through a task we set up ourselves (nearly every issue). When the video is a tour, launch or comparison and the issue walks the reader through trying it, name it for that ('How To Try It', 'What We Found').",
+    sample: "How We Did It",
+  },
+  closer_1: {
+    hint: "The first closing card's label: 'Use Cases' when it's who else this fits; otherwise what the card is ('Where It Falls Short', 'What It Costs', 'Which Tool For Which Job').",
+    sample: "Use Cases",
+  },
+  closer_2: {
+    hint: "The last card's label: 'Bonus Tips' in most issues; otherwise what it is ('The Verdict', 'What To Watch For').",
+    sample: "Bonus Tips",
+  },
 };
 
 /**
@@ -205,9 +232,29 @@ export const beehiivMappingSchema = z.object({
 });
 export type BeehiivMapping = z.infer<typeof beehiivMappingSchema>;
 
+/**
+ * A FIELD the drafter fills every issue: a `{name}` token typed into the
+ * design (a card label "{tool} Guide", a heading "{steps_heading}") that the
+ * issue gives a value to. `hint` tells the drafter what the value is; `sample`
+ * stands in for it in the template preview. Fields with no entry here still
+ * work (the drafter is told where the token sits); an entry gives it guidance.
+ */
+export const variableSchema = z.object({
+  hint: z.string().max(600).default(""),
+  sample: z.string().max(120).default(""),
+});
+export type NewsletterVariable = z.infer<typeof variableSchema>;
+/** An issue's values for the template's fields, by name (stored on newsletter_drafts.variables). */
+export type NewsletterVariables = Record<string, string>;
+
+/** `{name}` in designed text (never `{{first_name}}`, the personalization token). */
+export const VARIABLE_TOKEN = /(?<!\{)\{([a-z][a-z0-9_]*)\}(?!\})/g;
+
 export const newsletterTemplateSchema = z
   .object({
     version: z.literal(1),
+    /** The fields the drafter fills (see variableSchema), by `{name}`. */
+    variables: z.record(z.string().regex(/^[a-z][a-z0-9_]*$/), variableSchema).default({}),
     style: styleSchema.default(styleSchema.parse({})),
     hubspot: hubspotMappingSchema.nullable().default(null),
     beehiiv: beehiivMappingSchema.nullable().default(null),
@@ -272,6 +319,35 @@ export function parseNewsletterTemplate(raw: unknown): NewsletterTemplate | null
   return r.success ? r.data : null;
 }
 
+/** The `{name}` tokens in a piece of designed text, in order, each once. Pure. */
+export function variableNames(text: string): string[] {
+  return [...new Set([...text.matchAll(VARIABLE_TOKEN)].map((m) => m[1]))];
+}
+
+/**
+ * Every `{name}` token in text, replaced: the issue's value, else the
+ * template's sample (previews), else `fallback(name)`. Pure.
+ */
+export function fillVariables(text: string, values: NewsletterVariables | null | undefined, template?: Pick<NewsletterTemplate, "variables"> | null, fallback: (name: string) => string = () => ""): string {
+  return text.replace(VARIABLE_TOKEN, (whole, name: string) => {
+    const v = values?.[name]?.trim();
+    if (v) return v;
+    const sample = template?.variables?.[name]?.sample?.trim();
+    if (sample) return sample;
+    const f = fallback(name);
+    return f || whole;
+  });
+}
+
+/**
+ * A section's heading with its fields filled in (the sample when the issue
+ * hasn't set a value): what a past issue's heading reads like, for matching
+ * (`usesCurrentTemplate`, the exemplars) and for naming the section. Pure.
+ */
+export function sectionHeadings(template: NewsletterTemplate, values?: NewsletterVariables | null): string[] {
+  return template.sections.map((s) => (s.heading ? fillVariables(s.heading, values, template) : "")).filter(Boolean);
+}
+
 const s = (
   key: string,
   heading: string | null,
@@ -308,6 +384,7 @@ const NEUTRAL_STYLE: NewsletterStyle = styleSchema.parse({});
 export const DEFAULT_TEMPLATES: Record<string, NewsletterTemplate> = {
   "sunday breakfast": {
     version: 1,
+    variables: {},
     locked: false,
     styleNotes: null,
     layout: null,
@@ -352,6 +429,7 @@ export const DEFAULT_TEMPLATES: Record<string, NewsletterTemplate> = {
   },
   "daily seinfeld": {
     version: 1,
+    variables: {},
     locked: false,
     styleNotes: null,
     layout: null,
@@ -406,15 +484,54 @@ export const DEFAULT_TEMPLATES: Record<string, NewsletterTemplate> = {
         layout: null,
         learnedAt: null,
         learnedFrom: null,
+        variables: FUTUREPEDIA_VARIABLES,
+        // Written from the 38 How-To issues sent Mar–Oct 2026: what each card
+        // does and how much of the issue it is, with the variation the issues
+        // actually show. The skeleton (the cards, their order) is fixed; what
+        // fills it is the video's call.
         sections: [
-          s("intro", null, "2 to 4 short first-person lines in the channel voice, the signature on its own line, then a one-line teaser text link to the Free Resource offer, the arrow after the link: '[See the bundle](URL) →'."),
-          s("article", null, "The article headline as an H2 (the how-to, benefit-first), then the video thumbnail, then the one-line concrete example.", { thumbnail: true }),
-          s("why", null, "An H3 'Why [Tool] Works', a benefit-first line, then 3 to 5 ✅ lines, one per line with no bullet dash, each led by a bolded action verb ('✅ **Builds** every frame from code').", { bullets: "lines" }),
-          s("steps", "How We Did It", "The first half of the 4 to 6 numbered steps, one action each. Each step: its title in bold on its own line ('**1. Pick a style in the Style Atlas**', no period), then 1 to 3 short sentences on the next line. Screenshots go on only 3 or 4 of the 6 steps in the whole issue, after the step's text, where the screen shows something the words can't. Weave a concrete business impact into at least one step.", { headingLevel: 3, screenshots: true }),
-          s("free_resource", "Free Resource", "The offer: headline, 2 to 3 sentence body, 3 to 5 Key Takeaways bullets and the CTA link.", { kind: "sponsor", boxColor: "#f1f5f9" }),
-          s("steps_continued", "How We Did It (continued)", "The rest of the numbered steps (continue the numbering), laid out the same way: the bold title on its own line, then 1 to 3 short sentences, with a screenshot only on the steps that need one (3 or 4 across all 6 steps). Then one closing line (an honest catch or the payoff), then the line [Watch The Full Video](VIDEO_URL) →.", { headingLevel: 3, screenshots: true }),
-          s("use_cases", "Use Cases", "One intro sentence on who else this fits, then 3 to 5 lines, each its own line with no bullet dash and no emoji: a bold role label, then the point ('**Sales:** Draft a follow-up to every lead from your call notes').", { headingLevel: 3, bullets: "paragraphs" }),
-          s("bonus_tips", "Bonus Tips", "2 to 3 lines, each its own line with no bullet dash: a bold directive with its colon, then the explanation ('**Keep your notes in one folder:** …'), at least one about scaling or saving time.", { headingLevel: 3, bullets: "paragraphs" }),
+          s(
+            "intro",
+            null,
+            "The opening card, first person in the channel's voice, like a note to a friend: what happened with the tool this week and why it clicked (Kevin: what he tested and what won; Saj: what finally made sense to him), and one line on what this issue shows. Two to four short lines, about 60 to 120 words. The sign-off ('- Kevin' / '- Saj') on its own line, then one teaser line that is a text link to the Free Resource offer with the arrow after the link ('[Run ChatGPT ads from inside HubSpot, the first CRM to plug in](URL) →'). No pain-point hook, no video link here (the thumbnail below links the video).",
+          ),
+          s(
+            "article",
+            null,
+            "The guide's headline as an H2, the way the issues write it: 'How We Used [Tool] To [the outcome a real person wants]' for a walkthrough, or a benefit-first headline when the issue isn't one. Then the video thumbnail, linked to the video. Then one short paragraph, the concrete example: a specific person, the job, the tool or feature that does it, the outcome ('A solo consultant with five clients loses Friday afternoon to status emails. She points ChatGPT Work at one folder of project notes & gets five personal drafts to review.'). About 50 to 60 words after the headline.",
+            { thumbnail: true },
+          ),
+          s(
+            "why",
+            null,
+            "Why this tool earns the issue. Its own H3: usually 'Why [Tool] Works', varied when a better line exists ('Why ChatGPT Work Is a Winner', 'Why ChatGPT Work Beats a Blank Prompt', 'Get On-Brand Designs Without Opening a Design App'). One plain benefit line, then a tight run of ✅ lines (three to five in the issues), one per line with no bullet dash, each opening with a bolded verb and naming a capability from the transcript ('✅ **Reads** the files in a project folder on your computer, so there's nothing to upload'). About 70 to 90 words.",
+            { bullets: "lines" },
+          ),
+          s(
+            "steps",
+            "{steps_heading}",
+            "The heart of the issue: this card and the continued card together are about half of it (400 to 460 words). Open with a sentence or two that frames the walkthrough and who it's for ('Here's how we set up a weekly client update that mostly writes itself. If you send the same kind of message to several people, you could use the same setup.'), then the first half of the numbered steps. Each step: a bold title on its own line ('**1. Create a project & point it at your folder**', no period), then one to four short sentences a first-timer can follow, with the exact prompt in quotes on its own line where there is one. The issues run four to six steps; the video decides. Put the payoff (time saved, nothing missed, still in control) in a step where it's true. Screenshots on the steps where the screen shows something words can't, usually three or four across the whole walkthrough, after the step's text.",
+            { headingLevel: 3, screenshots: true },
+          ),
+          s("free_resource", "Free Resource", "The offer: headline, 2 to 3 sentence body, 3 to 5 'What's Inside' bullets and the CTA link.", { kind: "sponsor", boxColor: "#f1f5f9" }),
+          s(
+            "steps_continued",
+            null,
+            "The rest of the steps, numbering continued, laid out the same way. Then one closing paragraph: the honest catch ('One catch: Work is built for the Business & Pro plans. The free plan has it on desktop only & it's very limited.') or the payoff in one breath (what used to need a photographer now takes a prompt, and you still control every image that goes out). Then, on its own line, [Watch The Full Video](VIDEO_URL) →, the only YouTube link in the issue.",
+            { screenshots: true },
+          ),
+          s(
+            "use_cases",
+            null,
+            "The first closing card, labelled by the field closer_1. In most issues it's Use Cases: one sentence on who else this fits ('If you send similar messages to several people on a schedule, this setup stretches far.'), then three to five lines, each its own line with no bullet dash: a bold role or situation with its colon, then the point ('**Sales:** Draft a follow-up to every lead from your call notes'). Roles beyond the office are welcome when the video supports them (teachers, family). When the video gives you something more useful for this spot (where the tool falls short, what it costs, which tool wins for which job), write that instead and label the card for it. About 75 to 100 words.",
+            { bullets: "paragraphs" },
+          ),
+          s(
+            "bonus_tips",
+            null,
+            "The last card, labelled by the field closer_2. Usually Bonus Tips: two or three lines, each its own line with no bullet dash, a bold directive with its colon then the explanation ('**Say 'don't send' every time:** Putting it in your prompt keeps every draft waiting for your approval'), at least one about saving time or scaling, often one honest limit from the video. When the video calls for a different ending (the verdict of a comparison, what to watch for next, a cost note), write that and label the card for it. About 80 to 100 words. Nothing after it: no sign-off, no 'what's next' (the poll and the footer follow).",
+            { bullets: "paragraphs" },
+          ),
         ],
       },
     ]),
@@ -422,21 +539,23 @@ export const DEFAULT_TEMPLATES: Record<string, NewsletterTemplate> = {
 };
 
 /**
- * The Futurepedia emails' look, read off the sent How-To issues (Oct 2026):
- * light blue-grey page, Open Sans body, Poppins headings / labels / buttons,
- * navy buttons, Futurepedia-blue links. Applied to a beehiiv template that
- * hasn't been redesigned in the builder yet (no `layout`).
+ * The Futurepedia emails' look, read off the HTML of the sent How-To issues
+ * (Oct 2026): page #F5F8FB, Open Sans 16px body in #222, Poppins titles at
+ * regular weight in navy #273653, links in beehiiv's light blue #49adff (the
+ * card labels keep Futurepedia blue #00AEEF through the layout), navy
+ * buttons. Applied to a beehiiv template that hasn't been redesigned in the
+ * builder yet (no `layout`).
  */
 export const FUTUREPEDIA_LOOK: Partial<NewsletterStyle> = {
   fontFamily: "'Open Sans', 'Segoe UI', Helvetica, Arial, sans-serif",
   headingFont: "'Poppins', 'Segoe UI', Helvetica, Arial, sans-serif",
-  headingWeight: 500,
+  headingWeight: 400,
   textColor: "#222222",
   headingColor: "#273653",
-  linkColor: "#00AEEF",
+  linkColor: "#49adff",
   buttonColor: "#273653",
-  pageBackground: "#f4f9fc",
-  contentBackground: "#f4f9fc",
+  pageBackground: "#F5F8FB",
+  contentBackground: "#F5F8FB",
   dividers: false,
 };
 

@@ -20,15 +20,17 @@ import { Textarea } from "@/components/ui/textarea";
 import { useFeatureFlags } from "@/components/clip-editor/use-feature-flags";
 import { EmailPreview } from "@/components/dashboard/email-preview";
 import { LayoutEditor, removeSlot } from "@/components/dashboard/layout-editor";
-import { defaultSection, layoutFor, newSlotKey, withLayout, type LayoutDoc } from "@/lib/newsletter-layout";
+import { defaultSection, layoutFor, layoutText, newSlotKey, withLayout, type LayoutDoc } from "@/lib/newsletter-layout";
 import { bodyStyle } from "@/lib/newsletter-email-html";
 import { cn } from "@/lib/utils";
 import {
   STORY_KIND_LABELS,
   STORY_KINDS,
+  variableNames,
   type NewsletterStyle,
   type NewsletterTemplate,
   type NewsletterTemplateSection,
+  type NewsletterVariable,
   type StoryKind,
 } from "@/lib/newsletter-template";
 
@@ -427,7 +429,9 @@ export function TemplateEditorDialog({
             ) : (
               <OverviewPanel
                 template={t}
+                design={design}
                 storyCtx={storyCtx}
+                onVariables={(variables) => setT({ ...t, variables })}
                 onAddSection={() => {
                   const ed = layoutEditor.current;
                   if (!ed) return;
@@ -452,20 +456,31 @@ function PanelTitle({ children }: { children: React.ReactNode }) {
   return <span className="text-sm font-medium">{children}</span>;
 }
 
-/** Nothing selected: how the template works, style notes, adding an AI section, the look. */
+/** Nothing selected: how the template works, style notes, the fields, adding an AI section, the look. */
 function OverviewPanel({
   template: t,
+  design,
   storyCtx,
   onAddSection,
   onLook,
   onStyleNotes,
+  onVariables,
 }: {
   template: NewsletterTemplate;
+  /** The layout as it stands on the canvas (its `{fields}` are listed below). */
+  design: LayoutDoc;
   storyCtx: StoryContext;
   onAddSection: () => void;
   onLook: () => void;
   onStyleNotes: (notes: string | null) => void;
+  onVariables: (variables: Record<string, NewsletterVariable>) => void;
 }) {
+  // The fields: every {name} typed into the design, plus any the template still describes (a token just deleted keeps its guidance until saved).
+  const fields = [...new Set([...variableNames(layoutText(design).join("\n")), ...Object.keys(t.variables ?? {})])];
+  const setField = (name: string, patch: Partial<NewsletterVariable>) => {
+    const cur = t.variables?.[name];
+    onVariables({ ...(t.variables ?? {}), [name]: { hint: cur?.hint ?? "", sample: cur?.sample ?? "", ...patch } });
+  };
   return (
     <div className="flex flex-col gap-3">
       <PanelTitle>Whole template</PanelTitle>
@@ -484,6 +499,25 @@ function OverviewPanel({
       <p className="rounded-md bg-muted/60 p-3 text-xs text-muted-foreground">
         The canvas is the email. Type, click and restyle anything: images, headings and labels (colors, pills), boxes (fill, border), buttons, dividers, fixed text. Each <span className="font-medium text-[#2563eb]">AI section</span> is where the drafter writes every issue — click one for its instructions. Use the + handle or the toolbar to add blocks anywhere.
       </p>
+      <div className="flex flex-col gap-2">
+        <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <Sparkles className="size-3 text-[#2563eb]" /> Fields the drafter fills
+        </span>
+        <p className="text-xs text-muted-foreground">
+          Type <span className="font-mono">{"{name}"}</span> anywhere in the design (a card label like <span className="font-mono">{"{tool} Guide"}</span>, a heading) and the drafter fills it in every issue from the video. Tell it what each one is; the sample stands in here.
+        </p>
+        {fields.length === 0 && <p className="text-xs italic text-muted-foreground">None yet.</p>}
+        {fields.map((name) => {
+          const v = t.variables?.[name];
+          return (
+            <div key={name} className="flex flex-col gap-1 rounded-md border p-2 text-xs">
+              <span className="font-mono text-foreground">{`{${name}}`}</span>
+              <Textarea className="min-h-14 text-xs" placeholder="What it is, for the drafter (e.g. the tool's short name as readers know it)" value={v?.hint ?? ""} onChange={(e) => setField(name, { hint: e.target.value })} />
+              <Input className="h-7 text-xs" placeholder="Sample shown in this preview" value={v?.sample ?? ""} onChange={(e) => setField(name, { sample: e.target.value })} />
+            </div>
+          );
+        })}
+      </div>
       <p className="rounded-md bg-muted/60 p-3 text-xs text-muted-foreground">
         {storyCtx.singleVideoNote ??
           "Each section's Story setting says where the drafter looks for it (this week's newest videos, case studies, a recent video…); its instructions say what to pick and how to write it. It's the usual shape, not a quota, and a story this newsletter ran in the last 3 weeks is never reused."}

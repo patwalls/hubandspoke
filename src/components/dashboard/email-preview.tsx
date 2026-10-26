@@ -44,6 +44,7 @@ export function EmailPreview({
   screenshots,
   width = EMAIL_WIDTH,
   layout,
+  variables,
 }: {
   template: NewsletterTemplate;
   sections?: NewsletterSection[];
@@ -61,8 +62,10 @@ export function EmailPreview({
   width?: number;
   /** This issue's own design (a draft whose designed parts were changed). */
   layout?: DocNode | null;
+  /** The issue's values for the template's `{fields}`. */
+  variables?: Record<string, string> | null;
 }) {
-  return <HtmlEmailPreview template={template} sections={sections} sponsor={sponsor} showHints={showHints} scale={scale} clipHeight={clipHeight} className={className} edit={edit} screenshots={screenshots} width={width} layout={layout ?? null} />;
+  return <HtmlEmailPreview template={template} sections={sections} sponsor={sponsor} showHints={showHints} scale={scale} clipHeight={clipHeight} className={className} edit={edit} screenshots={screenshots} width={width} layout={layout ?? null} variables={variables ?? null} />;
 }
 
 function HtmlEmailPreview({
@@ -77,8 +80,10 @@ function HtmlEmailPreview({
   screenshots,
   width,
   layout,
+  variables,
 }: {
   layout: DocNode | null;
+  variables: Record<string, string> | null;
   template: NewsletterTemplate;
   sections: NewsletterSection[];
   sponsor: { copy: string | null; landingUrl: string | null } | null;
@@ -94,8 +99,8 @@ function HtmlEmailPreview({
   /** Draft canvas: images and screenshot spots are clickable. */
   const draftCanvas = !!edit && edit.mode !== "template";
   const parts = useMemo(
-    () => renderEmailParts({ template, sections, sponsor, showHints, screenshots: screenshots ?? null, canvas: draftCanvas, layout }),
-    [template, sections, sponsor, showHints, screenshots, draftCanvas, layout],
+    () => renderEmailParts({ template, sections, sponsor, showHints, screenshots: screenshots ?? null, canvas: draftCanvas, layout, variables }),
+    [template, sections, sponsor, showHints, screenshots, draftCanvas, layout, variables],
   );
   // A designed part open for editing in this issue: where it starts, and how many nodes it is now.
   const [designEdit, setDesignEdit] = useState<{ path: number[]; doc: DocNode; count: number } | null>(null);

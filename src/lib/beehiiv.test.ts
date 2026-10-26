@@ -65,9 +65,12 @@ describe("assertSafeDraftCreate: a create can only ever make an unsent draft", (
     expect(() => assertSafeDraftCreate({ ...safe, guest_author_ids: [HOWTO_AUTHOR_IDS.saj] })).not.toThrow();
   });
 
-  it("refuses raw HTML, risky block types, per-block audience targeting and other authors or polls", () => {
+  it("refuses body_content, an html block that could run code, risky block types, per-block audience targeting and other authors or polls", () => {
     refuses({ body_content: "<p>x</p>" }, /not allowed: body_content/);
-    refuses({ blocks: [{ type: "html", html: "<p>x</p>" }] }, /block type not allowed: html/);
+    // The rendered email goes over as an html block (beehiiv-draft.ts): plain markup is fine, anything that runs or loads code is not.
+    expect(() => assertSafeDraftCreate({ ...safe, blocks: [{ type: "html", html: "<table><tr><td style=\"color:#222\">x</td></tr></table>" }] })).not.toThrow();
+    refuses({ blocks: [{ type: "html", html: "<p>x</p><script>1</script>" }] }, /may not contain <script/);
+    refuses({ blocks: [{ type: "html", html: "" }] }, /needs its html/);
     refuses({ blocks: [{ type: "advertisement" }] }, /block type not allowed: advertisement/);
     refuses({ blocks: [{ type: "paragraph", plaintext: "x", visibility_settings: { include_segment_ids: ["seg_x"] } }] }, /visibility_settings/);
     refuses({ blocks: [{ type: "section", blocks: [{ type: "section", blocks: [] }] }] }, /nested/);

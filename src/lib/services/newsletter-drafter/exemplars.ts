@@ -7,8 +7,11 @@
 // of them by hand. Structural split on our own template headings (not content
 // analysis). Pure.
 
-import type { NewsletterTemplate } from "@/lib/newsletter-template";
+import { fillVariables, type NewsletterTemplate } from "@/lib/newsletter-template";
 import type { PastIssue } from "./sources";
+
+/** A section's heading as a past issue would print it: its `{fields}` filled with the template's samples ("{steps_heading}" → "How We Did It"). */
+const headingOf = (template: NewsletterTemplate, heading: string | null): string => (heading ? fillVariables(heading, null, template) : "");
 
 /** Examples per section go into the prompt: keep each one readable, not the whole issue. */
 export const EXAMPLE_CHAR_BUDGET = 1_800;
@@ -52,14 +55,14 @@ export function splitIssueSections(body: string, headings: string[]): { preamble
  */
 export function sectionExamples(issues: PastIssue[], template: NewsletterTemplate): Record<string, string[]> {
   const out: Record<string, string[]> = {};
-  const headings = template.sections.map((s) => s.heading ?? "").filter(Boolean);
+  const headings = template.sections.map((s) => headingOf(template, s.heading)).filter(Boolean);
   const firstKey = template.sections[0];
   for (const issue of issues) {
     const { preamble, sections } = splitIssueSections(issue.body, headings);
     for (const sec of template.sections) {
       if (sec.kind === "sponsor") continue;
       let text: string | undefined;
-      if (sec.heading) text = sections.get(norm(sec.heading));
+      if (sec.heading) text = sections.get(norm(headingOf(template, sec.heading)));
       else if (sec === firstKey && headings.length) text = preamble;
       else if (!headings.length && sec === firstKey) text = issue.body;
       text = text?.trim();

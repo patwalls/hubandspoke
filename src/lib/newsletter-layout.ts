@@ -111,6 +111,25 @@ export function slotKeys(layout: LayoutDoc): string[] {
 const plain = (n: DocNode): string => (n.text ?? "") + (n.content ?? []).map(plain).join("");
 
 /**
+ * The designed text of a layout, one entry per heading / paragraph / list
+ * item (document order), for finding the `{fields}` the drafter fills and
+ * saying where each one sits. Pure; exported for tests.
+ */
+export function layoutText(layout: LayoutDoc): string[] {
+  const out: string[] = [];
+  const walk = (n: DocNode) => {
+    if (n.type === "heading" || n.type === "paragraph" || n.type === "listItem") {
+      const t = plain(n).trim();
+      if (t) out.push(t);
+      return;
+    }
+    n.content?.forEach(walk);
+  };
+  walk(layout);
+  return out;
+}
+
+/**
  * The heading the design puts right above each slot (same parent, nothing but
  * a heading in between), by slot key — the section's name for the drafter,
  * the past-issue examples and the editor. Pure; exported for tests.

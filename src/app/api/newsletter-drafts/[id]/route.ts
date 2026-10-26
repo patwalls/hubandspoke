@@ -49,6 +49,8 @@ const PatchBody = z
       .custom<Record<string, unknown>>((v) => v === null || (!!v && typeof v === "object" && (v as { type?: unknown }).type === "doc"))
       .nullable()
       .optional(),
+    /** The issue's values for the template's `{fields}` (the tool's name, what a card is called…). */
+    variables: z.record(z.string().regex(/^[a-z][a-z0-9_]*$/), z.string().max(120)).optional(),
     /** The revision the editor loaded; a stale save is refused. */
     revision: z.number().int().optional(),
   })

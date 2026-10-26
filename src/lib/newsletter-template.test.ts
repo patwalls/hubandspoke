@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_TEMPLATES, composeIssue, newsletterQueueTitle, templateChangeProblem, parseNewsletterTemplate, styleSchema, templateFor, type NewsletterTemplate } from "./newsletter-template";
+import { DEFAULT_TEMPLATES, FUTUREPEDIA_VARIABLES, composeIssue, fillVariables, newsletterQueueTitle, templateChangeProblem, parseNewsletterTemplate, sectionHeadings, styleSchema, templateFor, variableNames, type NewsletterTemplate } from "./newsletter-template";
 
 const sec = (key: string, heading: string | null, extra: Partial<NewsletterTemplate["sections"][number]> = {}) => ({
   key,
@@ -19,6 +19,7 @@ const sec = (key: string, heading: string | null, extra: Partial<NewsletterTempl
 });
 const T: NewsletterTemplate = {
   version: 1,
+  variables: {},
   locked: false,
   styleNotes: null,
   layout: null,
@@ -73,7 +74,7 @@ describe("templateChangeProblem", () => {
 
   it("a beehiiv template not yet redesigned takes the Futurepedia look; a redesigned one keeps its own", () => {
     const fp = DEFAULT_TEMPLATES["futurepedia newsletter"];
-    expect(templateFor("Futurepedia Newsletter", null)!.style).toMatchObject({ pageBackground: "#f4f9fc", buttonColor: "#273653" });
+    expect(templateFor("Futurepedia Newsletter", null)!.style).toMatchObject({ pageBackground: "#F5F8FB", buttonColor: "#273653", linkColor: "#49adff" });
     const mine = { ...fp, layout: { type: "doc" as const, content: [] }, style: { ...fp.style, buttonColor: "#ff0000" } };
     expect(templateFor("Futurepedia Newsletter", mine)!.style.buttonColor).toBe("#ff0000");
   });
@@ -104,5 +105,32 @@ describe("newsletterQueueTitle (the queue names an edition like its email tool d
     expect(newsletterQueueTitle(beehiiv, { brandLabel: "Futurepedia", sendDate: "2026-11-03", subject: "  Give Your Claude Videos a Voice " })).toBe("Give Your Claude Videos a Voice");
     expect(newsletterQueueTitle(beehiiv, { brandLabel: "Futurepedia", sendDate: "2026-11-03", subject: "" })).toBeNull();
     expect(newsletterQueueTitle(null, { brandLabel: "X", sendDate: "2026-11-03", subject: "s" })).toBeNull();
+  });
+});
+
+describe("template fields ({name} tokens the drafter fills)", () => {
+  it("finds {name} tokens once each, never the {{first_name}} personalization token", () => {
+    expect(variableNames("{tool} Guide, then {tool} Guide Continued and {closer_1}")).toEqual(["tool", "closer_1"]);
+    expect(variableNames("Hey {{first_name}}, {Tool} isn't one either")).toEqual([]);
+  });
+
+  it("fills a token with the issue's value, else the template's sample, else the fallback, else leaves it as written", () => {
+    const t = { variables: { tool: { hint: "", sample: "ChatGPT Work" } } };
+    expect(fillVariables("{tool} Guide", { tool: "Nano Banana" }, t)).toBe("Nano Banana Guide");
+    expect(fillVariables("{tool} Guide", { tool: "  " }, t)).toBe("ChatGPT Work Guide");
+    expect(fillVariables("{tool} Guide", null, null, () => "AI")).toBe("AI Guide");
+    expect(fillVariables("{closer_1}", {}, t)).toBe("{closer_1}");
+    expect(fillVariables("Hey {{first_name}}", { first_name: "x" }, t)).toBe("Hey {{first_name}}");
+  });
+
+  it("the Futurepedia default declares its fields and its headings resolve to what the sent issues print", () => {
+    const fp = DEFAULT_TEMPLATES["futurepedia newsletter"];
+    expect(Object.keys(fp.variables)).toEqual(Object.keys(FUTUREPEDIA_VARIABLES));
+    expect(fp.sections.find((s) => s.key === "steps")!.heading).toBe("{steps_heading}");
+    expect(sectionHeadings(fp)).toEqual(["How We Did It", "Free Resource"]);
+    expect(sectionHeadings(fp, { steps_heading: "How To Try It" })).toEqual(["How To Try It", "Free Resource"]);
+    // Saved templates from before fields existed still parse (variables default to none).
+    const { variables: _v, ...old } = fp;
+    expect(parseNewsletterTemplate(old)?.variables).toEqual({});
   });
 });

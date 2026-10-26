@@ -169,8 +169,17 @@ const DRAFT_FIELDS = new Set([
 ]);
 const EMAIL_SETTINGS = new Set(["email_subject_line", "email_preview_text", "display_title_in_email", "display_subtitle_in_email"]);
 const WEB_SETTINGS = new Set(["slug", "display_title_on_web", "display_subtitle_on_web"]);
-/** Content blocks a draft may carry: no ads, embeds, RSS or paywalls, and no per-block audience targeting. */
-const DRAFT_BLOCK_TYPES = new Set(["section", "heading", "paragraph", "list", "image", "button", "poll"]);
+/** Content blocks a draft may carry: the rendered email (html), the poll card, and the native blocks; no ads, embeds, RSS or paywalls, and no per-block audience targeting. */
+const DRAFT_BLOCK_TYPES = new Set(["html", "section", "heading", "paragraph", "list", "image", "button", "poll"]);
+/** What an html block may never carry: anything that runs or loads code, or a form. beehiiv strips <style>/<link> itself. */
+const HTML_FORBIDDEN = /<\s*(script|iframe|object|embed|form|meta|base)\b|javascript:|\son[a-z]+\s*=/i;
+
+/** Throws unless `html` is a plain rendered email fragment (no scripts, frames, forms or event handlers). Exported for tests. */
+export function assertSafeHtmlBlock(html: unknown, no: (why: string) => never = (why) => { throw new BeehiivError(403, `Blocked beehiiv draft: ${why}`); }): void {
+  if (typeof html !== "string" || !html.trim()) no("an html block needs its html");
+  const m = (html as string).match(HTML_FORBIDDEN);
+  if (m) no(`html block may not contain ${m[0].trim()}`);
+}
 
 function assertSafeBlocks(blocks: unknown, no: (why: string) => never, depth = 0): void {
   if (!Array.isArray(blocks) || blocks.length === 0) no("blocks must be a non-empty list");
@@ -179,6 +188,7 @@ function assertSafeBlocks(blocks: unknown, no: (why: string) => never, depth = 0
     const block = b as Record<string, unknown>;
     if (!DRAFT_BLOCK_TYPES.has(block.type as string)) no(`block type not allowed: ${String(block.type)}`);
     if ("visibility_settings" in block) no("blocks may not carry visibility_settings (audience targeting)");
+    if (block.type === "html") assertSafeHtmlBlock(block.html, no);
     if (block.type === "poll" && block.poll_id !== HOWTO_POLL_ID) no("only the How-To feedback poll is allowed");
     if (block.type === "section") {
       if (depth > 0) no("sections can't be nested");

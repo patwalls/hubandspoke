@@ -21,13 +21,13 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { startVisibleInterval } from "@/lib/visible-interval";
-import { composeIssue, type NewsletterSection, type NewsletterTemplate } from "@/lib/newsletter-template";
+import { composeIssue, variableNames, type NewsletterSection, type NewsletterTemplate } from "@/lib/newsletter-template";
 import { EmailPreview, FOOTER_NOTE, MOBILE_WIDTH } from "@/components/dashboard/email-preview";
 import { EMAIL_WIDTH, renderEmailHtml } from "@/lib/newsletter-email-html";
 import { formatShortcut, useInlineFormat } from "@/components/dashboard/editable-section";
 import { TemplateEditorDialog } from "@/components/dashboard/newsletter-template-section";
 import { StoryCard, type StoryPick } from "@/components/dashboard/story-card";
-import { layoutFor, replaceAtPath } from "@/lib/newsletter-layout";
+import { layoutFor, layoutText, replaceAtPath } from "@/lib/newsletter-layout";
 import type { DocNode } from "@/lib/newsletter-rich-doc";
 import { ImagePanel, ScreenshotMarkPanel, ScreenshotPicker, useScreenshots } from "@/components/dashboard/newsletter-screenshot-picker";
 import { isVideoThumbnail } from "@/components/dashboard/preview-screenshots";
@@ -75,6 +75,8 @@ export interface EditorDraft {
   beehiivError: string | null;
   /** This issue's own design (designed parts edited in the draft); null = the template's. */
   layout?: Record<string, unknown> | null;
+  /** The issue's values for the template's `{fields}` (the tool's name, what a card is called…). */
+  variables?: Record<string, string> | null;
   /** The editor's AI review (POST …/review), when asked for. */
   review?: NewsletterReview | null;
   /** A running draft's phase (written by the worker each turn). */
@@ -252,6 +254,14 @@ function Workspace({
   const [notes, setNotes] = useState(draft.notes ?? "");
   /** This issue's own design (a designed part edited here), or null = the template's. */
   const [layout, setLayout] = useState<DocNode | null>((draft.layout as DocNode | null) ?? null);
+  /** The issue's values for the template's `{fields}` ("{tool} Guide" → "Nano Banana Guide"). */
+  const [variables, setVariables] = useState<Record<string, string>>(draft.variables ?? {});
+  /** The template's `{fields}` this issue fills (its design's tokens + the template's declared fields). */
+  const fieldNames = useMemo(() => {
+    if (!draft.template) return [] as string[];
+    const t = draft.template;
+    return [...new Set([...variableNames(layoutText(layoutFor(t, layout)).join("\n")), ...Object.keys(t.variables ?? {})])];
+  }, [draft.template, layout]);
   /**
    * The side panel. Before a click removes the button it came from (+ Add
    * screenshot, a trash icon), focus moves here without scrolling: otherwise
@@ -275,6 +285,7 @@ function Workspace({
     setSpecialCopy(draft.specialCopy ?? "");
     setNotes(draft.notes ?? "");
     setLayout((draft.layout as DocNode | null) ?? null);
+    setVariables(draft.variables ?? {});
   }, [draft]);
 
   const dirty =
@@ -285,6 +296,7 @@ function Workspace({
     specialCopy !== (draft.specialCopy ?? "") ||
     notes !== (draft.notes ?? "") ||
     JSON.stringify(layout ?? null) !== JSON.stringify(draft.layout ?? null) ||
+    JSON.stringify(variables) !== JSON.stringify(draft.variables ?? {}) ||
     !sameSections(sections, draft.sections);
 
   // Autosave, like the design editor: a moment after the last change.
@@ -293,7 +305,7 @@ function Workspace({
     const t = setTimeout(() => void save(), AUTOSAVE_MS);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- re-arm on every edit; save() reads the latest state
-  }, [dirty, draft.status, subject, previewText, sections, body, specialCopy, notes, layout]);
+  }, [dirty, draft.status, subject, previewText, sections, body, specialCopy, notes, layout, variables]);
   flushRef.current = () => (dirty ? save() : saveChain.current);
 
   const preview = useMemo(() => {
@@ -321,6 +333,7 @@ function Workspace({
           specialCopy,
           notes: notes.trim() || null,
           layout,
+          variables,
           revision: revisionRef.current,
           ...(draft.template ? { sections: withSections ?? sections } : { bodyMarkdown: body }),
         }),
@@ -786,13 +799,28 @@ function Workspace({
         <span className="font-medium">Preview text</span>
         <Input value={previewText} onChange={(e) => setPreviewText(e.target.value)} />
       </label>
+      {fieldNames.length > 0 && (
+        <div className="flex flex-col gap-2 text-sm">
+          <span className="font-medium">Template fields</span>
+          <p className="text-xs text-muted-foreground">Blanks in the design the drafter filled for this issue (card labels, a heading). Change one and the email updates.</p>
+          {fieldNames.map((name) => {
+            const v = draft.template?.variables?.[name];
+            return (
+              <label key={name} className="flex items-center gap-2 text-xs">
+                <span className="w-28 shrink-0 truncate font-mono text-muted-foreground" title={v?.hint || `{${name}}`}>{`{${name}}`}</span>
+                <Input className="h-8 text-xs" value={variables[name] ?? ""} placeholder={v?.sample || ""} onChange={(e) => setVariables({ ...variables, [name]: e.target.value })} />
+              </label>
+            );
+          })}
+        </div>
+      )}
     </>
   );
 
   const exactHtml = useMemo(
-    () => (draft.template ? renderEmailHtml({ template: draft.template, sections, sponsor: sponsorArg, subject, previewText, screenshots: previewShots, footerNote: draft.template.beehiiv ? null : FOOTER_NOTE, layout }) : ""),
+    () => (draft.template ? renderEmailHtml({ template: draft.template, sections, sponsor: sponsorArg, subject, previewText, screenshots: previewShots, footerNote: draft.template.beehiiv ? null : FOOTER_NOTE, layout, variables }) : ""),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- previewShots is rebuilt each render; its parts are what matters
-    [draft.template, sections, sponsorArg, subject, previewText, shots.chosen, shots.urlFor, layout],
+    [draft.template, sections, sponsorArg, subject, previewText, shots.chosen, shots.urlFor, layout, variables],
   );
   const canvasWidth = device === "mobile" ? MOBILE_WIDTH : EMAIL_WIDTH;
   const visual = draft.template ? (
@@ -826,6 +854,7 @@ function Workspace({
               screenshots={previewShots}
               width={canvasWidth}
               layout={layout}
+              variables={variables}
               edit={{
                 selected,
                 editingSection,
@@ -884,7 +913,7 @@ function Workspace({
         </div>
         <p className="flex items-center justify-center gap-1.5 px-5 pb-6 text-center text-xs text-muted-foreground">
           <MousePointerClick className="size-3.5" /> Click any text to edit it in place · click an image or screenshot to swap it, or drop a file on it
-          {!draft.template.beehiiv ? " · this is the email itself, exactly as it sends" : ""}
+          {" · this is the email itself, exactly as it sends"}
         </p>
       </div>
 
@@ -1190,7 +1219,7 @@ function Workspace({
                     <div className="text-xs text-muted-foreground">{previewText}</div>
                   </div>
                 </div>
-                <EmailPreview template={draft.template} sections={sections} screenshots={previewShots} sponsor={sponsorArg} />
+                <EmailPreview template={draft.template} sections={sections} screenshots={previewShots} sponsor={sponsorArg} variables={variables} />
               </>
             ) : (
               <div className="mx-auto max-w-[640px] p-5">
@@ -1256,7 +1285,7 @@ function ExactPreview({ html, device, onDevice, onClose, beehiiv }: { html: stri
             <Eye className="size-4" /> {beehiiv ? "The email as designed" : "Exactly what lands in the inbox"}
           </span>
           <span className="truncate text-xs text-muted-foreground">
-            {beehiiv ? "Rendered as-is. Create draft in beehiiv still builds the beehiiv post from its own blocks." : "The HTML that goes to HubSpot, rendered as-is. HubSpot adds the footer."}
+            {beehiiv ? "The HTML that goes to beehiiv, rendered as-is. beehiiv adds the feedback poll and the footer." : "The HTML that goes to HubSpot, rendered as-is. HubSpot adds the footer."}
           </span>
         </div>
         <DeviceToggle device={device} onChange={onDevice} />

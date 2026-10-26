@@ -20,7 +20,8 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
-import type { NewsletterSection, NewsletterTemplate } from "@/lib/newsletter-template";
+import { fillVariables, variableNames, type NewsletterSection, type NewsletterTemplate, type NewsletterVariables } from "@/lib/newsletter-template";
+import { layoutFor, layoutText } from "@/lib/newsletter-layout";
 import { listLeadMagnets } from "@/lib/services/starter-story-content";
 import { describeStoryPlan, newStoryGuidance, type StoryPlan } from "./story-plan";
 import { describeSectionExamples } from "./exemplars";
@@ -61,6 +62,8 @@ const SubmitInput = z.object({
   preview_text: z.string().max(200),
   body_markdown: z.string().optional(),
   sections: z.array(SectionInput).optional(),
+  /** The template's `{fields}` (the tool's name, what a card is called…), by name. */
+  variables: z.record(z.string(), z.string().max(120)).optional(),
   sources: z
     .array(
       z.object({
@@ -166,11 +169,11 @@ const SOURCES_SCHEMA = {
   },
 };
 
-function submitNewsletterTool(templated: boolean): Anthropic.Beta.BetaToolUnion {
+function submitNewsletterTool(templated: boolean, fields: string[] = []): Anthropic.Beta.BetaToolUnion {
   return {
     name: "submit_newsletter",
     description: templated
-      ? "Submit the finished issue: one Markdown block per template section (every key, in template order; don't repeat a section's fixed heading inside its markdown). sources lists every video/case study the issue draws on."
+      ? `Submit the finished issue: one Markdown block per template section (every key, in template order; don't repeat a section's fixed heading inside its markdown)${fields.length ? ", and a value for every template FIELD" : ""}. sources lists every video/case study the issue draws on.`
       : "Submit the finished issue. body_markdown is the full email body in Markdown (headings, links, lists). sources lists every video/case study the issue draws on.",
     input_schema: {
       type: "object",
@@ -178,6 +181,16 @@ function submitNewsletterTool(templated: boolean): Anthropic.Beta.BetaToolUnion 
         subject_options: { type: "array", items: { type: "string" }, description: "3-6 distinct subject lines, best first." },
         subject: { type: "string", description: "The chosen subject line (normally subject_options[0])." },
         preview_text: { type: "string", description: "Inbox preview text." },
+        ...(templated && fields.length
+          ? {
+              variables: {
+                type: "object",
+                description: `The template's fields, each a short plain-text value (no Markdown): ${fields.map((f) => `"${f}"`).join(", ")}. See TEMPLATE FIELDS in the first message.`,
+                properties: Object.fromEntries(fields.map((f) => [f, { type: "string" }])),
+                required: fields,
+              },
+            }
+          : {}),
         ...(templated
           ? {
               sections: {
@@ -206,7 +219,7 @@ function submitNewsletterTool(templated: boolean): Anthropic.Beta.BetaToolUnion 
           : { body_markdown: { type: "string" } }),
         sources: SOURCES_SCHEMA,
       },
-      required: ["subject_options", "subject", "preview_text", templated ? "sections" : "body_markdown", "sources"],
+      required: ["subject_options", "subject", "preview_text", templated ? "sections" : "body_markdown", ...(templated && fields.length ? ["variables"] : []), "sources"],
     },
   };
 }
@@ -278,6 +291,8 @@ export interface NewsletterAgentArgs {
   recentEditions?: { date: string | null; subject: string }[];
   /** How each template section has read in past issues (exemplars.ts), by section key: examples next to the instructions. */
   sectionExamples?: Record<string, string[]> | null;
+  /** A section rewrite: the issue's values for the template's fields (so a heading like "{steps_heading}" reads as the issue has it). */
+  variables?: NewsletterVariables | null;
   /** Checked before every model call; true = the editor cancelled, stop (throws NewsletterCancelledError). */
   shouldStop?: () => Promise<boolean>;
   /** Worker logger, e.g. helpers.logger.info: one line per turn with the tools called. */
@@ -471,20 +486,49 @@ export function wantsScreenshots(template: NewsletterTemplate | null | undefined
 export const SCREENSHOT_RULE = `SCREENSHOT RULE (sections marked "SCREENSHOTS" below): wherever a screenshot helps the reader, put a placeholder on its own line as *[Screenshot @ M:SS: what the screen shows]*. M:SS is the moment in the section's video (this issue's video, or the section's story video in a roundup — read its timestamped transcript with get_video_transcript) when that screen is on camera: the thing being shown, not when it's first mentioned. Hub & Spoke grabs that frame, so pick a moment it is visible. No video for the section (a case study)? Leave screenshots out of that section.`;
 
 /** Sections marked THUMBNAIL show their video's thumbnail (any newsletter, set per section). Exported for tests. */
-export const THUMBNAIL_RULE = `THUMBNAIL RULE (sections marked "THUMBNAIL" below): put the section's video thumbnail on its own line as a Markdown image ![<the video's title>](<thumbnail URL>), where the section's instructions place it. The URL is this issue's video's THUMBNAIL URL, or in a roundup the section's story video's thumbnail_url from the video tools. Never invent a URL: no video (a case study) means no thumbnail.`;
+export const THUMBNAIL_RULE = `THUMBNAIL RULE (sections marked "THUMBNAIL" below): put the section's video thumbnail on its own line as a Markdown image linked to the video, [![<the video's title>](<thumbnail URL>)](<video URL>), where the section's instructions place it. The URLs are this issue's video's THUMBNAIL URL and URL, or in a roundup the section's story video's thumbnail_url and url from the video tools. Never invent a URL: no video (a case study) means no thumbnail.`;
 
 /**
- * How the template is framed for the drafter: the instructions say WHAT goes
- * in a section; the examples (past issues, exemplars.ts) show HOW it reads.
- * Variation is wanted — a newsletter, not a form. Exported for tests.
+ * How the template is framed for the drafter: the sections are the skeleton
+ * every issue shares; what fills them — how long each runs, what each heading
+ * says, where the catch lands — comes from the video and from how the past
+ * issues read. Instructions say WHAT goes in a section; the examples (past
+ * issues, exemplars.ts) show HOW it reads. Exported for tests.
  */
 export const TEMPLATE_FRAMING =
-  "Each section's instructions say what goes there; its EXAMPLES (how that section read in past issues) show the voice, rhythm and shape — learn from the examples first, and let the instructions fill in what the examples don't show. Vary length, structure and rhythm the way the past issues do: a section can be one punchy paragraph in one issue and a short list in the next; never force every section into the same beat or the same length, and never copy an example's content. A section marked OPTIONAL may be submitted as an empty string when there's nothing worth saying in it this issue.";
+  "The template is the skeleton every issue shares: the same sections, in this order, in the same cards. What fills them is this issue's call. Each section's instructions say what it does and roughly how much of the issue it is; its EXAMPLES (how that section read in past issues) show the voice, rhythm and shape — learn from the examples first, let the instructions fill in what the examples don't show, and let the source decide the rest: how many steps, what a heading says, where the honest catch lands. Write an issue a reader would forward, not a form filled in: a section can be one punchy paragraph in one issue and a short list in the next; never force every section into the same beat or the same length, never pad to a count, and never copy an example's content. A section marked OPTIONAL may be submitted as an empty string when there's nothing worth saying in it this issue.";
+
+/**
+ * The template's fields (`{name}` tokens in the design), each with where it
+ * appears and the template's guidance: the block of the first turn that
+ * explains `variables`. Null when the template has none. Exported for tests.
+ */
+export function describeFields(template: NewsletterTemplate): { names: string[]; text: string | null } {
+  const layout = layoutFor(template);
+  const texts = layoutText(layout);
+  const names = [...new Set([...variableNames(texts.join("\n")), ...Object.keys(template.variables ?? {})])];
+  if (!names.length) return { names, text: null };
+  const lines = names.map((name) => {
+    const v = template.variables?.[name];
+    const where = texts.filter((t) => variableNames(t).includes(name)).map((t) => `"${t.trim()}"`);
+    const bits = [where.length ? `appears in ${where.join(", ")}` : null, v?.sample ? `e.g. "${v.sample}"` : null].filter(Boolean).join("; ");
+    return `- ${name}${bits ? ` (${bits})` : ""}${v?.hint ? `: ${v.hint}` : ""}`;
+  });
+  return {
+    names,
+    text: `TEMPLATE FIELDS — the design has blanks the issue fills: submit a short plain-text value for every one of these in variables (the email shows it wherever its {name} sits; a section's heading can be one of them):\n${lines.join("\n")}`,
+  };
+}
 
 /** The template block of the first user turn. Exported for tests. */
 export function describeTemplate(template: NewsletterTemplate, sponsorSupplied: boolean, examples?: Record<string, string[]> | null): string {
   const lines = template.sections.map((sec, i) => {
-    const heading = sec.heading ? `fixed heading "${sec.heading}" (added for you; don't repeat it)` : "no fixed heading (write your own if the section needs one)";
+    const fields = sec.heading ? variableNames(sec.heading) : [];
+    const heading = sec.heading
+      ? fields.length
+        ? `heading "${sec.heading}" (drawn for you from the field${fields.length > 1 ? "s" : ""} ${fields.join(", ")}; don't repeat it)`
+        : `fixed heading "${sec.heading}" (added for you; don't repeat it)`
+      : "no fixed heading (write your own if the section needs one)";
     const sponsor =
       sec.kind === "sponsor" && sponsorSupplied ? " — SUPPLIED BY THE PROMO CALENDAR: submit an empty string for this key" : "";
     const optional = sec.optional && sec.kind !== "sponsor" ? " — OPTIONAL" : "";
@@ -494,8 +538,8 @@ export function describeTemplate(template: NewsletterTemplate, sponsorSupplied: 
     return `${i + 1}. key "${sec.key}" — ${heading}${sponsor}${optional}\n   ${sec.hint}${shots}${thumb}${ex ? `\n${ex}` : ""}`;
   });
   const rules = [wantsScreenshots(template) ? SCREENSHOT_RULE : null, template.sections.some((s) => s.kind !== "sponsor" && s.thumbnail) ? THUMBNAIL_RULE : null].filter(Boolean);
-  const framing = examples && Object.keys(examples).length ? `${TEMPLATE_FRAMING}\n\n` : template.sections.some((s) => s.optional) ? "A section marked OPTIONAL may be submitted as an empty string when there's nothing worth saying in it this issue.\n\n" : "";
-  return `${rules.map((r) => `${r}\n\n`).join("")}${framing}ISSUE TEMPLATE — submit exactly these sections, every key, in this order (sections[].key / sections[].markdown):\n${lines.join("\n")}`;
+  const fields = describeFields(template).text;
+  return `${rules.map((r) => `${r}\n\n`).join("")}${TEMPLATE_FRAMING}\n\n${fields ? `${fields}\n\n` : ""}ISSUE TEMPLATE — submit exactly these sections, every key, in this order (sections[].key / sections[].markdown):\n${lines.join("\n")}`;
 }
 
 /** A roundup issue about one piece of pillar content: the block of the first turn. Exported for tests. */
@@ -587,6 +631,8 @@ export function submissionProblem(
   blocked?: Set<string>,
   /** The issue's pinned pillar: may appear in several sections and is never blocked. */
   pillarKey?: string | null,
+  /** The template's fields (describeFields): every one needs a value. */
+  fields: string[] = [],
 ): string | null {
   if (!template) {
     if (!sub.body_markdown || sub.body_markdown.trim().length < 200) return "body_markdown is missing or too short.";
@@ -595,6 +641,8 @@ export function submissionProblem(
     }
     return null;
   }
+  const blank = fields.filter((f) => !sub.variables?.[f]?.trim());
+  if (blank.length) return `These template fields need a value in variables: ${blank.join(", ")}.`;
   const got = new Map((sub.sections ?? []).map((sec) => [sec.key, sec.markdown]));
   const expected = template.sections.map((sec) => sec.key);
   const unknown = [...got.keys()].filter((k) => !expected.includes(k));
@@ -718,7 +766,8 @@ async function runLoop<T>(spec: LoopSpec<T>): Promise<{ value: T; model: string;
 export async function runNewsletterAgent(args: NewsletterAgentArgs): Promise<NewsletterAgentResult> {
   const templated = !!args.template;
   const sponsorSupplied = !!args.sponsoredCopy?.trim();
-  const submit = submitNewsletterTool(templated);
+  const fields = args.template ? describeFields(args.template).names : [];
+  const submit = submitNewsletterTool(templated, fields);
   const r = await runLoop<NewsletterSubmission>({
     args,
     firstUserTurn: buildUserTurn(args),
@@ -730,7 +779,7 @@ export async function runNewsletterAgent(args: NewsletterAgentArgs): Promise<New
       if (!parsed.success) {
         return { error: `Invalid submission: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}.` };
       }
-      const problem = submissionProblem(parsed.data, args.template, sponsorSupplied, args.video ? undefined : args.blocked, args.pillar ? `video:${args.pillar.productionItemId}` : null);
+      const problem = submissionProblem(parsed.data, args.template, sponsorSupplied, args.video ? undefined : args.blocked, args.pillar ? `video:${args.pillar.productionItemId}` : null, fields);
       if (problem) args.log?.(`newsletter agent submission rejected: ${problem}`);
       return problem ? { error: problem } : { value: parsed.data };
     },
@@ -778,11 +827,12 @@ export async function regenerateSection(
   const base = buildUserTurn({ ...args, template: null, sponsoredCopy: null, sponsoredPlaceholder: false, storyPlan: null });
   const where = args.newStoryExclude && args.storyPlan ? newStoryGuidance(args.storyPlan, sec.key, args.newStoryExclude) : null;
   const examples = describeSectionExamples(args.sectionExamples?.[sec.key], 3);
+  const heading = sec.heading ? fillVariables(sec.heading, args.variables, args.template) : null;
   const turn = [
     base,
     `THE ISSUE AS IT STANDS:\n${args.currentIssue}`,
     args.sourcesNote ? `SOURCES THIS ISSUE USES:\n${args.sourcesNote}` : null,
-    `Rewrite ONLY the section "${sec.key}"${sec.heading ? ` (heading "${sec.heading}", added for you)` : ""}. What it should contain: ${sec.hint}`,
+    `Rewrite ONLY the section "${sec.key}"${heading ? ` (heading "${heading}", added for you)` : ""}. What it should contain: ${sec.hint}`,
     examples ? `HOW THIS SECTION HAS READ IN PAST ISSUES (match the voice and shape, vary the rhythm, never the content):\n${examples}` : null,
     sec.kind !== "sponsor" && sec.screenshots ? `${SCREENSHOT_RULE}\nThis section is marked SCREENSHOTS.` : null,
     sec.kind !== "sponsor" && sec.thumbnail ? `${THUMBNAIL_RULE}\nThis section is marked THUMBNAIL: keep its thumbnail image.` : null,

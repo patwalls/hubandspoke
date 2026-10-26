@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { layoutSection, markdownToBlocks, splitStepTitles } from "./beehiiv-blocks";
+import { flattenBullets, keepSignoff, layoutSection, splitStepTitles } from "./beehiiv-blocks";
 
 describe("splitStepTitles", () => {
   it("puts an inline bold step title on its own line, like the Kevin/Saj templates", () => {
@@ -13,45 +13,30 @@ describe("splitStepTitles", () => {
     const md = "**1. Pick a style in the Style Atlas**\nOpen the free Style Atlas.\nA **bold** word mid-line.";
     expect(splitStepTitles(md)).toBe(md);
   });
-
-  it("makes the title and its explanation separate beehiiv paragraphs", () => {
-    const blocks = markdownToBlocks(splitStepTitles("**2. Record your voiceover.** Open Google AI Studio."));
-    expect(blocks.map((b) => b.type)).toEqual(["paragraph", "paragraph"]);
-    expect(blocks[0]).toMatchObject({ formattedText: [{ text: "2. Record your voiceover", styling: ["bold"] }] });
-  });
 });
 
 describe("layoutSection (the Kevin/Saj template's bullets and arrows)", () => {
-  it("'lines': ✅ bullets become one tight group, a paragraph per line with no spacing between", () => {
+  it("'lines': ✅ bullets become one tight group, a hard line break between items", () => {
     const md = "### Why Claude Works\n\nA benefit line.\n\n- ✅ **Builds** frames\n- ✅ **Syncs** voice\n- ✅ **Fixes** colors";
-    const blocks = markdownToBlocks(layoutSection(md, "lines"));
-    expect(blocks.map((b) => b.type)).toEqual(["heading", "paragraph", "paragraph", "paragraph", "paragraph"]);
-    expect(blocks[2]).toMatchObject({ formattedText: [{ text: "✅ " }, { text: "Builds", styling: ["bold"] }, { text: " frames" }], visual_settings: { inner_spacing_bottom: 0, outer_spacing_bottom: 0 } });
-    expect(blocks[3].visual_settings).toEqual({ inner_spacing_top: 0, outer_spacing_top: 0, inner_spacing_bottom: 0, outer_spacing_bottom: 0 });
-    expect(blocks[4].visual_settings).toEqual({ inner_spacing_top: 0, outer_spacing_top: 0 });
-    expect(blocks[1].visual_settings).toBeUndefined();
+    expect(layoutSection(md, "lines")).toBe("### Why Claude Works\n\nA benefit line.\n\n✅ **Builds** frames  \n✅ **Syncs** voice  \n✅ **Fixes** colors");
   });
 
   it("'lines' also joins ✅ lines written without a dash", () => {
-    const blocks = markdownToBlocks(layoutSection("✅ **A** one\n✅ **B** two", "lines"));
-    expect(blocks.map((b) => b.visual_settings)).toEqual([{ inner_spacing_bottom: 0, outer_spacing_bottom: 0 }, { inner_spacing_top: 0, outer_spacing_top: 0 }]);
+    expect(flattenBullets("✅ **A** one\n✅ **B** two", "lines")).toBe("✅ **A** one  \n✅ **B** two");
   });
 
   it("'paragraphs': each bullet is its own paragraph, no list", () => {
-    const blocks = markdownToBlocks(layoutSection("Who else this fits.\n\n- **Sales:** follow-ups\n- **Ops:** updates", "paragraphs"));
-    expect(blocks.map((b) => b.type)).toEqual(["paragraph", "paragraph", "paragraph"]);
-    expect(blocks[1]).toMatchObject({ formattedText: [{ text: "Sales:", styling: ["bold"] }, { text: " follow-ups" }] });
+    expect(layoutSection("Who else this fits.\n\n- **Sales:** follow-ups\n- **Ops:** updates", "paragraphs")).toBe("Who else this fits.\n\n**Sales:** follow-ups\n\n**Ops:** updates");
   });
 
   it("keeps the '- Kevin' sign-off and leaves 'list' sections alone", () => {
     expect(layoutSection("Hi.\n\n- Kevin", "paragraphs")).toBe("Hi.\n\n- Kevin");
     expect(layoutSection("- a\n- b", "list")).toBe("- a\n- b");
+    expect(keepSignoff("Hi.\n\n- Kevin")).toBe("Hi.\n\n\\- Kevin");
   });
 
-  it("puts the arrow after the link, and a link-only line with an arrow is still a centered button", () => {
+  it("puts the arrow after the link", () => {
     expect(layoutSection("[See the bundle ->](https://x.co)")).toBe("[See the bundle](https://x.co) →");
     expect(layoutSection("[Watch The Full Video](https://y.co) ->")).toBe("[Watch The Full Video](https://y.co) →");
-    const [b] = markdownToBlocks(layoutSection("[Watch The Full Video ->](https://y.co)"), { buttons: true });
-    expect(b).toMatchObject({ type: "button", text: "Watch The Full Video →", alignment: "center" });
   });
 });

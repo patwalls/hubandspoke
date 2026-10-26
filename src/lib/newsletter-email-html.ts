@@ -17,7 +17,7 @@
 
 import { Marked, type Tokens } from "marked";
 import { replaceScreenshotMarks, screenshotKey, stepsWithoutScreenshots, type ChosenScreenshot, type StepSpot } from "@/lib/newsletter-screenshots";
-import { sponsorBlock, type NewsletterSection, type NewsletterStyle, type NewsletterTemplate, type NewsletterTemplateSection } from "@/lib/newsletter-template";
+import { fillVariables, sponsorBlock, type NewsletterSection, type NewsletterStyle, type NewsletterTemplate, type NewsletterTemplateSection, type NewsletterVariables } from "@/lib/newsletter-template";
 import { beehiivButtonKeys, layoutFor } from "@/lib/newsletter-layout";
 import { keepSignoff, layoutSection } from "@/lib/beehiiv-blocks";
 import { docToMarkdown, type DocNode } from "@/lib/newsletter-rich-doc";
@@ -82,6 +82,8 @@ export interface RenderEmailArgs {
   personalization?: Personalization;
   /** This issue's own design (a draft whose designed parts were changed); else the template's. */
   layout?: DocNode | null;
+  /** The issue's values for the template's `{fields}` (the tool's name, what the closing cards are called…). */
+  variables?: NewsletterVariables | null;
 }
 
 // ── Style tokens ────────────────────────────────────────────────────────
@@ -125,7 +127,7 @@ function tokens(st: NewsletterStyle) {
     eyebrow: (color?: string | null) => `margin:0 0 8px 0;${HF}font-size:14px;font-weight:700;line-height:1.3;letter-spacing:0.01em;color:${color ?? st.linkColor};`,
     label: (color: string) => `background:${color};border-radius:6px;padding:6px 10px;${F}font-size:13px;font-weight:700;line-height:1.2;color:${st.headingColor};`,
     box: (color: string, border?: string | null) =>
-      border ? `background:${color};border:2px solid ${border};border-radius:10px;padding:22px 24px 8px 24px;box-shadow:${CARD_SHADOW};` : `background:${color};border-radius:12px;padding:20px 22px 6px 22px;`,
+      border ? `background:${color};border:2px solid ${border};border-radius:6px;padding:22px 24px 8px 24px;box-shadow:${CARD_SHADOW};` : `background:${color};border-radius:12px;padding:20px 22px 6px 22px;`,
     buttonCell: `background:${button};border-radius:8px;`,
     buttonLink: `display:inline-block;padding:13px 26px;${HF}font-size:16px;font-weight:700;line-height:1.2;color:#ffffff;text-decoration:none;border-radius:8px;`,
     masthead: `background:${st.mastheadBackground ?? "transparent"};border-radius:12px;text-align:center;padding:0;`,
@@ -307,7 +309,7 @@ export interface EmailParts {
 /** A tinted box (a layout `callout`), as React style for the canvas. */
 export function boxStyle(color: string, border?: string | null): Record<string, string> {
   return border
-    ? { background: color, border: `2px solid ${border}`, borderRadius: "10px", padding: "22px 24px 8px 24px", marginBottom: "20px", boxShadow: CARD_SHADOW }
+    ? { background: color, border: `2px solid ${border}`, borderRadius: "6px", padding: "22px 24px 8px 24px", marginBottom: "14px", boxShadow: CARD_SHADOW }
     : { background: color, borderRadius: "12px", padding: "20px 22px 6px 22px", marginBottom: "16px" };
 }
 
@@ -332,15 +334,28 @@ function slotPart(args: RenderEmailArgs, sec: NewsletterTemplateSection, t: Retu
 }
 
 /**
- * Variables a designed part can use: {tool} = the tool the issue's "Why …
- * Works" section names (Futurepedia's "{tool} Guide" label), else "AI".
+ * The template's `{fields}` in a designed part, filled with the issue's
+ * values (newsletter-template.ts → fillVariables): the drafter's values, else
+ * the template's sample in a preview, else — for drafts written before fields
+ * existed — {tool} read off the "Why … Works" heading, else "AI". A token
+ * with nothing to fill it is shown as written, so the template preview says
+ * where each field goes. Exported for tests.
  */
-function applyVars(textHtml: string, args: RenderEmailArgs): string {
-  if (!textHtml.includes("{tool}")) return textHtml;
-  const why = args.sections.find((s) => s.key === "why")?.markdown ?? "";
-  const m = why.match(/Why\s+(.+?)\s+Works/i);
-  const tool = m ? m[1].replace(/[*_#]/g, "").trim() : null;
-  return textHtml.split("{tool}").join(esc(tool || (args.showHints ? "{tool}" : "AI")));
+export function applyVars(textHtml: string, args: Pick<RenderEmailArgs, "template" | "sections" | "variables" | "showHints">): string {
+  if (!textHtml.includes("{")) return textHtml;
+  // Values land in HTML, so they're escaped like any other text. A preview shows the samples; an issue with no
+  // value for a field (drafted before fields existed) gets the legacy read for {tool}, the sample for the rest.
+  const values = Object.fromEntries(Object.entries(args.variables ?? {}).map(([k, v]) => [k, esc(v)]));
+  return fillVariables(textHtml, values, null, (name) => {
+    const sample = esc(args.template.variables?.[name]?.sample?.trim() ?? "");
+    if (args.showHints) return sample;
+    if (name === "tool") {
+      const why = args.sections.find((s) => s.key === "why")?.markdown ?? "";
+      const m = why.match(/Why\s+(.+?)\s+(?:Works|Is|Beats)/i);
+      return esc(m ? m[1].replace(/[*_#]/g, "").trim() : "AI");
+    }
+    return sample;
+  });
 }
 
 /** A fixed (designed) layout node as email HTML. */
@@ -370,7 +385,7 @@ function fixedHtml(node: DocNode, args: RenderEmailArgs, t: ReturnType<typeof to
     case "horizontalRule":
       return divider(true);
     default:
-      return markdownToEmailHtml(docToMarkdown({ type: "doc", content: [node] }), st, { personalization: args.personalization });
+      return applyVars(markdownToEmailHtml(docToMarkdown({ type: "doc", content: [node] }), st, { personalization: args.personalization }), args);
   }
 }
 
@@ -430,7 +445,7 @@ export function pruneForSend(blocks: EmailBlock[], top = true): EmailBlock[] {
 
 function blocksHtml(blocks: EmailBlock[], t: ReturnType<typeof tokens>): string {
   return blocks
-    .map((b) => (b.kind === "fixed" ? b.html : b.kind === "slot" ? b.content : `${TABLE(`margin:0 0 ${b.border ? 20 : 16}px 0;`, true)}<tr><td style="${t.box(b.color, b.border)}">${blocksHtml(b.children, t)}</td></tr></table>`))
+    .map((b) => (b.kind === "fixed" ? b.html : b.kind === "slot" ? b.content : `${TABLE(`margin:0 0 ${b.border ? 14 : 16}px 0;`, true)}<tr><td style="${t.box(b.color, b.border)}">${blocksHtml(b.children, t)}</td></tr></table>`))
     .join("");
 }
 

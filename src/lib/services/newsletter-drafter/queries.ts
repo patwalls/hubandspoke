@@ -101,6 +101,7 @@ export async function getNewsletterDraft(id: string) {
       review: newsletterDrafts.review,
       progress: newsletterDrafts.progress,
       layout: newsletterDrafts.layout,
+      variables: newsletterDrafts.variables,
       updatedAt: newsletterDrafts.updatedAt,
       slotKey: newsletterDrafts.slotKey,
       sections: newsletterDrafts.sections,

@@ -1,5 +1,6 @@
 // Worker-only: push a ready How-To draft into beehiiv (Futurepedia) as an
-// UNSENT DRAFT post (feature flag `newsletterDrafter`). Enqueued by
+// UNSENT DRAFT post (feature flag `newsletterDrafter`): the designed email as
+// one html block + the poll (beehiiv-draft.ts). Enqueued by
 // `POST /api/newsletter-drafts/[id]/beehiiv`. Idempotent: a draft that already
 // has `beehiiv_post_id` is skipped, so a retry never makes a second post.
 // Never publishes or schedules — beehiiv.ts refuses any request that could.
@@ -10,6 +11,7 @@ import { db } from "@/lib/db";
 import { formats, newsletterDrafts, productionItems } from "@/lib/db/schema";
 import { createFuturepediaDraft } from "@/lib/beehiiv";
 import { buildBeehiivDraftRequest } from "@/lib/beehiiv-draft";
+import type { DocNode } from "@/lib/newsletter-rich-doc";
 import { advanceNewsletterItem } from "@/lib/services/newsletter-drafter/queue-status";
 import { templateFor } from "@/lib/newsletter-template";
 import { voiceForChannel } from "@/lib/services/newsletter-drafter/format-config";
@@ -29,6 +31,8 @@ export const beehiivNewsletterCreateDraftTask: Task = async (rawPayload, helpers
       previewText: newsletterDrafts.previewText,
       sendDate: newsletterDrafts.sendDate,
       sections: newsletterDrafts.sections,
+      layout: newsletterDrafts.layout,
+      variables: newsletterDrafts.variables,
       screenshots: newsletterDrafts.screenshots,
       specialCopy: newsletterDrafts.specialCopy,
       specialSource: newsletterDrafts.specialSource,
@@ -71,6 +75,8 @@ export const beehiivNewsletterCreateDraftTask: Task = async (rawPayload, helpers
       author: voiceForChannel(row.formatName, row.channelHandle)?.voice ?? null,
       screenshots,
       screenshotUrls: await screenshotUrlsByKey(screenshots),
+      layout: row.layout as DocNode | null,
+      variables: row.variables,
     });
     // Record the post the moment it exists, so a failed check below can never lead to a second post.
     const post = await createFuturepediaDraft(body, async (p) => {

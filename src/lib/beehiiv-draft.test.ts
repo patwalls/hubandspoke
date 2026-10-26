@@ -1,42 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { assertSafeDraftCreate, HOWTO_AUTHOR_IDS, HOWTO_BASE_TEMPLATE_ID, SKILL_LEAP_MEMBERS_SEGMENT_ID } from "@/lib/beehiiv";
-import { inlineRuns, markdownToBlocks } from "@/lib/beehiiv-blocks";
+import { assertSafeDraftCreate, assertSafeHtmlBlock, HOWTO_AUTHOR_IDS, HOWTO_BASE_TEMPLATE_ID, HOWTO_POLL_ID, SKILL_LEAP_MEMBERS_SEGMENT_ID } from "@/lib/beehiiv";
 import { DEFAULT_TEMPLATES } from "@/lib/newsletter-template";
-import { beehiivSlug, buildBeehiivDraftRequest, toolFromWhy } from "./beehiiv-draft";
+import { beehiivSlug, buildBeehiivDraftRequest } from "./beehiiv-draft";
 
-type B = Record<string, unknown> & { type: string; blocks?: B[] };
+type B = Record<string, unknown> & { type: string; blocks?: B[]; html?: string };
 
-describe("markdown → beehiiv blocks", () => {
-  it("turns bold, italic and links into formatted runs", () => {
-    expect(inlineRuns("Hi **you** and *them*, [read](https://x.com)")).toEqual([
-      { text: "Hi " },
-      { text: "you", styling: ["bold"] },
-      { text: " and " },
-      { text: "them", styling: ["italic"] },
-      { text: ", " },
-      { text: "read", link: { href: "https://x.com", target: "_blank" } },
-    ]);
-    expect(inlineRuns("keep snake_case_words")).toEqual([{ text: "keep snake_case_words" }]);
-  });
-
-  it("makes headings, bullet lists, images and (when asked) link-only lines into buttons", () => {
-    const blocks = markdownToBlocks("## Title\n- ✅ **One** thing\n- two\n![thumb](https://img/x.jpg)\n[Watch The Full Video ->](https://youtu.be/x)", { buttons: true });
-    expect(blocks.map((b) => b.type)).toEqual(["heading", "list", "image", "button"]);
-    expect(blocks[3]).toMatchObject({ text: "Watch The Full Video →", href: "https://youtu.be/x", visual_settings: { background_color: "#273653" } });
-    expect(markdownToBlocks("[Grab the guide →](https://g.com)")[0].type).toBe("paragraph");
-    expect(markdownToBlocks("Hey\n- Saj").map((b) => b.type)).toEqual(["paragraph", "paragraph"]);
-  });
-});
-
-describe("beehiiv draft request", () => {
+describe("beehiiv draft request (the designed email as one html block)", () => {
   it("slugs the subject + send date the team's way", () => {
     expect(beehiivSlug("ChatGPT Reads the Fine Print So You Don't Have To", "2026-09-29")).toBe("chatgpt-reads-the-fine-print-so-you-dont-have-to-09-29-2026");
     expect(beehiivSlug("Notes → A Plan, Fast!", "2026-10-27")).toBe("notes-a-plan-fast-10-27-2026");
-  });
-
-  it("reads the tool off the Why section for the card label", () => {
-    expect(toolFromWhy("### Why **Claude** Works\nbecause")).toBe("Claude");
-    expect(toolFromWhy("nothing")).toBeNull();
   });
 
   const template = DEFAULT_TEMPLATES["futurepedia newsletter"];
@@ -48,13 +20,14 @@ describe("beehiiv draft request", () => {
     author: "saj",
     sections: [
       { key: "intro", markdown: "Hey friends\n- Saj\n[Grab our free guide →](https://g.com)" },
-      { key: "article", markdown: "## Turn Notes Into a Plan\n![thumb](https://img.youtube.com/vi/x/maxresdefault.jpg)\nOne line." },
+      { key: "article", markdown: "## Turn Notes Into a Plan\n[![thumb](https://img.youtube.com/vi/x/maxresdefault.jpg)](https://youtu.be/x)\nOne line." },
       { key: "why", markdown: "### Why Claude Works\n- ✅ **Fast**" },
       { key: "steps", markdown: "1. **Open** it" },
       { key: "steps_continued", markdown: "4. **Ship** it\n[Watch The Full Video ->](https://youtu.be/x)" },
-      { key: "use_cases", markdown: "- 📊 **Ops:** x" },
+      { key: "use_cases", markdown: "- **Ops:** x" },
       { key: "bonus_tips", markdown: "- **Batch:** y" },
     ],
+    variables: { tool: "Claude Cowork", steps_heading: "How We Did It", closer_1: "Use Cases", closer_2: "Where It Falls Short" },
     sponsor: { copy: "Get the free guide", landingUrl: "https://example.com/guide" },
     thumbnailUrl: null,
   }) as Record<string, unknown> & { blocks: B[] };
@@ -73,72 +46,42 @@ describe("beehiiv draft request", () => {
     expect(body).not.toHaveProperty("body_content");
   });
 
-  it("rebuilds the template's cards in order, labelled like the template", () => {
-    const cards = body.blocks.filter((b) => b.type === "section");
-    const label = (c: B) => {
-      const h = c.blocks![0] as { formattedText?: { text: string }[]; text?: string };
-      return h.formattedText?.[0].text ?? h.text;
-    };
-    expect(cards.map((c) => (c.blocks![0].type === "heading" ? label(c) : c.blocks![0].type === "poll" ? "(poll)" : "(intro)"))).toEqual([
-      "(intro)",
-      "Claude Guide",
-      "Free Resource",
-      "Claude Guide Continued",
-      "Use Cases",
-      "Bonus Tips",
-      "(poll)",
-    ]);
-    // The poll shows its own question; no heading of ours above it (it read twice in a beehiiv draft).
-    expect(cards.at(-1)!.blocks).toEqual([{ type: "poll", poll_id: expect.any(String) }]);
-    expect(body.blocks[0]).toMatchObject({ type: "image" }); // masthead
-    expect(cards[3].blocks!.at(-1)).toMatchObject({ type: "button", href: "https://youtu.be/x" });
-    expect(cards[2].blocks!.at(-1)).toMatchObject({ type: "button", href: "https://example.com/guide" });
+  it("is one html block holding the designed email, then the poll card — nothing else", () => {
+    expect(body.blocks.map((b) => b.type)).toEqual(["html", "section"]);
+    expect(body.blocks[1].blocks).toEqual([{ type: "poll", poll_id: HOWTO_POLL_ID }]);
+    const html = body.blocks[0].html!;
+    // The design: masthead, the cards with the issue's field values, the buttons, the thumbnail linked to the video, inline styles only.
+    expect(html).toContain("Futurepedia_Masthead.png");
+    expect(html).toContain("Claude Cowork Guide");
+    expect(html).toContain("Claude Cowork Guide Continued");
+    expect(html).toContain("Where It Falls Short");
+    expect(html).not.toContain("{tool}");
+    expect(html).not.toContain("{closer_2}");
+    expect(html).toContain('href="https://youtu.be/x"');
+    expect(html).toContain("Watch The Full Video");
+    expect(html).toContain("https://example.com/guide");
+    expect(html).toContain("Free Resource");
+    expect(html).not.toContain("<style");
+    expect(html).not.toContain("<link");
+    // The sign-off stays a line, not a list.
+    expect(html).toContain("- Saj");
+    expect(html).not.toContain("<li");
   });
 
-  it("builds from the template's layout: relabel a card, move a section, drop the poll", () => {
-    const base = DEFAULT_TEMPLATES["futurepedia newsletter"];
-    const layout = base.beehiiv!.layout;
-    const edited = {
-      ...base,
-      beehiiv: {
-        ...base.beehiiv!,
-        layout: {
-          ...layout,
-          poll: false,
-          outroImageUrl: null,
-          // Use Cases + Bonus Tips merged into one "Extras" card.
-          cards: [
-            ...layout.cards.slice(0, 4),
-            { label: "Extras", border: "#111111", background: "#FFFFFF", sections: [{ key: "use_cases", showHeading: true, linkButtons: false }, { key: "bonus_tips", showHeading: true, linkButtons: false }] },
-          ],
-        },
-      },
-    };
+  it("drops the poll when the template's beehiiv setup turns it off", () => {
     const out = buildBeehiivDraftRequest({
-      template: edited,
+      template: { ...template, beehiiv: { ...template.beehiiv!, layout: { ...template.beehiiv!.layout, poll: false } } },
       subject: "S",
       previewText: null,
       sendDate: "2026-10-30",
-      sections: [
-        { key: "intro", markdown: "Hi" },
-        { key: "why", markdown: "### Why Claude Works" },
-        { key: "use_cases", markdown: "- one" },
-        { key: "bonus_tips", markdown: "- two" },
-      ],
+      sections: [{ key: "intro", markdown: "Hi" }],
       sponsor: null,
       thumbnailUrl: null,
     }) as { blocks: B[] };
-    const cards = out.blocks.filter((b) => b.type === "section");
-    const last = cards.at(-1)!;
-    expect((last.blocks![0] as unknown as { formattedText: { text: string }[] }).formattedText[0].text).toBe("Extras");
-    expect(last.visual_settings).toMatchObject({ border_color: "#111111" });
-    expect(last.blocks!.filter((b) => b.type === "heading").map((h) => (h as { text?: string }).text)).toEqual([undefined, "Use Cases", "Bonus Tips"]);
-    expect(out.blocks.some((b) => b.type === "poll" || (b.blocks ?? []).some((x) => x.type === "poll"))).toBe(false);
-    expect(out.blocks.filter((b) => b.type === "image")).toHaveLength(1); // masthead only
+    expect(out.blocks.map((b) => b.type)).toEqual(["html"]);
   });
 
   it("puts a picked screenshot in as an image where its placeholder was; an unpicked one is left out", () => {
-    const template = DEFAULT_TEMPLATES["futurepedia newsletter"];
     const out = buildBeehiivDraftRequest({
       template,
       subject: "S",
@@ -150,10 +93,19 @@ describe("beehiiv draft request", () => {
       screenshots: { "steps:the skills page": { frameId: "f1", sec: 272, bucket: "www.starterstory.com", key: "k.jpg" } },
       screenshotUrls: { "k.jpg": "https://s3.us-east-1.amazonaws.com/www.starterstory.com/k.jpg" },
     }) as { blocks: B[] };
-    const guide = out.blocks.filter((b) => b.type === "section")[0].blocks!;
-    expect(guide).toContainEqual(expect.objectContaining({ type: "image", imageUrl: "https://s3.us-east-1.amazonaws.com/www.starterstory.com/k.jpg" }));
-    expect(JSON.stringify(guide)).not.toContain("Screenshot @ 5:10");
-    expect(JSON.stringify(guide)).not.toContain("[Screenshot @ 4:32");
+    const html = out.blocks[0].html!;
+    expect(html).toContain('src="https://s3.us-east-1.amazonaws.com/www.starterstory.com/k.jpg"');
+    expect(html).not.toContain("Screenshot @ 5:10");
+    expect(html).not.toContain("[Screenshot @ 4:32");
+  });
+
+  it("the guard refuses an html block that could run code or collect input", () => {
+    expect(() => assertSafeHtmlBlock("<table><tr><td style=\"color:#222\">fine</td></tr></table>")).not.toThrow();
+    expect(() => assertSafeHtmlBlock("<p>x</p><script>alert(1)</script>")).toThrow(/script/);
+    expect(() => assertSafeHtmlBlock('<a href="javascript:void(0)">x</a>')).toThrow(/javascript/);
+    expect(() => assertSafeHtmlBlock('<img src="x" onerror="alert(1)">')).toThrow(/onerror/);
+    expect(() => assertSafeHtmlBlock("<form action='/x'></form>")).toThrow(/form/);
+    expect(() => assertSafeHtmlBlock("")).toThrow(/needs its html/);
+    expect(() => assertSafeDraftCreate({ ...body, blocks: [{ type: "html", html: "<iframe src='x'></iframe>" }] })).toThrow(/iframe/);
   });
 });
-

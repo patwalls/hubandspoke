@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_TEMPLATES } from "./newsletter-template";
-import { layoutFor, layoutFromSections, newSlotKey, slotHeadings, slotKeys, withLayout } from "./newsletter-layout";
+import { layoutFor, layoutFromSections, layoutText, newSlotKey, slotHeadings, slotKeys, withLayout } from "./newsletter-layout";
 
 const sb = DEFAULT_TEMPLATES["sunday breakfast"];
 
@@ -70,6 +70,23 @@ describe("layoutFromBeehiiv (Futurepedia's cards → a designed layout)", () => 
     // A label isn't a section's name; the "How We Did It" heading is.
     const heads = slotHeadings(l);
     expect(heads.article).toBeNull();
-    expect(heads.steps).toEqual({ text: "How We Did It", level: 3 });
+    // The walkthrough's heading is a field the drafter fills ("How We Did It" in nearly every issue).
+    expect(heads.steps).toEqual({ text: "{steps_heading}", level: 3 });
+  });
+});
+
+describe("layoutText", () => {
+  it("lists the designed text once per block, boxes and lists included, images skipped", () => {
+    const layout = {
+      type: "doc",
+      content: [
+        { type: "image", attrs: { src: "https://x/y.png" } },
+        { type: "heading", attrs: { level: 4 }, content: [{ type: "text", text: "{tool} Guide" }] },
+        { type: "callout", attrs: { color: "#fff" }, content: [{ type: "paragraph", content: [{ type: "text", text: "Fixed " }, { type: "text", text: "line", marks: [{ type: "bold" }] }] }, { type: "slot", attrs: { key: "a" } }] },
+        { type: "bulletList", content: [{ type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "Item {x}" }] }] }] },
+      ],
+    };
+    expect(layoutText(layout)).toEqual(["{tool} Guide", "Fixed line", "Item {x}"]);
+    expect(layoutText(layoutFor(DEFAULT_TEMPLATES["futurepedia newsletter"]))).toEqual(["{tool} Guide", "{steps_heading}", "Free Resource", "{tool} Guide Continued", "{closer_1}", "{closer_2}"]);
   });
 });

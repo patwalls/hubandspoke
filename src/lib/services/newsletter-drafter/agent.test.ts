@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_TEMPLATES } from "@/lib/newsletter-template";
-import { describePillar, describeTemplate, phaseFor, submissionProblem, TEMPLATE_FRAMING } from "./agent";
+import { describeFields, describePillar, describeTemplate, phaseFor, submissionProblem, TEMPLATE_FRAMING, THUMBNAIL_RULE } from "./agent";
 
 const sb = DEFAULT_TEMPLATES["sunday breakfast"];
 
@@ -13,8 +13,8 @@ describe("describeTemplate with examples", () => {
     expect(text).toContain("   | **[$50K app](https://x)**");
     expect(text).toContain("EXAMPLE 2");
     expect(text).toContain("   | Hey!");
-    // No examples → no framing block.
-    expect(describeTemplate(sb, false, null)).not.toContain(TEMPLATE_FRAMING);
+    // The framing (skeleton fixed, the filling is the issue's call) is there with or without examples.
+    expect(describeTemplate(sb, false, null)).toContain(TEMPLATE_FRAMING);
   });
 
   it("marks optional sections, and the sponsor slot gets no examples when its copy is supplied", () => {
@@ -85,5 +85,38 @@ describe("pinnedStoryInstruction (Find new story → the editor picked one)", ()
     expect(v).toContain("The editor's steer: shorter");
     const c = pinnedStoryInstruction({ kind: "case_study", key: "case:/stories/x", title: "X", url: "https://www.starterstory.com/stories/x", productionItemId: null });
     expect(c).toContain("read_case_study (https://www.starterstory.com/stories/x)");
+  });
+});
+
+describe("template fields in the drafter's prompt and submission", () => {
+  const fp = DEFAULT_TEMPLATES["futurepedia newsletter"];
+
+  it("lists every field with where it sits in the design, its sample and its guidance; a template without fields gets none", () => {
+    const { names, text } = describeFields(fp);
+    expect(names).toEqual(["tool", "steps_heading", "closer_1", "closer_2"]);
+    expect(text).toContain('- tool (appears in "{tool} Guide", "{tool} Guide Continued"; e.g. "ChatGPT Work"): The tool\'s short name');
+    expect(text).toContain('- steps_heading (appears in "{steps_heading}"; e.g. "How We Did It")');
+    expect(describeFields(sb)).toEqual({ names: [], text: null });
+    const prompt = describeTemplate(fp, true, null);
+    expect(prompt).toContain("TEMPLATE FIELDS");
+    expect(prompt).toContain('key "steps" — heading "{steps_heading}" (drawn for you from the field steps_heading; don\'t repeat it)');
+    expect(prompt).toContain(THUMBNAIL_RULE);
+    expect(describeTemplate(sb, false, null)).not.toContain("TEMPLATE FIELDS");
+  });
+
+  it("a submission is rejected until every field has a value", () => {
+    const base = {
+      subject_options: ["a", "b", "c"],
+      subject: "a",
+      preview_text: "p",
+      sources: [],
+      sections: fp.sections.filter((s) => s.kind !== "sponsor").map((s) => ({ key: s.key, markdown: "x" })),
+    };
+    const fields = describeFields(fp).names;
+    expect(submissionProblem(base, fp, true, undefined, null, fields)).toMatch(/fields need a value in variables: tool, steps_heading, closer_1, closer_2/);
+    expect(submissionProblem({ ...base, variables: { tool: "Claude", steps_heading: "How We Did It", closer_1: " ", closer_2: "Bonus Tips" } }, fp, true, undefined, null, fields)).toMatch(/closer_1/);
+    expect(submissionProblem({ ...base, variables: { tool: "Claude", steps_heading: "How We Did It", closer_1: "Use Cases", closer_2: "Bonus Tips" } }, fp, true, undefined, null, fields)).toBeNull();
+    // A template with no fields asks for none.
+    expect(submissionProblem({ ...base, sections: sb.sections.map((s) => ({ key: s.key, markdown: "x" })) }, sb, true, undefined, null, [])).toBeNull();
   });
 });

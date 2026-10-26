@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { markdownToEmailHtml, pruneForSend, renderEmailBody, renderEmailHtml, renderEmailParts, sectionMarkdown, webFontLink, type EmailBlock, type EmailParts } from "./newsletter-email-html";
+import { applyVars, markdownToEmailHtml, pruneForSend, renderEmailBody, renderEmailHtml, renderEmailParts, sectionMarkdown, webFontLink, type EmailBlock, type EmailParts } from "./newsletter-email-html";
 
 /** Every slot in the layout's blocks (boxes opened), and all the fixed HTML. */
 const flat = (blocks: EmailBlock[]): EmailBlock[] => blocks.flatMap((b) => (b.kind === "box" ? [b, ...flat(b.children)] : [b]));
@@ -229,5 +229,37 @@ describe("a draft's own design", () => {
     expect(body).not.toContain("The Orange Juice");
     const fixed = renderEmailParts({ template: sb, sections: [], layout: mine }).blocks.find((b) => b.kind === "fixed" && b.html.includes("The Big Juice"));
     expect(fixed).toMatchObject({ path: [ojAt] });
+  });
+});
+
+describe("template fields in the design ({tool} Guide, {closer_2}…)", () => {
+  const fp = DEFAULT_TEMPLATES["futurepedia newsletter"];
+  const why = [{ key: "why", markdown: "### Why Claude Cowork Works\n✅ **Reads** files" }];
+
+  it("a draft's values fill the card labels and the walkthrough heading", () => {
+    const html = renderEmailBody({ template: fp, sections: [{ key: "article", markdown: "## Headline" }, ...why, { key: "steps", markdown: "1. **Open** it" }, { key: "bonus_tips", markdown: "**Tip:** x" }], variables: { tool: "Nano Banana", steps_heading: "How To Try It", closer_2: "The Verdict" } });
+    expect(html).toContain("Nano Banana Guide");
+    expect(html).toContain("How To Try It");
+    expect(html).toContain("The Verdict");
+    expect(html).not.toContain("{");
+  });
+
+  it("the template preview shows each field's sample where it sits", () => {
+    const html = renderEmailHtml({ template: fp, sections: [], showHints: true });
+    expect(html).toContain("ChatGPT Work Guide");
+    expect(html).toContain("How We Did It");
+    expect(html).toContain("Use Cases");
+    expect(html).toContain("Bonus Tips");
+  });
+
+  it("a draft written before fields existed still reads the tool off its Why heading and the rest from the samples", () => {
+    expect(applyVars("{tool} Guide", { template: fp, sections: why, variables: null })).toBe("Claude Cowork Guide");
+    expect(applyVars("{tool} Guide", { template: fp, sections: [], variables: {} })).toBe("AI Guide");
+    expect(applyVars("{closer_1}", { template: fp, sections: why, variables: {} })).toBe("Use Cases");
+    expect(applyVars("Hey {{first_name}}", { template: fp, sections: why, variables: {} })).toBe("Hey {{first_name}}");
+  });
+
+  it("a value is escaped like any other text", () => {
+    expect(applyVars("{tool} Guide", { template: fp, sections: [], variables: { tool: "<b>x</b>" } })).toBe("&lt;b&gt;x&lt;/b&gt; Guide");
   });
 });

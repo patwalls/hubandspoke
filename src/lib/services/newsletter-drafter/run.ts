@@ -9,7 +9,7 @@ import { brands, formats, newsletterDrafts, newsletterIssueHistory, type Newslet
 import { newsletterModel, NewsletterCancelledError, runNewsletterAgent, storyKeyOf, type NewsletterSubmission } from "./agent";
 import { blockedKeys, loadUsage, toStoredSources, usageGroupFor, withInferredSources } from "./usage";
 import { buildStoryPlan, withPlanDates } from "./story-plan";
-import { composeIssue, templateFor, type NewsletterSection } from "@/lib/newsletter-template";
+import { composeIssue, sectionHeadings, templateFor, type NewsletterSection } from "@/lib/newsletter-template";
 import { formatConfigFor, voiceForChannel } from "./format-config";
 import { findSpecial } from "./promo";
 import { SINGLE_VIDEO_TRANSCRIPT_BUDGET, getPastIssues, getSingleVideo, getTimestampedTranscript, youtubeThumbnailUrl } from "./sources";
@@ -162,7 +162,7 @@ export async function runNewsletterDraft(
     const [pastIssues, special] = await Promise.all([
       // Same-voice past issues for two-voice formats (Kevin / Saj by the video's channel).
       // Only issues in the current template count as examples (never a retired layout).
-      getPastIssues(row.brand, row.formatName, video?.voiceName ?? null, template?.sections.map((s) => s.heading ?? "").filter(Boolean) ?? []),
+      getPastIssues(row.brand, row.formatName, video?.voiceName ?? null, template ? sectionHeadings(template) : []),
       findSpecial(row.formatName, row.sendDate),
     ]);
     const sponsored = special?.ok ? special : null;
@@ -219,6 +219,8 @@ export async function runNewsletterDraft(
         subject: s.subject,
         previewText: s.preview_text,
         sections,
+        // The template's fields as this issue fills them (the tool's name, what the closing cards are called…).
+        variables: s.variables ?? {},
         // A fresh issue: earlier screenshot picks belong to the old text (autoPick below makes new ones).
         screenshots: {},
         // Templated: the composed issue (what the HubSpot push sends); free-form: the agent's body.

@@ -84,3 +84,12 @@ describe("describeSectionExamples", () => {
     expect(text).not.toContain("EXAMPLE 3");
   });
 });
+
+describe("sections whose heading is a field", () => {
+  it("still finds the section in a past issue by the field's sample (\"{steps_heading}\" → \"How We Did It\")", () => {
+    const fp = DEFAULT_TEMPLATES["futurepedia newsletter"];
+    const issue = { subject: "s", previewText: null, publishedAt: "2026-10-20", views: null, body: "Intro line\n\n- Saj\n\nHow We Did It\n\nHere's how we set it up.\n\n1. Create a project\n\nFree Resource\n\nThe offer." };
+    const ex = sectionExamples([issue], fp);
+    expect(ex.steps).toEqual(["Here's how we set it up.\n\n1. Create a project"]);
+  });
+});
