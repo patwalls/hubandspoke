@@ -122,7 +122,7 @@ function NextCard({
           {next && byPlatform ? (
             <>
               <p className="text-muted-foreground">
-                {done} Still to post from this post ({siblings.length}):
+                {done} Still to post ({siblings.length}):
               </p>
               <p className="mt-0.5 truncate font-medium">{next.title || "Untitled"}</p>
             </>

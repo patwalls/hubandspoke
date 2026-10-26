@@ -54,7 +54,7 @@ test("after a Publish, the card lists the post's other cross-posts by platform",
     await expect(dialog).toBeHidden();
 
     const card = page.getByTestId("up-next-card");
-    await expect(card).toContainText("Published. Still to post from this post (3)");
+    await expect(card).toContainText("Published. Still to post (3)");
     const buttons = card.getByTestId("up-next-siblings").getByRole("link");
     await expect(buttons).toHaveText(["Threads", "YouTube Community", "Facebook"]);
     if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT });
