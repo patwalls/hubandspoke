@@ -894,7 +894,10 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
   (`sendMyWorkDigestEmail`).
 - **Inputs:** the same reads as `/my-work` (`getMyWork` + `getRowNews`).
   Recipients = users with the `myWorkDigest` flag AND
-  `users.my_work_digest_enabled = true` (opt-out, default true).
+  `users.my_work_digest_enabled = true` (opt-out, default true). The flag is
+  `everyone: true` since 2026-10-26 (Pat-only 10-23 → 10-26), so in practice
+  every account that hasn't opted out; ~12–15 have something waiting on a
+  given weekday.
 - **Outputs:** one HubSpot SMTP send per recipient with something on their
   turn or to review; nothing waiting → no email. No DB writes.
 - **Idempotency:** per-person sends are wrapped and the task never throws,

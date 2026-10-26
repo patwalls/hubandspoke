@@ -59,6 +59,11 @@ describe("isFeatureEnabled", () => {
     expect(isFeatureEnabled("designEditor", { email: "someone-new@example.com" }, {})).toBe(true);
     expect(isFeatureEnabled("clipEditor", null, {})).toBe(false);
   });
+
+  it("the My Work morning email is on for every signed-in account", () => {
+    expect(isFeatureEnabled("myWorkDigest", { email: "someone-new@example.com" }, {})).toBe(true);
+    expect(isFeatureEnabled("myWorkDigest", null, {})).toBe(false);
+  });
 });
 
 describe("resolveFeatureFlags", () => {
@@ -68,7 +73,7 @@ describe("resolveFeatureFlags", () => {
       designEditor: true,
       newsletterDrafter: false,
       newsletterTemplateAdmin: false,
-      myWorkDigest: false,
+      myWorkDigest: true,
     });
     expect(resolveFeatureFlags({ email: "Sam@StarterStory.com" }, {}).newsletterDrafter).toBe(true);
     expect(resolveFeatureFlags({ email: "Sam@StarterStory.com" }, {}).newsletterTemplateAdmin).toBe(true);
