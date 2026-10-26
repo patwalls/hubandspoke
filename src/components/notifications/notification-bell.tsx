@@ -5,29 +5,14 @@ import Link from "next/link";
 import { BellIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { startVisibleInterval } from "@/lib/visible-interval";
+import { trackUsage } from "@/lib/usage/track";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import type { NotificationPayload } from "@/lib/db/schema";
-
-type NotificationItem = {
-  id: string;
-  kind: string;
-  payload: NotificationPayload;
-  contentItemId: string | null;
-  commentId: string | null;
-  readAt: string | null;
-  createdAt: string;
-  item: { id: string; title: string | null; brand: string } | null;
-  actor: {
-    id: string;
-    name: string | null;
-    email: string | null;
-    avatarUrl: string | null;
-  } | null;
-};
+import type { NotificationItem } from "@/lib/notifications/to-item";
+import { PostTypeTag } from "@/components/my-work/up-next";
 
 type ApiShape = {
   items: NotificationItem[];
@@ -86,7 +71,13 @@ export function NotificationBell() {
   }
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (next) trackUsage("notifications:bell");
+      }}
+    >
       <PopoverTrigger
         aria-label="Notifications"
         className="relative inline-flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
@@ -195,7 +186,12 @@ function NotificationRow({
       />
       <div className="min-w-0 flex-1">
         <p className="text-[12px] text-muted-foreground truncate">{summary}</p>
+        {/* Cross-posts share their post's title, so the platform is what
+            tells two notifications apart. */}
         <p className="text-[13px] text-foreground font-medium truncate">
+          <span data-notification-platform className="mr-1 text-xs font-normal">
+            <PostTypeTag postType={n.item?.postType} />
+          </span>
           {title}
         </p>
         {(n.payload.kind === "comment" || n.payload.kind === "mention") && (

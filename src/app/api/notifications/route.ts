@@ -5,9 +5,9 @@ import {
   notifications,
   productionItems,
   users,
-  type NotificationPayload,
 } from "@/lib/db/schema";
 import { auth } from "@/lib/auth";
+import { toNotificationItem } from "@/lib/notifications/to-item";
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
@@ -40,6 +40,7 @@ export async function GET(request: NextRequest) {
       createdAt: notifications.createdAt,
       itemTitle: productionItems.title,
       itemBrand: productionItems.brand,
+      itemPostType: productionItems.postType,
       actorName: users.name,
       actorEmail: users.email,
       actorAvatarUrl: users.avatarUrl,
@@ -62,26 +63,7 @@ export async function GET(request: NextRequest) {
     );
 
   return NextResponse.json({
-    items: rows.map((r) => ({
-      id: r.id,
-      kind: r.kind,
-      payload: r.payload as NotificationPayload,
-      contentItemId: r.contentItemId,
-      commentId: r.commentId,
-      readAt: r.readAt ? r.readAt.toISOString() : null,
-      createdAt: r.createdAt.toISOString(),
-      item: r.contentItemId
-        ? { id: r.contentItemId, title: r.itemTitle, brand: r.itemBrand }
-        : null,
-      actor: r.actorUserId
-        ? {
-            id: r.actorUserId,
-            name: r.actorName,
-            email: r.actorEmail,
-            avatarUrl: r.actorAvatarUrl,
-          }
-        : null,
-    })),
+    items: rows.map(toNotificationItem),
     unreadCount: Number(unreadCount),
   });
 }
