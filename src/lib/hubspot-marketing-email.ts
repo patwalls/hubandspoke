@@ -202,13 +202,20 @@ export async function createDraftEmailFromTemplate(args: {
   if (String(clone.id) === String(args.templateEmailId)) {
     throw new HubspotEmailError(500, "clone returned the template's own id; refusing to edit the template");
   }
-  const full = await hubspotFetch<HubspotEmail>(`/marketing/v3/emails/${clone.id}`, { method: "GET" });
-  const content = buildHtmlEmailContent(full, args.html, args.previewText);
-  await hubspotFetch<HubspotEmail>(`/marketing/v3/emails/${clone.id}`, {
-    method: "PATCH",
-    body: { name: args.name, subject: args.subject, content },
-  });
-  return { id: String(clone.id), editUrl: emailEditUrl(String(clone.id)) };
+  const editUrl = emailEditUrl(String(clone.id));
+  try {
+    const full = await hubspotFetch<HubspotEmail>(`/marketing/v3/emails/${clone.id}`, { method: "GET" });
+    const content = buildHtmlEmailContent(full, args.html, args.previewText);
+    await hubspotFetch<HubspotEmail>(`/marketing/v3/emails/${clone.id}`, {
+      method: "PATCH",
+      body: { name: args.name, subject: args.subject, content },
+    });
+  } catch (err) {
+    // The copy exists but isn't filled: say where, so it's deleted rather than joined by a second one on retry.
+    const status = err instanceof HubspotEmailError ? err.status : 500;
+    throw new HubspotEmailError(status, `${(err as Error).message} — a half-filled copy was left in HubSpot (${editUrl}); delete it before trying again.`);
+  }
+  return { id: String(clone.id), editUrl };
 }
 
 /** One email, for its send state (`state`, `publishDate`). The same GET the push already uses. */

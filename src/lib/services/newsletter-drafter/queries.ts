@@ -8,6 +8,7 @@ import { formatConfigFor } from "./format-config";
 import { loadUsage, publishedLabel, usageGroupFor, usageLabel, withInferredSources } from "./usage";
 import { computeWindow } from "./window";
 import { resolvePendingScreenshots, screenshotPreviewUrls } from "./screenshots";
+import { pushView } from "./push-state";
 
 export interface NewsletterFormatOption {
   id: string;
@@ -115,7 +116,11 @@ export async function getNewsletterDraft(id: string) {
     .where(eq(newsletterDrafts.id, id))
     .limit(1);
   if (!row) return null;
-  const { formatTemplate, ...rest } = row;
+  const { formatTemplate, ...pushed } = row;
+  // A push the worker never finished reads as failed, so the editor can retry (push-state.ts).
+  const hs = pushView(row.hubspotStatus, row.hubspotError, row.updatedAt, Date.now(), "HubSpot");
+  const bh = pushView(row.beehiivStatus, row.beehiivError, row.updatedAt, Date.now(), "beehiiv");
+  const rest = { ...pushed, hubspotStatus: hs.status, hubspotError: hs.error, beehiivStatus: bh.status, beehiivError: bh.error };
   const config = formatConfigFor(row.formatName);
   // Drafts written before the agent filled `source` get it from their links.
   const sections = config.kind === "roundup" ? withInferredSources(row.sections, row.sources) : row.sections;

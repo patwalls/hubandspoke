@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { assertAllowedHubspotCall, buildHtmlEmailContent } from "./hubspot-marketing-email";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { assertAllowedHubspotCall, buildHtmlEmailContent, createDraftEmailFromTemplate } from "./hubspot-marketing-email";
 
 describe("buildHtmlEmailContent", () => {
   // The shape of "[TEMPLATE] Sunday Breakfast – Hub & Spoke": masthead section, course sections (label + divider + rich text), footer section.
@@ -94,5 +94,31 @@ describe("assertAllowedHubspotCall", () => {
     ]) {
       expect(() => assertAllowedHubspotCall(method, path), `${method} ${path}`).toThrow(/Blocked HubSpot call/);
     }
+  });
+});
+
+describe("createDraftEmailFromTemplate", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it("when filling the copy fails, the error names the half-made copy so it gets deleted, not duplicated by a retry", async () => {
+    vi.stubEnv("HUBSPOT_PORTAL_53_ACCESS_TOKEN", "test");
+    const calls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init: { method: string }) => {
+        calls.push(`${init.method} ${new URL(url).pathname}`);
+        if (init.method === "POST") return new Response(JSON.stringify({ id: "777" }), { status: 200 });
+        if (init.method === "GET") return new Response(JSON.stringify({ id: "777", content: {} }), { status: 200 });
+        return new Response("nope", { status: 500 });
+      }),
+    );
+    const err = await createDraftEmailFromTemplate({ templateEmailId: "9", name: "n", subject: "s", previewText: null, html: "<p>x</p>" }).catch((e: Error) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toContain("/edit/777/");
+    expect((err as Error).message).toMatch(/delete it/i);
+    expect(calls).toEqual(["POST /marketing/v3/emails/clone", "GET /marketing/v3/emails/777"]);
   });
 });
