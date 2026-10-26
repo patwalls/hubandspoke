@@ -35,6 +35,8 @@ import {
   LinkIcon,
   Loader2Icon,
   MoreHorizontalIcon,
+  RectangleHorizontalIcon,
+  RectangleVerticalIcon,
   Redo2Icon,
   SparklesIcon,
   TimerOffIcon,
@@ -44,7 +46,7 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { KillIdeaDialog } from "@/components/dashboard/kill-idea-dialog";
-import { isSourceSection, lookFromDoc, type ClipEditDoc } from "@/lib/clip-editor/doc";
+import { aspectOfCanvas, isSourceSection, lookFromDoc, type AspectRatio, type ClipEditDoc } from "@/lib/clip-editor/doc";
 import { compileRenderPlan } from "@/lib/clip-editor/plan";
 import { resolveScene } from "@/lib/clip-editor/scene";
 import { buildTranscriptView } from "@/lib/clip-editor/transcript-view";
@@ -175,6 +177,11 @@ function EditorRoot(props: {
     </EditorStoreContext.Provider>
   );
 }
+
+const ASPECT_OPTIONS: { aspect: AspectRatio; label: string; hint: string }[] = [
+  { aspect: "16:9", label: "Landscape", hint: "X, LinkedIn, YouTube" },
+  { aspect: "9:16", label: "Portrait", hint: "Instagram, TikTok, Shorts" },
+];
 
 function fmtDuration(sec: number): string {
   const t = Math.max(0, Math.round(sec));
@@ -598,6 +605,29 @@ function EditorWorkspace({
         )}
         <div className="ml-auto flex items-center gap-1">
           {nav && <IdeaNavButtons nav={nav} />}
+          <details className="relative">
+            <summary className="flex size-7 cursor-pointer list-none items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground" title="Aspect ratio" aria-label="Aspect ratio">
+              {vertical ? <RectangleVerticalIcon className="size-4" /> : <RectangleHorizontalIcon className="size-4" />}
+            </summary>
+            <div className="absolute right-0 top-full z-30 mt-1 w-60 rounded-lg border border-border bg-popover p-1 text-sm shadow-lg" onClick={(e) => ((e.currentTarget.closest("details") as HTMLDetailsElement).open = false)}>
+              {ASPECT_OPTIONS.map((o) => (
+                <button
+                  key={o.aspect}
+                  type="button"
+                  disabled={locked}
+                  onClick={() => apply(commands.setAspect(o.aspect))}
+                  className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-muted disabled:opacity-50"
+                >
+                  <CheckIcon className={cn("size-3.5 shrink-0", aspectOfCanvas(doc.canvas) !== o.aspect && "invisible")} />
+                  <span className="flex flex-1 flex-col">
+                    <span>{o.label}</span>
+                    <span className="text-[11px] text-muted-foreground">{o.hint}</span>
+                  </span>
+                  <span className="font-mono text-xs text-muted-foreground">{o.aspect}</span>
+                </button>
+              ))}
+            </div>
+          </details>
           <details className="relative">
             <summary className="flex size-7 cursor-pointer list-none items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground" title="Options" aria-label="Options">
               <MoreHorizontalIcon className="size-4" />

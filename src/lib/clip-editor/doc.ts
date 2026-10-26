@@ -454,6 +454,39 @@ const CANVAS_BY_ASPECT: Record<AspectRatio, { width: number; height: number }> =
     "1:1": { width: 1080, height: 1080 },
   };
 
+/** The preset a canvas matches by ratio, or null for a custom size. */
+export function aspectOfCanvas(canvas: { width: number; height: number }): AspectRatio | null {
+  for (const [aspect, size] of Object.entries(CANVAS_BY_ASPECT) as [AspectRatio, { width: number; height: number }][]) {
+    if (canvas.width * size.height === canvas.height * size.width) return aspect;
+  }
+  return null;
+}
+
+/**
+ * Re-aspect a document in place (portrait ⇄ landscape). The cut, video
+ * placement and layer positions are canvas percentages, so they carry over
+ * as-is. Text sizes (% of canvas height) and image widths (% of canvas
+ * width) are rescaled so each keeps its on-screen size instead of halving
+ * or doubling with the canvas. Layout is the editor's to tidy afterwards.
+ */
+export function setDocAspect(doc: ClipEditDoc, aspect: AspectRatio): ClipEditDoc {
+  const { width, height } = CANVAS_BY_ASPECT[aspect];
+  if (doc.canvas.width === width && doc.canvas.height === height) return doc;
+  const hScale = doc.canvas.height / height;
+  const wScale = doc.canvas.width / width;
+  const scale = (v: number, by: number, min: number, max: number) =>
+    Math.min(max, Math.max(min, Math.round(v * by * 100) / 100));
+  const layers = doc.layers.map((l): Layer => {
+    if (l.type === "image") return { ...l, widthPct: scale(l.widthPct, wScale, 2, 100) };
+    const style = { ...l.style, sizePct: scale(l.style.sizePct, hScale, 0.5, 20) };
+    if (l.type === "text") {
+      return { ...l, style, fitHeightPct: l.fitHeightPct === null ? null : scale(l.fitHeightPct, hScale, 2, 100) };
+    }
+    return { ...l, style };
+  });
+  return { ...doc, canvas: { ...doc.canvas, width, height }, layers };
+}
+
 /** An uploaded clip's words share times with the source's, so their
  *  corrections are keyed under the clip's id. */
 export function wordEditKey(startSec: number, mediaId?: string): string {
