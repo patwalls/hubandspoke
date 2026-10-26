@@ -17,6 +17,7 @@ import {
 } from "@/lib/services/content-revisions";
 import {
   generateTrackedCta,
+  NoCtaOfferError,
   TRACKED_CTA_VERSION,
 } from "./tracked-cta";
 
@@ -52,6 +53,7 @@ export type RegenerateCtaSkipReason =
   | "item_not_found"
   | "no_cta_field"
   | "no_current_draft"
+  | "no_cta_offer"
   | "unsupported_post_type";
 
 export interface RegenerateCtaResult {
@@ -147,14 +149,21 @@ export async function regenerateCtaForItem(
       ? captionRaw
       : null;
 
-  const tracked = await generateTrackedCta({
-    productionItemId,
-    channel,
-    utmCampaign: item.utmCampaign ?? null,
-    postBody,
-    pillarTitle,
-    formatInstructions,
-  });
+  let tracked;
+  try {
+    tracked = await generateTrackedCta({
+      productionItemId,
+      channel,
+      utmCampaign: item.utmCampaign ?? null,
+      postBody,
+      pillarTitle,
+      formatInstructions,
+    });
+  } catch (err) {
+    // The brand has no CTA offer set up for this post — nothing to retry.
+    if (err instanceof NoCtaOfferError) return { status: "skipped", reason: "no_cta_offer" };
+    throw err;
+  }
   const newCta = tracked.cta;
 
   // Clone-on-write: demote current, insert v+1 with the updated cta.
