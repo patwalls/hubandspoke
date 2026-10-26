@@ -97,21 +97,24 @@ export function isSibling(row: SourceLinks, of: SourceLinks | null): boolean {
  * (the other cross-posts of the same post, the other clips of the same video)
  * jump the line, because a curator publishing five cross-posts went back to
  * the production list to find each next one. `sameSource` says the next one
- * is a sibling.
+ * is a sibling, and `siblings` lists every one still waiting, so the card can
+ * name each by platform (they all share the post's title).
  */
 export function upNext<R extends MyWorkRow & SourceLinks>(
   split: MyWorkSplit<R>,
   currentId: string | null,
   siblingsOf: SourceLinks | null = null,
-): { next: R | null; remaining: number; currentWaiting: boolean; sameSource: boolean } {
+): { next: R | null; remaining: number; currentWaiting: boolean; sameSource: boolean; siblings: R[] } {
   const all = [...split.toReview, ...[...split.yourTurn].reverse()];
   const queue = all.filter((r) => r.id !== currentId);
-  const sibling = queue.find((r) => isSibling(r, siblingsOf)) ?? null;
+  const siblings = queue.filter((r) => isSibling(r, siblingsOf));
+  const sibling = siblings[0] ?? null;
   const next = sibling ?? queue[0] ?? null;
   return {
     next,
     remaining: queue.length,
     currentWaiting: currentId !== null && queue.length < all.length,
     sameSource: sibling !== null,
+    siblings,
   };
 }

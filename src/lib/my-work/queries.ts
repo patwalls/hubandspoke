@@ -15,6 +15,7 @@ export const myWorkColumns = {
   status: productionItems.status,
   format: productionItems.format,
   platform: productionItems.platform,
+  postType: productionItems.postType,
   publishedDate: productionItems.publishedDate,
   thumbnail: productionItems.thumbnail,
   editorUserId: productionItems.editorUserId,
@@ -30,6 +31,7 @@ export type MyWorkItem = {
   status: string | null;
   format: string | null;
   platform: string[] | null;
+  postType: string | null;
   publishedDate: string | null;
   thumbnail: string | null;
   editorUserId: string | null;

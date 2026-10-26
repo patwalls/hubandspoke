@@ -83,7 +83,7 @@ describe("upNext", () => {
 
   it("is empty when the post you're on was the only one waiting", () => {
     const one = { toReview: [], yourTurn: [row("only", "Assigned")], waitingOnOthers: [] };
-    expect(upNext(one, "only")).toEqual({ next: null, remaining: 0, currentWaiting: true, sameSource: false });
+    expect(upNext(one, "only")).toEqual({ next: null, remaining: 0, currentWaiting: true, sameSource: false, siblings: [] });
   });
 
   it("says whether the post you're on is still waiting on you", () => {
@@ -110,8 +110,11 @@ describe("upNext", () => {
     // Clips of the same video count too.
     const clips = { toReview: [], yourTurn: [{ ...row("c2", "Assigned"), pillarContentItemId: "vid" }, row("t", "Assigned")], waitingOnOthers: [] };
     expect(upNext(clips, "c1", { pillarContentItemId: "vid" })).toMatchObject({ next: { id: "c2" }, sameSource: true });
+    // Every cross-post of the same post still waiting, in the order offered.
+    expect(after.siblings.map((r) => r.id)).toEqual(["xp-a", "xp-b"]);
+    expect(upNext(mixed, "xp-a", { repostedFromItemId: "src" }).siblings.map((r) => r.id)).toEqual(["xp-b"]);
     // No links on the post you're on (or no sibling waiting): the usual order.
     expect(upNext(mixed, "xp-a", { repostedFromItemId: null, pillarContentItemId: null })).toMatchObject({ next: { id: "rv-old" }, sameSource: false });
-    expect(upNext(mixed, "xp-a", { repostedFromItemId: "nope" })).toMatchObject({ next: { id: "rv-old" }, sameSource: false });
+    expect(upNext(mixed, "xp-a", { repostedFromItemId: "nope" })).toMatchObject({ next: { id: "rv-old" }, sameSource: false, siblings: [] });
   });
 });
