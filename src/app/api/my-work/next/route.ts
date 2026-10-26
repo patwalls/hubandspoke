@@ -1,10 +1,13 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { requireSession } from "@/lib/auth-guards";
-import { getMyWork } from "@/lib/my-work/queries";
+import { getMyWork, type MyWorkItem } from "@/lib/my-work/queries";
 import { upNext } from "@/lib/my-work/split";
 import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+
+// A post goes out to ~6 platforms; more than this and the card links the rest via the first.
+const MAX_SIBLINGS = 8;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -16,7 +19,8 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * waiting besides it, and whether the current post is still waiting on you
  * (when that flips, the page offers the next one). Siblings of the current
  * post (same post cross-posted, same video clipped) come first, and
- * `sameSource` says so. Fetched when the page's status or editor changes,
+ * `sameSource` says so; `siblings` lists all of them still waiting (with
+ * their post type, since cross-posts share one title). Fetched when the page's status or editor changes,
  * never on a timer.
  */
 export async function GET(req: NextRequest) {
@@ -40,11 +44,19 @@ export async function GET(req: NextRequest) {
           .then((rows) => rows[0] ?? null)
       : null,
   ]);
-  const { next, remaining, currentWaiting, sameSource } = upNext(split, current, links);
+  const { next, remaining, currentWaiting, sameSource, siblings } = upNext(split, current, links);
+  const brief = (r: MyWorkItem) => ({
+    id: r.id,
+    title: r.title,
+    brand: r.brand,
+    status: r.status,
+    postType: r.postType,
+  });
   return NextResponse.json({
-    next: next && { id: next.id, title: next.title, brand: next.brand, status: next.status },
+    next: next && brief(next),
     remaining,
     currentWaiting,
     sameSource,
+    siblings: siblings.slice(0, MAX_SIBLINGS).map(brief),
   });
 }

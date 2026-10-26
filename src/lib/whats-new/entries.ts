@@ -29,6 +29,16 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-10-26-next-card-platforms",
+    shippedAt: "2026-10-26T14:30:00Z",
+    kind: "feature",
+    title: "After you publish, pick the next platform right from the card",
+    body:
+      "Cross-posts of one post all share its title, so the card that pops up after Publish now lists what's left by platform " +
+      "(Threads, X, Facebook…). Click the one you're posting next. Up next on the post's page names the platform too.",
+    screen: "/[brand]/content/[id]",
+  },
+  {
     id: "2026-10-26-my-work-waiting",
     shippedAt: "2026-10-26T07:55:00Z",
     kind: "feature",

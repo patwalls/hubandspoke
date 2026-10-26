@@ -4,15 +4,28 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowRightIcon, CheckIcon, XIcon } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
+import { PlatformIcon } from "@/components/ui/platform-icon";
+import { postTypeDisplay } from "@/lib/platforms";
+import { cn } from "@/lib/utils";
 import { trackUsage } from "@/lib/usage/track";
 
+interface NextPost {
+  id: string;
+  title: string | null;
+  brand: string;
+  status: string | null;
+  postType?: string | null;
+}
+
 interface UpNextData {
-  next: { id: string; title: string | null; brand: string; status: string | null } | null;
+  next: NextPost | null;
   remaining: number;
   /** Is the post you're on still waiting on you? */
   currentWaiting: boolean;
   /** `next` was made from the same post / video as the one you're on. */
   sameSource?: boolean;
+  /** Every sibling still waiting on you, `next` first. */
+  siblings?: NextPost[];
 }
 
 /**
@@ -26,7 +39,10 @@ interface UpNextData {
  * handed it on), a card offers the next one: reviewers kept going back to the
  * production list after every approval and never noticed the small link.
  * After a Publish the card says so, and offers the same post's next
- * cross-post (or the same video's next clip) first.
+ * cross-post (or the same video's next clip) first. Cross-posts of one post
+ * share its title, so the card names each by platform and lists every one
+ * still waiting — the curator went back to the production list to pick the
+ * next platform even with the card up, because it only showed the title.
  */
 export function UpNext({ itemId, status, editorUserId }: { itemId: string; status: string; editorUserId: string }) {
   const [data, setData] = useState<UpNextData | null>(null);
@@ -87,7 +103,11 @@ function NextCard({
   onClose: () => void;
 }) {
   const { next, remaining, sameSource } = data;
+  const siblings = sameSource ? (data.siblings ?? []) : [];
   const done = published ? "Published." : "Sent on.";
+  // Two or more siblings with a platform each: list them all, so you pick
+  // the platform instead of going back to the list to find it.
+  const byPlatform = siblings.length > 1 && siblings.every((r) => postTypeDisplay(r.postType).label);
   return (
     // bottom-24: above the toast stack (bottom-right), so the "Published"
     // toast doesn't cover Open next.
@@ -99,13 +119,23 @@ function NextCard({
       <div className="flex items-start gap-2">
         <CheckIcon className="mt-0.5 size-4 shrink-0 text-emerald-600" />
         <div className="min-w-0 flex-1 text-sm">
-          {next ? (
+          {next && byPlatform ? (
+            <>
+              <p className="text-muted-foreground">
+                {done} Still to post from this post ({siblings.length}):
+              </p>
+              <p className="mt-0.5 truncate font-medium">{next.title || "Untitled"}</p>
+            </>
+          ) : next ? (
             <>
               <p className="text-muted-foreground">
                 {done} {sameSource ? "Next from the same post" : "Next waiting on you"}
                 {remaining > 1 ? ` (${remaining} left)` : ""}:
               </p>
-              <p className="mt-0.5 truncate font-medium">{next.title || "Untitled"}</p>
+              <p className="mt-0.5 flex min-w-0 items-center gap-1 font-medium">
+                <PostTypeTag postType={next.postType} />
+                <span className="truncate">{next.title || "Untitled"}</span>
+              </p>
             </>
           ) : (
             <p className="font-medium">{done} That&apos;s everything waiting on you.</p>
@@ -120,7 +150,29 @@ function NextCard({
           <XIcon className="size-4" />
         </button>
       </div>
-      {next && (
+      {next && byPlatform && (
+        <div className="mt-2 flex flex-wrap gap-1.5" data-testid="up-next-siblings">
+          {siblings.map((r, i) => (
+            <Link
+              key={r.id}
+              href={`/${r.brand}/content/${r.id}`}
+              onClick={() =>
+                trackUsage(i === 0 ? "my-work:next-card:open" : "my-work:next-card:sibling", r.brand)
+              }
+              title={r.status ?? undefined}
+              className={cn(
+                buttonVariants({ size: "sm", variant: i === 0 ? "default" : "outline" }),
+                "gap-1.5",
+              )}
+            >
+              <PlatformIcon platform={postTypeDisplay(r.postType).platform} size={13} inheritColor={i === 0} />
+              {postTypeDisplay(r.postType).label}
+              {i === 0 && <ArrowRightIcon className="size-3.5" />}
+            </Link>
+          ))}
+        </div>
+      )}
+      {next && !byPlatform && (
         <div className="mt-2 flex justify-end">
           <Link
             href={`/${next.brand}/content/${next.id}`}
@@ -147,8 +199,21 @@ function UpNextLink({ data }: { data: UpNextData | null }) {
       className="inline-flex h-7 max-w-[22rem] items-center gap-1 rounded-md border-l border-border pl-3 pr-2 text-xs text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors"
     >
       <span className="shrink-0">Up next{remaining > 1 ? ` (${remaining})` : ""}:</span>
+      <PostTypeTag postType={next.postType} />
       <span className="truncate font-medium text-foreground">{next.title || "Untitled"}</span>
       <ArrowRightIcon className="size-3 shrink-0" />
     </Link>
+  );
+}
+
+/** "TikTok ·" before a title, when the post type is known. */
+function PostTypeTag({ postType }: { postType?: string | null }) {
+  const { platform, label } = postTypeDisplay(postType);
+  if (!label) return null;
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1 text-muted-foreground">
+      <PlatformIcon platform={platform} size={12} />
+      {label} ·
+    </span>
   );
 }

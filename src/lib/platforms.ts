@@ -127,3 +127,22 @@ export function toPlatform(raw: string | null | undefined): Platform {
   if (v in PLATFORM_META) return v as Platform;
   return "other";
 }
+
+/** Which platform a post type belongs to, and how to name it on its own:
+ *  "TikTok", "LinkedIn", "YouTube Community", "Instagram Post". Cross-posts
+ *  of one post share its title, so this is what tells them apart. Unknown or
+ *  missing post types come back as `other` with a null label. */
+export function postTypeDisplay(postType: string | null | undefined): {
+  platform: Platform;
+  label: string | null;
+} {
+  const platform = (Object.keys(PLATFORM_META) as Platform[]).find((p) =>
+    (PLATFORM_META[p].postTypes as string[]).includes(postType ?? ""),
+  );
+  if (!platform || !postType) return { platform: "other", label: null };
+  const meta = PLATFORM_META[platform];
+  const label = platformHasMultiplePostTypes(platform)
+    ? `${meta.label} ${POST_TYPE_SHORT_LABEL[postType as PostType]}`
+    : meta.label;
+  return { platform, label };
+}
