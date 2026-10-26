@@ -1,0 +1,1 @@
+ALTER TABLE "newsletter_drafts" ADD COLUMN "beehiiv_pushed_text" text;

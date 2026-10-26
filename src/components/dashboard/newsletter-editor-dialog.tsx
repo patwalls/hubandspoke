@@ -404,6 +404,12 @@ function Workspace({
     await post(`/api/newsletter-drafts/${draft.id}/beehiiv`, {}, "beehiiv");
   }
 
+  /** "Update in beehiiv": the post's body replaced with the email as it is now; `force` after a "edited by hand there" refusal. */
+  async function updateBeehiiv(force = false) {
+    if (dirty && !(await save())) return;
+    await post(`/api/newsletter-drafts/${draft.id}/beehiiv/update`, { force }, "beehiiv");
+  }
+
   async function pushToHubspot() {
     if (dirty && !(await save())) return;
     await post(`/api/newsletter-drafts/${draft.id}/hubspot`, {}, "hubspot");
@@ -539,7 +545,7 @@ function Workspace({
         </span>
         <span className="truncate text-xs text-muted-foreground">
           {draft.sendDate ? `Sends ${fmtDate(draft.sendDate)}` : "No send date"}
-          {pushUrl ? ` · draft in ${tool}` : draft.status === "ready" ? " · draft" : ""}
+          {pushUrl ? ` · draft in ${tool}${draft.beehiivStatus === "updated" ? " (updated)" : ""}` : draft.status === "ready" ? " · draft" : ""}
           {words > 0 && ` · ${words} words · ~${Math.max(1, Math.round(words / 200))} min read`}
         </span>
       </div>
@@ -625,6 +631,12 @@ function Workspace({
                       <DropdownMenuItem onClick={() => window.open(beehiivPreview, "_blank", "noreferrer")} className="cursor-pointer gap-2">
                         <Eye className="size-4" />
                         Preview in beehiiv
+                      </DropdownMenuItem>
+                    )}
+                    {draft.template?.beehiiv && (
+                      <DropdownMenuItem onClick={() => updateBeehiiv(false)} disabled={busyAction !== null || pushPending} className="cursor-pointer gap-2">
+                        <RefreshCw className="size-4" />
+                        Update in beehiiv
                       </DropdownMenuItem>
                     )}
                   </>
@@ -1129,11 +1141,28 @@ function Workspace({
           ) : (
             "the post's preview"
           )}
-          ) shows the design. Change the subject, preview text or send settings there. The words and design are edited here.
+          ) shows the design. Change the subject, preview text or send settings there. The words and design are edited here: fix them, then{" "}
+          <button
+            type="button"
+            onClick={() => updateBeehiiv(false)}
+            disabled={busyAction !== null || pushPending}
+            className="inline-flex items-center gap-1 rounded-md border bg-background px-1.5 py-0.5 font-medium text-foreground hover:bg-muted disabled:opacity-50"
+            title="Replaces the beehiiv draft's body with this email as it is now. The subject, preview text and send settings you set in beehiiv stay. Refuses a post that was sent, scheduled or edited by hand there."
+          >
+            {pushBusy ? <Loader2 className="size-3 animate-spin" /> : <RefreshCw className="size-3" />} Update in beehiiv
+          </button>{" "}
+          replaces the post&apos;s body.
         </p>
       )}
       {draft.beehiivStatus === "failed" && draft.beehiivError && (
-        <p className="mx-5 mt-3 rounded-md bg-red-50 p-2 text-xs text-red-800 dark:bg-red-900/30 dark:text-red-200">beehiiv push: {draft.beehiivError}</p>
+        <p className="mx-5 mt-3 flex flex-wrap items-center gap-2 rounded-md bg-red-50 p-2 text-xs text-red-800 dark:bg-red-900/30 dark:text-red-200">
+          <span>beehiiv: {draft.beehiivError}</span>
+          {draft.beehiivPostUrl && draft.beehiivError.includes("edited by hand") && (
+            <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={() => updateBeehiiv(true)} disabled={busyAction !== null || pushPending}>
+              Replace anyway
+            </Button>
+          )}
+        </p>
       )}
       {draft.error && draft.status === "ready" && (
         <p className="mx-5 mt-3 rounded-md bg-red-50 p-2 text-xs text-red-800 dark:bg-red-900/30 dark:text-red-200">{draft.error}</p>

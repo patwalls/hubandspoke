@@ -12,6 +12,10 @@
 // Env:
 //   BEEHIIV_API_KEY   workspace key (Heroku config only; never in code/chat)
 
+import { beehiivEditUrl } from "./beehiiv-links";
+import { htmlToText } from "./html-text";
+export { beehiivEditUrl, beehiivPreviewUrl } from "./beehiiv-links";
+
 const BASE_URL = "https://api.beehiiv.com/v2";
 
 /** The Kevin / Saj templates our drafts copy the look of (read-only references; we never post into them). */
@@ -102,6 +106,12 @@ const ALLOWED_CALLS: ReadonlyArray<{ method: string; path: RegExp; query: Record
     why: "create ONE unsent draft post (the request body is checked by assertSafeDraftCreate: status must be draft, no schedule)",
   },
   {
+    method: "PATCH",
+    path: new RegExp(`^/publications/${PUB}/posts/post_${UUID}$`),
+    query: {},
+    why: "replace the body (and title / subject) of ONE draft post Hub & Spoke created (assertSafeDraftUpdate: content only — never status, schedule, audience or authors; updateFuturepediaDraft checks the post is still a draft first)",
+  },
+  {
     method: "GET",
     path: new RegExp(`^/publications/${PUB}/segments/${SKILL_LEAP_MEMBERS_SEGMENT_ID.replace(/-/g, "\\-")}$`),
     query: {},
@@ -126,9 +136,10 @@ export function assertAllowedBeehiivCall(method: string, pathWithQuery: string):
   if (!ok) throw new BeehiivError(403, `Blocked beehiiv call ${method} ${pathWithQuery}: not on the allowlist`);
 }
 
-async function beehiivFetch<T>(method: "GET" | "POST", pathWithQuery: string, body?: unknown): Promise<T> {
+async function beehiivFetch<T>(method: "GET" | "POST" | "PATCH", pathWithQuery: string, body?: unknown): Promise<T> {
   assertAllowedBeehiivCall(method, pathWithQuery);
   if (method === "POST") assertSafeDraftCreate(body);
+  if (method === "PATCH") assertSafeDraftUpdate(body);
   for (let attempt = 0; ; attempt++) {
     const res = await fetch(`${BASE_URL}${pathWithQuery}`, {
       method,
@@ -137,7 +148,7 @@ async function beehiivFetch<T>(method: "GET" | "POST", pathWithQuery: string, bo
       signal: AbortSignal.timeout(30_000),
       cache: "no-store",
     });
-    // Only reads are retried: a create that timed out may have succeeded, and a retry would make a second draft.
+    // Only reads are retried: a create that timed out may have succeeded, and a retry would make a second draft (an update is idempotent but is not retried either: it runs once per click).
     if (res.status === 429 && method === "GET" && attempt < 2) {
       const wait = Number(res.headers.get("retry-after")) || 2;
       await new Promise((r) => setTimeout(r, wait * 1000));
@@ -237,6 +248,39 @@ export function assertSafeDraftCreate(body: unknown): void {
   if (r.web && !okKeys(r.web, ["tier_ids"])) no("recipients.web has unexpected fields");
 }
 
+/** The fields an update may carry: the content and the words around it. Nothing that sends, schedules, retargets or re-attributes the post. */
+const UPDATE_FIELDS = new Set(["blocks", "content_merge_strategy", "title", "subtitle", "email_settings", "thumbnail_image_url"]);
+
+/**
+ * Throws unless `body` only replaces a draft's content / title / subject:
+ * `blocks` (checked like a create's) with `content_merge_strategy` "replace"
+ * (the default; anything else would leave the old copy in the post), and
+ * nothing else beyond title, subtitle, email subject / preview and the
+ * thumbnail. `status`, `scheduled_at`, `recipients`, authors, `body_content`
+ * and every other field are refused. Exported for tests.
+ */
+export function assertSafeDraftUpdate(body: unknown): void {
+  const no = (why: string): never => {
+    throw new BeehiivError(403, `Blocked beehiiv update: ${why}`);
+  };
+  if (!body || typeof body !== "object" || Array.isArray(body)) return no("body must be an object");
+  const b = body as Record<string, unknown>;
+  const keys = Object.keys(b);
+  if (!keys.length) no("nothing to update");
+  const extra = keys.filter((k) => !UPDATE_FIELDS.has(k));
+  if (extra.length) no(`fields not allowed: ${extra.join(", ")}`);
+  if (b.blocks !== undefined) assertSafeBlocks(b.blocks, no);
+  if (b.content_merge_strategy !== undefined && b.content_merge_strategy !== "replace") no('content_merge_strategy must be "replace"');
+  if (b.content_merge_strategy !== undefined && b.blocks === undefined) no("content_merge_strategy needs blocks");
+  if (b.title !== undefined && (typeof b.title !== "string" || !b.title.trim())) no("title can't be blank");
+  const es = b.email_settings;
+  if (es !== undefined) {
+    if (!es || typeof es !== "object" || Array.isArray(es)) no("email_settings must be an object");
+    const bad = Object.keys(es as object).filter((k) => !EMAIL_SETTINGS.has(k));
+    if (bad.length) no(`email_settings fields not allowed: ${bad.join(", ")}`);
+  }
+}
+
 function qs(params: Record<string, string | number | string[] | undefined>): string {
   const sp = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
@@ -312,8 +356,6 @@ export async function getSkillLeapMembersSegment(): Promise<{ id: string; name: 
   return r.data;
 }
 
-import { beehiivEditUrl } from "./beehiiv-links";
-export { beehiivEditUrl, beehiivPreviewUrl } from "./beehiiv-links";
 
 /**
  * Create ONE unsent draft post, then read it back and confirm beehiiv saved
@@ -343,4 +385,49 @@ export async function createFuturepediaDraft(
     throw new BeehiivError(500, `beehiiv post ${id} reads back as "${status ?? "no status yet"}", not draft — check it in beehiiv (${post.editUrl})`);
   }
   return post;
+}
+
+/** The update was refused because beehiiv's copy no longer carries the words Hub & Spoke last sent (someone edited the post there). */
+export class BeehiivHandEditedError extends BeehiivError {
+  constructor(editUrl: string) {
+    super(409, `beehiiv's copy was edited by hand since the last push — Update would replace those edits (${editUrl})`);
+  }
+}
+/** The marker the editor looks for to offer "Replace anyway". */
+export const HAND_EDITED_MARK = "edited by hand";
+
+/**
+ * Whether the post in beehiiv still carries the words Hub & Spoke last sent
+ * (`pushedText`, htmlToText of the pushed fragment): beehiiv wraps the block
+ * in its own header / footer and rewrites link URLs, so the check is "our
+ * words are still in there", not "the HTML is identical". No rendered email
+ * yet (a post still processing) can't be judged, so it passes. Pure; exported for tests.
+ */
+export function handEditedInBeehiiv(pushedText: string | null | undefined, currentEmailHtml: string | null | undefined): boolean {
+  const expect = pushedText?.trim();
+  if (!expect || !currentEmailHtml) return false;
+  return !htmlToText(currentEmailHtml).includes(expect);
+}
+
+/**
+ * Replace the content of ONE draft post Hub & Spoke created (the "Update in
+ * beehiiv" button): refuses a post that is no longer a draft (sent or
+ * scheduled there), and — unless `force` — one whose copy was edited by hand
+ * in beehiiv since the last push (BeehiivHandEditedError, so the editor can
+ * ask). Reads the post back afterwards and requires it to still be a draft.
+ * Never changes status, schedule, audience or author (assertSafeDraftUpdate).
+ */
+export async function updateFuturepediaDraft(
+  postId: string,
+  body: Record<string, unknown>,
+  opts: { pushedText?: string | null; force?: boolean } = {},
+): Promise<{ id: string; editUrl: string }> {
+  const editUrl = beehiivEditUrl(postId);
+  const current = await getFuturepediaPost(postId, ["free_email_content"]);
+  if (current.status !== "draft") throw new BeehiivError(409, `beehiiv post is "${current.status}", not a draft any more — it can't be updated from here (${editUrl})`);
+  if (!opts.force && handEditedInBeehiiv(opts.pushedText, current.content?.free?.email)) throw new BeehiivHandEditedError(editUrl);
+  await beehiivFetch<{ data: BeehiivPost }>("PATCH", `/publications/${FUTUREPEDIA_PUBLICATION_ID}/posts/${postId}`, body);
+  const after = await getFuturepediaPost(postId);
+  if (after.status !== "draft") throw new BeehiivError(500, `beehiiv post ${postId} reads back as "${after.status}" after the update — check it in beehiiv (${editUrl})`);
+  return { id: postId, editUrl };
 }

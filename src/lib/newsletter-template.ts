@@ -543,19 +543,20 @@ export const DEFAULT_TEMPLATES: Record<string, NewsletterTemplate> = {
 
 /**
  * The Futurepedia emails' look, read off the HTML of the sent How-To issues
- * (Oct 2026): page #F5F8FB, Open Sans 16px body in #222, Poppins titles at
- * regular weight in navy #273653, links in beehiiv's light blue #49adff (the
- * card labels keep Futurepedia blue #00AEEF through the layout), navy
+ * (Oct 2026) and tuned 2026-10-26: page #F5F8FB, Open Sans 16px body in
+ * #222, Poppins titles at medium weight in navy #273653, links in a deeper
+ * Futurepedia blue (the card labels keep #00AEEF through the layout), navy
  * buttons. Applied to a beehiiv template that hasn't been redesigned in the
  * builder yet (no `layout`).
  */
 export const FUTUREPEDIA_LOOK: Partial<NewsletterStyle> = {
   fontFamily: "'Open Sans', 'Segoe UI', Helvetica, Arial, sans-serif",
   headingFont: "'Poppins', 'Segoe UI', Helvetica, Arial, sans-serif",
-  headingWeight: 400,
+  // Poppins medium: the sent issues ran titles at regular weight, which reads thin next to 16px Open Sans; 500 keeps them light but present.
+  headingWeight: 500,
   textColor: "#222222",
-  headingColor: "#273653",
-  linkColor: "#49adff",
+  // Links a shade deeper than beehiiv's #49adff (2.4:1 on white, below AA); still the Futurepedia blue family, readable on a phone in sunlight.
+  linkColor: "#0B78BF",
   buttonColor: "#273653",
   pageBackground: "#F5F8FB",
   contentBackground: "#F5F8FB",

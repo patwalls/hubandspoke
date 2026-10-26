@@ -40,6 +40,7 @@ import {
   type HubspotNewsletterCreateDraftPayload,
 } from "./hubspot-newsletter-create-draft";
 import { beehiivNewsletterCreateDraftTask, type BeehiivNewsletterCreateDraftPayload } from "./beehiiv-newsletter-create-draft";
+import { beehiivNewsletterUpdateDraftTask, type BeehiivNewsletterUpdateDraftPayload } from "./beehiiv-newsletter-update-draft";
 import {
   diarizeTranscriptTask,
   type DiarizeTranscriptPayload,
@@ -159,6 +160,7 @@ export interface TaskPayloads {
   "newsletter-review": NewsletterReviewPayload;
   "hubspot-newsletter-create-draft": HubspotNewsletterCreateDraftPayload;
   "beehiiv-newsletter-create-draft": BeehiivNewsletterCreateDraftPayload;
+  "beehiiv-newsletter-update-draft": BeehiivNewsletterUpdateDraftPayload;
   "diarize-transcript": DiarizeTranscriptPayload;
   "descript-derivative-create": DescriptDerivativeCreatePayload;
   "transcribe-whisper": TranscribeWhisperPayload;
@@ -235,6 +237,7 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "newsletter-review": newsletterReviewTask,
   "hubspot-newsletter-create-draft": hubspotNewsletterCreateDraftTask,
   "beehiiv-newsletter-create-draft": beehiivNewsletterCreateDraftTask,
+  "beehiiv-newsletter-update-draft": beehiivNewsletterUpdateDraftTask,
   "diarize-transcript": diarizeTranscriptTask,
   "descript-derivative-create": descriptDerivativeCreateTask,
   "transcribe-whisper": transcribeWhisperTask,

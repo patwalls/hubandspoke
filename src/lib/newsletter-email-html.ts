@@ -24,10 +24,25 @@ import { docToMarkdown, type DocNode } from "@/lib/newsletter-rich-doc";
 
 /** The email's width in a desktop client; phones get 100%. */
 export const EMAIL_WIDTH = 600;
-/** Inner padding on every side (the masthead and images are EMAIL_WIDTH − 2 × this wide). */
+/** Inner padding on every side of a framed email (the masthead and images are EMAIL_WIDTH − 2 × this wide). */
 const PAD = 24;
+/**
+ * The gutter of an email that is cards on a page (its content color is the
+ * page's — Futurepedia): tighter, because every card adds its own padding and
+ * a phone has ~375px to give; the page color still shows around the cards.
+ */
+const CARD_PAD_X = 12;
 export const CONTENT_WIDTH = EMAIL_WIDTH - 2 * PAD;
 const RULE = "#e5e7eb";
+
+/** Cards-on-a-page mode: the email is the page's own color, so there is no frame and the gutter is tight. */
+export function cardsOnPage(st: NewsletterStyle): boolean {
+  return st.contentBackground.toLowerCase() === st.pageBackground.toLowerCase();
+}
+/** The width the masthead and full-width images render at on desktop. */
+export function contentWidth(st: NewsletterStyle): number {
+  return EMAIL_WIDTH - 2 * (cardsOnPage(st) ? CARD_PAD_X : PAD);
+}
 
 export function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -95,7 +110,7 @@ const CARD_SHADOW = "0 2px 10px rgba(39,54,83,0.07)";
 
 /** The email's frame: a faint border, unless the email is the page's own color (cards on a page). */
 export function frameBorder(st: NewsletterStyle): string {
-  return st.contentBackground.toLowerCase() === st.pageBackground.toLowerCase() ? "" : "border:1px solid #eaf0f6;";
+  return cardsOnPage(st) ? "" : "border:1px solid #eaf0f6;";
 }
 
 function tokens(st: NewsletterStyle) {
@@ -104,41 +119,48 @@ function tokens(st: NewsletterStyle) {
   const HF = `font-family:${st.headingFont ?? st.fontFamily};`;
   const text = `${F}font-size:16px;line-height:1.6;color:${st.textColor};`;
   const button = st.buttonColor ?? st.linkColor;
+  const cw = contentWidth(st);
   return {
     F,
     HF,
     text,
     button,
+    /** Desktop width of a full-width image. */
+    cw,
     p: `margin:0 0 16px 0;${text}`,
-    h: (level: 1 | 2 | 3) => `margin:${level === 1 ? 24 : 20}px 0 ${level === 3 ? 8 : 10}px 0;${HF}font-size:${level === 1 ? 26 : level === 2 ? (st.headingWeight < 700 ? 24 : 21) : 18}px;font-weight:${level === 3 ? 700 : st.headingWeight};line-height:1.3;color:${st.headingColor};`,
+    h: (level: 1 | 2 | 3) => `margin:${level === 1 ? 24 : level === 2 ? 22 : 24}px 0 ${level === 3 ? 10 : 12}px 0;${HF}font-size:${level === 1 ? 26 : level === 2 ? (st.headingWeight < 700 ? 24 : 21) : 18}px;font-weight:${level === 3 ? 600 : st.headingWeight};line-height:1.3;${level < 3 ? "letter-spacing:-0.01em;" : ""}color:${st.headingColor};`,
+    /** A numbered step's title line ("1. Write a short script"): a small heading, so the steps read as a sequence rather than bold paragraphs. */
+    step: `margin:22px 0 8px 0;${HF}font-size:17px;font-weight:600;line-height:1.35;color:${st.headingColor};`,
     // list-style spelled out: some clients (and the app's own CSS reset) strip bullets otherwise.
     ul: (ordered: boolean) => `margin:0 0 16px 0;padding:0 0 0 24px;list-style-type:${ordered ? "decimal" : "disc"};${text}`,
     li: `margin:0 0 8px 0;${text}`,
     a: `color:${st.linkColor};text-decoration:underline;`,
-    img: `display:block;width:100%;max-width:${CONTENT_WIDTH}px;height:auto;border:0;border-radius:10px;margin:4px 0 16px 0;`,
+    img: `display:block;width:100%;max-width:${cw}px;height:auto;border:0;border-radius:12px;margin:6px 0 18px 0;`,
     blockquote: `margin:0 0 16px 0;padding:4px 0 4px 16px;border-left:3px solid ${RULE};${F}font-size:16px;line-height:1.6;color:#4b5563;font-style:italic;`,
     code: `font-family:Menlo,Consolas,monospace;font-size:14px;background:#f3f4f6;padding:2px 5px;border-radius:4px;`,
     pre: `margin:0 0 16px 0;padding:14px 16px;background:#f3f4f6;border-radius:8px;font-family:Menlo,Consolas,monospace;font-size:13px;line-height:1.5;color:${st.textColor};white-space:pre-wrap;`,
     hr: `border:0;border-top:1px solid ${RULE};margin:24px 0;`,
     hint: `margin:0 0 16px 0;${F}font-size:15px;line-height:1.5;color:#9ca3af;font-style:italic;`,
     pill: (color: string) => `background:${color};border-radius:8px;padding:8px 14px;${HF}font-size:19px;font-weight:700;line-height:1.2;color:${st.headingColor};`,
-    plainHeading: (level: 2 | 3, color?: string | null) => `margin:0 0 12px 0;${HF}font-size:${level === 2 ? (st.headingWeight < 700 ? 24 : 22) : 18}px;font-weight:${level === 2 ? st.headingWeight : 700};line-height:1.3;color:${color ?? st.headingColor};`,
-    /** A card's small label ("ChatGPT Work Guide", "Free Resource"). */
-    eyebrow: (color?: string | null) => `margin:0 0 8px 0;${HF}font-size:14px;font-weight:700;line-height:1.3;letter-spacing:0.01em;color:${color ?? st.linkColor};`,
+    plainHeading: (level: 2 | 3, color?: string | null) => `margin:0 0 14px 0;${HF}font-size:${level === 2 ? (st.headingWeight < 700 ? 24 : 22) : 18}px;font-weight:${level === 2 ? st.headingWeight : 600};line-height:1.3;${level === 2 ? "letter-spacing:-0.01em;" : ""}color:${color ?? st.headingColor};`,
+    /** A card's small label ("ChatGPT Work Guide", "Free Resource"): small caps-style, the way a magazine runs a kicker. */
+    eyebrow: (color?: string | null) => `margin:0 0 12px 0;${HF}font-size:12px;font-weight:700;line-height:1.3;letter-spacing:0.08em;text-transform:uppercase;color:${color ?? st.linkColor};`,
     label: (color: string) => `background:${color};border-radius:6px;padding:6px 10px;${F}font-size:13px;font-weight:700;line-height:1.2;color:${st.headingColor};`,
     box: (color: string, border?: string | null) =>
-      border ? `background:${color};border:2px solid ${border};border-radius:6px;padding:22px 24px 8px 24px;box-shadow:${CARD_SHADOW};` : `background:${color};border-radius:12px;padding:20px 22px 6px 22px;`,
-    buttonCell: `background:${button};border-radius:8px;`,
-    buttonLink: `display:inline-block;padding:13px 26px;${HF}font-size:16px;font-weight:700;line-height:1.2;color:#ffffff;text-decoration:none;border-radius:8px;`,
+      border ? `background:${color};border:2px solid ${border};border-radius:12px;padding:22px 20px 8px 20px;box-shadow:${CARD_SHADOW};` : `background:${color};border-radius:12px;padding:20px 22px 6px 22px;`,
+    buttonCell: `background:${button};border-radius:10px;`,
+    buttonLink: `display:inline-block;padding:14px 28px;${HF}font-size:15px;font-weight:600;line-height:1.2;letter-spacing:0.01em;color:#ffffff;text-decoration:none;border-radius:10px;`,
     masthead: `background:${st.mastheadBackground ?? "transparent"};border-radius:12px;text-align:center;padding:0;`,
-    mastheadImg: `display:block;width:100%;max-width:${CONTENT_WIDTH}px;height:auto;border:0;border-radius:12px;margin:0 auto;`,
+    mastheadImg: `display:block;width:100%;max-width:${cw}px;height:auto;border:0;border-radius:12px;margin:0 auto;`,
     body: bodyStyle(st),
   };
 }
 
 /** The email body cell's style (padding, font, color) — as an object, so the canvas can put the same on a React element. */
 export function bodyStyle(st: NewsletterStyle): Record<string, string> {
-  return { padding: `${PAD}px ${PAD}px ${PAD + 4}px ${PAD}px`, fontFamily: st.fontFamily, fontSize: "16px", lineHeight: "1.6", color: st.textColor };
+  const x = cardsOnPage(st) ? CARD_PAD_X : PAD;
+  const y = cardsOnPage(st) ? 20 : PAD;
+  return { padding: `${y}px ${x}px ${y + 4}px ${x}px`, fontFamily: st.fontFamily, fontSize: "16px", lineHeight: "1.6", color: st.textColor };
 }
 
 /** React-style CSS object → inline `style=""` text. */
@@ -169,9 +191,19 @@ interface SectionRenderContext {
   t: ReturnType<typeof tokens>;
   /** A line that is only a link becomes a button. */
   buttons: boolean;
+  /** A line that is only a bold "N. Title" (a numbered step's title, as splitStepTitles lays them out) is drawn as a small heading. */
+  steps: boolean;
   canvas: boolean;
   /** Ordinary images in this section so far (their order is the canvas's handle on them). */
   images: number;
+}
+
+/** The bold "N. Title" a paragraph consists of (a step's title line), else null. Structural: our own Markdown's shape. */
+function soleStepTitle(tokens: Tokens.Paragraph["tokens"]): Tokens.Strong | null {
+  const meaningful = tokens.filter((x) => !(x.type === "text" && !x.text.trim()));
+  if (meaningful.length !== 1 || meaningful[0].type !== "strong") return null;
+  const strong = meaningful[0] as Tokens.Strong;
+  return /^\d{1,2}\.\s+\S/.test(strong.text) ? strong : null;
 }
 
 /** The one link a paragraph consists of (optionally bold-wrapped), else null. */
@@ -210,8 +242,10 @@ function markedFor(ctx: SectionRenderContext): Marked {
         const href = link && safeUrl(link.href);
         if (link && href) {
           const label = explicit ? esc(link.text.replace(BUTTON_PREFIX, "").trim()) : this.parser.parseInline(link.tokens);
-          return `${TABLE("margin:4px auto 20px auto;")}<tr><td align="center" style="${t.buttonCell}"><a href="${esc(href)}" target="_blank" style="${t.buttonLink}">${label}</a></td></tr></table>`;
+          return `${TABLE("margin:6px auto 22px auto;")}<tr><td align="center" style="${t.buttonCell}"><a href="${esc(href)}" target="_blank" style="${t.buttonLink}">${label}</a></td></tr></table>`;
         }
+        const step = ctx.steps ? soleStepTitle(tokens) : null;
+        if (step) return `<p style="${t.step}">${this.parser.parseInline(step.tokens)}</p>`;
         return `<p style="${t.p}">${this.parser.parseInline(tokens)}</p>`;
       },
       list(token) {
@@ -231,16 +265,16 @@ function markedFor(ctx: SectionRenderContext): Marked {
         if (text.startsWith(SHOT)) {
           const [, markKey, label, sec, pending] = text.split("|");
           const url = safeUrl(href);
-          if (!ctx.canvas) return url ? `<img src="${esc(url)}" width="${CONTENT_WIDTH}" alt="${esc(label)}" style="${t.img}">` : "";
+          if (!ctx.canvas) return url ? `<img src="${esc(url)}" width="${t.cw}" alt="${esc(label)}" style="${t.img}">` : "";
           const data = `class="nlc-shot" data-shot="${esc(markKey)}" data-label="${esc(label)}"${sec ? ` data-sec="${esc(sec)}"` : ""}${pending ? ' data-pending="1"' : ""}`;
           return url
-            ? `<img src="${esc(url)}" width="${CONTENT_WIDTH}" alt="${esc(label)}" ${data} style="${t.img}">`
+            ? `<img src="${esc(url)}" width="${t.cw}" alt="${esc(label)}" ${data} style="${t.img}">`
             : `<div ${data} style="margin:4px 0 16px 0;padding:26px 24px;border:2px dashed #c7d2dc;border-radius:10px;background:#f7fafc;text-align:center;${t.F}font-size:13px;line-height:1.5;color:#6b7280;"><strong>${pending ? "Grabbing frame" : "Screenshot"}${sec ? ` @ ${esc(sec)}` : ""}</strong><br>${esc(label)}${pending ? "" : '<br><span style="color:#49adff;">Click to pick a frame, or drop an image here</span>'}</div>`;
         }
         const url = safeUrl(href);
         if (!url) return "";
         const data = ctx.canvas ? ` class="nlc-img" data-img="${ctx.images++}"` : "";
-        return `<img src="${esc(url)}" width="${CONTENT_WIDTH}" alt="${esc(text)}"${data} style="${t.img}">`;
+        return `<img src="${esc(url)}" width="${t.cw}" alt="${esc(text)}"${data} style="${t.img}">`;
       },
     },
   });
@@ -255,9 +289,9 @@ function markedFor(ctx: SectionRenderContext): Marked {
 export function markdownToEmailHtml(
   markdown: string,
   style: NewsletterStyle,
-  opts: { buttons?: boolean; canvas?: boolean; inline?: boolean; personalization?: Personalization } = {},
+  opts: { buttons?: boolean; steps?: boolean; canvas?: boolean; inline?: boolean; personalization?: Personalization } = {},
 ): string {
-  const ctx: SectionRenderContext = { t: tokens(style), buttons: !!opts.buttons, canvas: !!opts.canvas, images: 0 };
+  const ctx: SectionRenderContext = { t: tokens(style), buttons: !!opts.buttons, steps: !!opts.steps, canvas: !!opts.canvas, images: 0 };
   const m = markedFor(ctx);
   const out = opts.inline ? m.parseInline(markdown, { async: false }) : m.parse(markdown, { async: false });
   return applyPersonalization((out as string).trim(), opts.personalization ?? "sample");
@@ -309,7 +343,7 @@ export interface EmailParts {
 /** A tinted box (a layout `callout`), as React style for the canvas. */
 export function boxStyle(color: string, border?: string | null): Record<string, string> {
   return border
-    ? { background: color, border: `2px solid ${border}`, borderRadius: "6px", padding: "22px 24px 8px 24px", marginBottom: "14px", boxShadow: CARD_SHADOW }
+    ? { background: color, border: `2px solid ${border}`, borderRadius: "12px", padding: "22px 20px 8px 20px", marginBottom: "18px", boxShadow: CARD_SHADOW }
     : { background: color, borderRadius: "12px", padding: "20px 22px 6px 22px", marginBottom: "16px" };
 }
 
@@ -320,7 +354,7 @@ function slotPart(args: RenderEmailArgs, sec: NewsletterTemplateSection, t: Retu
   // beehiiv-style templates lay their bullets / step titles out the way the Kevin/Saj emails do.
   const md = raw && args.template.beehiiv ? keepSignoff(layoutSection(raw, sec.bullets)) : raw;
   const buttons = sec.linkButtons || beehiivButtonKeys(args.template).has(sec.key);
-  let content = md ? markdownToEmailHtml(md, st, { buttons, canvas: args.canvas, inline: sec.look === "label", personalization: args.personalization }) : "";
+  let content = md ? markdownToEmailHtml(md, st, { buttons, steps: !!args.template.beehiiv, canvas: args.canvas, inline: sec.look === "label", personalization: args.personalization }) : "";
   if (!content && args.showHints) {
     const sample = (title: string, body: string) =>
       `<div style="margin:4px 0 16px 0;padding:22px 24px;border:2px dashed #c7d2dc;border-radius:10px;background:#f7fafc;text-align:center;${t.F}font-size:13px;line-height:1.5;color:#6b7280;"><strong>${title}</strong><br>${body}</div>`;
@@ -366,7 +400,7 @@ function fixedHtml(node: DocNode, args: RenderEmailArgs, t: ReturnType<typeof to
       const src = safeUrl(String(node.attrs?.src ?? ""));
       if (!src) return "";
       const bg = typeof node.attrs?.background === "string" ? node.attrs.background : null;
-      const img = `<img src="${esc(src)}" width="${CONTENT_WIDTH}" alt="${esc(String(node.attrs?.alt ?? ""))}" style="${t.mastheadImg}">`;
+      const img = `<img src="${esc(src)}" width="${t.cw}" alt="${esc(String(node.attrs?.alt ?? ""))}" style="${t.mastheadImg}">`;
       const link = safeUrl(typeof node.attrs?.href === "string" ? node.attrs.href : null);
       return `${TABLE("margin:0 0 24px 0;", true)}<tr><td style="background:${bg ?? "transparent"};border-radius:12px;text-align:center;padding:0;">${link ? `<a href="${esc(link)}" target="_blank" style="display:block;">${img}</a>` : img}</td></tr></table>`;
     }
@@ -445,7 +479,7 @@ export function pruneForSend(blocks: EmailBlock[], top = true): EmailBlock[] {
 
 function blocksHtml(blocks: EmailBlock[], t: ReturnType<typeof tokens>): string {
   return blocks
-    .map((b) => (b.kind === "fixed" ? b.html : b.kind === "slot" ? b.content : `${TABLE(`margin:0 0 ${b.border ? 14 : 16}px 0;`, true)}<tr><td style="${t.box(b.color, b.border)}">${blocksHtml(b.children, t)}</td></tr></table>`))
+    .map((b) => (b.kind === "fixed" ? b.html : b.kind === "slot" ? b.content : `${TABLE(`margin:0 0 ${b.border ? 18 : 16}px 0;`, true)}<tr><td style="${t.box(b.color, b.border)}">${blocksHtml(b.children, t)}</td></tr></table>`))
     .join("");
 }
 

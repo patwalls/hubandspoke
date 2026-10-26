@@ -81,7 +81,7 @@ describe("templateChangeProblem", () => {
 
   it("a beehiiv template not yet redesigned takes the Futurepedia look; a redesigned one keeps its own", () => {
     const fp = DEFAULT_TEMPLATES["futurepedia newsletter"];
-    expect(templateFor("Futurepedia Newsletter", null)!.style).toMatchObject({ pageBackground: "#F5F8FB", buttonColor: "#273653", linkColor: "#49adff" });
+    expect(templateFor("Futurepedia Newsletter", null)!.style).toMatchObject({ pageBackground: "#F5F8FB", buttonColor: "#273653", linkColor: "#0B78BF", headingWeight: 500 });
     const mine = { ...fp, layout: { type: "doc" as const, content: [] }, style: { ...fp.style, buttonColor: "#ff0000" } };
     expect(templateFor("Futurepedia Newsletter", mine)!.style.buttonColor).toBe("#ff0000");
   });

@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   assertAllowedBeehiivCall,
   assertSafeDraftCreate,
+  assertSafeDraftUpdate,
+  handEditedInBeehiiv,
   FUTUREPEDIA_PUBLICATION_ID as FP,
   HOWTO_AUTHOR_IDS,
   HOWTO_BASE_TEMPLATE_ID,
@@ -25,11 +27,14 @@ describe("assertAllowedBeehiivCall (read-only, Futurepedia only)", () => {
     ok("GET", `/publications/${FP}/segments/${SEG}`);
   });
 
-  it("allows only creating a post in Futurepedia; blocks updating, deleting and everything else", () => {
+  it("allows creating a post and updating ONE post in Futurepedia; blocks deleting, bulk updates and everything else", () => {
     ok("POST", `/publications/${FP}/posts`);
+    ok("PATCH", `/publications/${FP}/posts/${POST}`);
     blocked("POST", `/publications/${OTHER_PUB}/posts`);
+    blocked("PATCH", `/publications/${OTHER_PUB}/posts/${POST}`);
     blocked("POST", `/publications/${FP}/posts?status=confirmed`);
-    blocked("PATCH", `/publications/${FP}/posts/${POST}`);
+    blocked("PATCH", `/publications/${FP}/posts/${POST}?status=confirmed`);
+    blocked("PATCH", `/publications/${FP}/posts`);
     blocked("PUT", `/publications/${FP}/posts/${POST}`);
     blocked("DELETE", `/publications/${FP}/posts/${POST}`);
     blocked("POST", `/publications/${FP}/post_templates`);
@@ -92,5 +97,59 @@ describe("assertSafeDraftCreate: a create can only ever make an unsent draft", (
     refuses({ recipients: { email: { tier_ids: ["free"], exclude_segment_ids: [] } } }, /Skill Leap members segment must be excluded/);
     refuses({ recipients: { email: { tier_ids: ["free"], exclude_segment_ids: [SEG], include_segment_ids: ["seg_x"] } } }, /no segment may be added/);
     refuses({ email_settings: { email_subject_line: "x", send_at: "now" } }, /email_settings fields not allowed: send_at/);
+  });
+});
+
+describe("assertSafeDraftUpdate: an update can only replace a draft's content and words", () => {
+  const html = { type: "html", html: "<table><tr><td>Hello</td></tr></table>" };
+  const fine = (b: unknown) => expect(() => assertSafeDraftUpdate(b)).not.toThrow();
+  const refused = (b: unknown, why: RegExp) => expect(() => assertSafeDraftUpdate(b)).toThrow(why);
+
+  it("accepts the body replaced, with or without the title / subject / preview", () => {
+    fine({ blocks: [html], content_merge_strategy: "replace" });
+    fine({ blocks: [html, { type: "section", blocks: [{ type: "poll", poll_id: HOWTO_POLL_ID }] }] });
+    fine({ title: "New title", subtitle: "New preview", email_settings: { email_subject_line: "New subject", email_preview_text: "p" } });
+    fine({ thumbnail_image_url: "https://img.youtube.com/vi/x/maxresdefault.jpg" });
+  });
+
+  it("refuses anything that sends, schedules, retargets or re-attributes the post", () => {
+    refused({ blocks: [html], status: "confirmed" }, /fields not allowed: status/);
+    refused({ blocks: [html], scheduled_at: "2026-10-28T13:00:00Z" }, /scheduled_at/);
+    refused({ recipients: { email: { tier_ids: ["free"] } } }, /recipients/);
+    refused({ guest_author_ids: [HOWTO_AUTHOR_IDS.saj] }, /guest_author_ids/);
+    refused({ body_content: "<p>x</p>" }, /body_content/);
+    refused({ web_settings: { slug: "x" } }, /web_settings/);
+    refused({ custom_link_tracking_enabled: false }, /custom_link_tracking_enabled/);
+  });
+
+  it("refuses a merge that would keep the old copy, bad blocks, a blank title and an empty update", () => {
+    refused({ blocks: [html], content_merge_strategy: "append" }, /must be "replace"/);
+    refused({ content_merge_strategy: "replace" }, /needs blocks/);
+    refused({ blocks: [] }, /non-empty/);
+    refused({ blocks: [{ type: "html", html: "<script>x</script>" }] }, /script/);
+    refused({ blocks: [{ type: "advertisement", opportunity_id: "x" }] }, /not allowed/);
+    refused({ title: "  " }, /blank/);
+    refused({ email_settings: { from_address: "x@y.z" } }, /email_settings fields not allowed/);
+    refused({}, /nothing to update/);
+    refused(null, /object/);
+  });
+});
+
+describe("handEditedInBeehiiv: are the words we last sent still in the post?", () => {
+  const pushedText = "Claude can make videos with nothing but code. Watch The Full Video →";
+  const render = (inner: string) => `<html><body><div id="header"><a href="x">Kevin at Futurepedia</a></div><div id="content-blocks"><p>${inner}</p></div><div id="footer">Unsubscribe</div></body></html>`;
+
+  it("passes when beehiiv's render still carries them, however it wraps or re-links the block", () => {
+    expect(handEditedInBeehiiv(pushedText, render(`Claude can make videos with nothing but code. <a href="https://youtu.be/x?utm_source=futurepedia">Watch The Full Video</a> →`))).toBe(false);
+  });
+
+  it("flags a post whose words changed in beehiiv", () => {
+    expect(handEditedInBeehiiv(pushedText, render("Claude can make videos with only code. Watch The Full Video →"))).toBe(true);
+  });
+
+  it("can't judge without a rendered email or a recorded push, so it passes", () => {
+    expect(handEditedInBeehiiv(pushedText, null)).toBe(false);
+    expect(handEditedInBeehiiv(pushedText, "")).toBe(false);
+    expect(handEditedInBeehiiv(null, render("anything"))).toBe(false);
   });
 });

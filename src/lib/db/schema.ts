@@ -2731,6 +2731,8 @@ export const newsletterDrafts = pgTable(
     beehiivPostUrl: text("beehiiv_post_url"),
     beehiivStatus: text("beehiiv_status"),
     beehiivError: text("beehiiv_error"),
+    /** The words of the email last pushed to beehiiv (html-text.ts), so "Update in beehiiv" can tell a hand-edited post from an untouched one. */
+    beehiivPushedText: text("beehiiv_pushed_text"),
     /** This issue's own design (newsletter-layout.ts), when the editor changed a designed part in the draft; null = the template's. */
     layout: jsonb("layout").$type<Record<string, unknown>>(),
     /** The issue's values for the template's `{fields}` (the tool's name, what the closing cards are called…), by name. */

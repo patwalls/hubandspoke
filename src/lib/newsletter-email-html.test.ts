@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyVars, markdownToEmailHtml, pruneForSend, renderEmailBody, renderEmailHtml, renderEmailParts, sectionMarkdown, webFontLink, type EmailBlock, type EmailParts } from "./newsletter-email-html";
+import { applyVars, bodyStyle, boxStyle, contentWidth, markdownToEmailHtml, pruneForSend, renderEmailBody, renderEmailHtml, renderEmailParts, sectionMarkdown, webFontLink, type EmailBlock, type EmailParts } from "./newsletter-email-html";
 
 /** Every slot in the layout's blocks (boxes opened), and all the fixed HTML. */
 const flat = (blocks: EmailBlock[]): EmailBlock[] => blocks.flatMap((b) => (b.kind === "box" ? [b, ...flat(b.children)] : [b]));
@@ -50,7 +50,7 @@ describe("markdownToEmailHtml", () => {
     expect(html).toContain('src="https://s3.example.com/f.jpg"');
     expect(html).toContain('width="552"');
     expect(html).toContain("max-width:552px");
-    expect(html).toContain("border-radius:10px");
+    expect(html).toContain("border-radius:12px");
     expect(html).not.toContain("data-img");
   });
 
@@ -261,5 +261,41 @@ describe("template fields in the design ({tool} Guide, {closer_2}…)", () => {
 
   it("a value is escaped like any other text", () => {
     expect(applyVars("{tool} Guide", { template: fp, sections: [], variables: { tool: "<b>x</b>" } })).toBe("&lt;b&gt;x&lt;/b&gt; Guide");
+  });
+});
+
+describe("design pass (2026-10-26): cards on a page", () => {
+  const cardsStyle = { ...style, pageBackground: "#F5F8FB", contentBackground: "#F5F8FB", headingFont: "'Poppins', sans-serif" };
+
+  it("a numbered step's title line is a small heading in a beehiiv-style template, a bold paragraph elsewhere", () => {
+    const md = "**1. Write a short script**\n\nKeep it to the steps a client goes through.";
+    const steps = markdownToEmailHtml(md, cardsStyle, { steps: true });
+    expect(steps).toMatch(/<p style="margin:22px 0 8px 0;font-family:'Poppins'[^"]*font-size:17px;font-weight:600[^"]*">1\. Write a short script<\/p>/);
+    expect(steps).not.toContain("<strong>1. Write");
+    const plain = markdownToEmailHtml(md, cardsStyle);
+    expect(plain).toContain("<strong>1. Write a short script</strong>");
+    // Not a step: a bold sentence, or a bold line that only starts with a number inside a longer paragraph.
+    expect(markdownToEmailHtml("**Builds** every frame from code", cardsStyle, { steps: true })).toContain("<strong>Builds</strong>");
+    expect(markdownToEmailHtml("**1. Title** and then more words", cardsStyle, { steps: true })).toContain("<strong>1. Title</strong>");
+  });
+
+  it("an email that is the page's own color gets the tight gutter and wider images; a framed one keeps 24px", () => {
+    expect(bodyStyle(cardsStyle).padding).toBe("20px 12px 24px 12px");
+    expect(contentWidth(cardsStyle)).toBe(576);
+    expect(bodyStyle(style).padding).toBe("24px 24px 28px 24px");
+    expect(contentWidth(style)).toBe(552);
+    const img = markdownToEmailHtml("![f](https://s3.example.com/f.jpg)", cardsStyle);
+    expect(img).toContain('width="576"');
+    expect(img).toContain("max-width:576px");
+  });
+
+  it("card labels are small caps-style kickers and bordered cards have soft 12px corners", () => {
+    expect(boxStyle("#fff", "#273653")).toMatchObject({ borderRadius: "12px", padding: "22px 20px 8px 20px", marginBottom: "18px" });
+    const label = renderEmailBody({
+      template: { ...sb, style: cardsStyle, layout: { type: "doc", content: [{ type: "callout", attrs: { color: "#fff", border: "#00AEEF" }, content: [{ type: "heading", attrs: { level: 4, color: "#00AEEF" }, content: [{ type: "text", text: "Claude Guide" }] }, { type: "slot", attrs: { key: "intro" } }] }] } },
+      sections: [{ key: "intro", markdown: "Hello." }],
+    });
+    expect(label).toMatch(/font-size:12px;font-weight:700;line-height:1.3;letter-spacing:0.08em;text-transform:uppercase;color:#00AEEF;">Claude Guide<\/p>/);
+    expect(label).toContain("border:2px solid #00AEEF;border-radius:12px;padding:22px 20px 8px 20px;");
   });
 });
