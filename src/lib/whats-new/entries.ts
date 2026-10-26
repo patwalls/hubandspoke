@@ -29,6 +29,17 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-10-26-my-work-waiting",
+    shippedAt: "2026-10-26T07:55:00Z",
+    kind: "feature",
+    title: "My Work shows how long each post has waited",
+    body:
+      "Your turn and To review now have a Waiting column: how long each post has sat in its status. " +
+      "It turns amber after 6 hours and red after a day, and To review puts the longest wait at the top.",
+    href: "/my-work",
+    screen: "/my-work",
+  },
+  {
     id: "2026-10-25-publish-link-platform",
     shippedAt: "2026-10-25T01:30:00Z",
     kind: "fix",

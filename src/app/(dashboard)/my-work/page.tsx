@@ -4,7 +4,8 @@ import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { contentComments, productionItems, users } from "@/lib/db/schema";
-import { getMyWork, getRowNews } from "@/lib/my-work/queries";
+import { getMyWork, getRowNews, getStatusSinceMany } from "@/lib/my-work/queries";
+import { sortByLongestWait, waitingFor } from "@/lib/my-work/waiting";
 import { ago, previewText, type RowNews } from "@/lib/my-work/news";
 import { htmlToPlainText } from "@/lib/comments/sanitize";
 import { cn } from "@/lib/utils";
@@ -26,7 +27,18 @@ export default async function MyWorkPage() {
   const userId = session.user.id;
 
   // Your turn / to review / waiting on others — rules in src/lib/my-work/split.ts.
-  const { yourTurn, toReview, waitingOnOthers } = await getMyWork(userId);
+  const split = await getMyWork(userId);
+  const { yourTurn, waitingOnOthers } = split;
+
+  // How long each row has sat in its status (my-day M11): its latest
+  // status_change, else its last edit. To review goes longest wait first.
+  const statusSince = await getStatusSinceMany(
+    [...yourTurn, ...split.toReview].map((r) => r.id),
+  );
+  for (const r of [...yourTurn, ...split.toReview]) {
+    if (!statusSince.has(r.id) && r.updatedAt) statusSince.set(r.id, r.updatedAt);
+  }
+  const toReview = sortByLongestWait(split.toReview, statusSince);
   const mineRows = [
     ...yourTurn,
     ...waitingOnOthers,
@@ -153,12 +165,13 @@ export default async function MyWorkPage() {
         palettes={palettes}
         news={news}
         handoffs={handoffs}
+        waitingSince={statusSince}
       />
 
       {toReview.length > 0 && (
         <Section
           title="To review"
-          subtitle="In Review on brands you've approved posts for this month. Oldest first."
+          subtitle="In Review on brands you've approved posts for this month. Longest wait first."
           rows={toReview}
           section="to-review"
           emptyText="Nothing to review."
@@ -167,6 +180,7 @@ export default async function MyWorkPage() {
           news={news}
           handoffs={handoffs}
           editorNames={editorNames}
+          waitingSince={statusSince}
         />
       )}
 
@@ -254,6 +268,7 @@ function Section({
   news,
   handoffs,
   editorNames,
+  waitingSince,
 }: {
   title: string;
   subtitle: string;
@@ -266,7 +281,10 @@ function Section({
   handoffs: ReadonlyMap<string, Handoff | null>;
   /** Set on To review: adds an Editor column. */
   editorNames?: ReadonlyMap<string, string>;
+  /** Set on Your turn / To review: adds a Waiting column (time in this status). */
+  waitingSince?: ReadonlyMap<string, Date>;
 }) {
+  const now = new Date();
   return (
     <div className="rounded-lg border border-border bg-card">
       <div className="px-4 py-3 border-b border-border flex items-baseline justify-between gap-3">
@@ -309,6 +327,11 @@ function Section({
                 <th className="px-3 py-2 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
                   Status
                 </th>
+                {waitingSince && (
+                  <th className="px-3 py-2 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
+                    Waiting
+                  </th>
+                )}
                 {section !== "waiting" && <th className="px-3 py-2" />}
               </tr>
             </thead>
@@ -358,6 +381,11 @@ function Section({
                       <span className="text-muted-foreground">—</span>
                     )}
                   </td>
+                  {waitingSince && (
+                    <td className="px-3 py-2">
+                      <WaitingCell since={waitingSince.get(r.id)} now={now} />
+                    </td>
+                  )}
                   {section !== "waiting" && (
                     <td className="px-3 py-2 text-right">
                       <RowActions
@@ -378,6 +406,27 @@ function Section({
         </div>
       )}
     </div>
+  );
+}
+
+/** "5h" / "3d" in this status; amber from 6 h, red from a day (rules in `waiting.ts`). */
+function WaitingCell({ since, now }: { since: Date | undefined; now: Date }) {
+  const w = waitingFor(since ?? null, now);
+  if (!w) return <span className="text-muted-foreground">—</span>;
+  return (
+    <span
+      data-testid="my-work-waiting"
+      data-tone={w.tone}
+      title={`In this status since ${since!.toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}`}
+      className={cn(
+        "tabular-nums text-xs",
+        w.tone === "fresh" && "text-muted-foreground",
+        w.tone === "due" && "text-amber-600 dark:text-amber-400 font-medium",
+        w.tone === "late" && "text-red-600 dark:text-red-400 font-medium",
+      )}
+    >
+      {w.label}
+    </span>
   );
 }
 

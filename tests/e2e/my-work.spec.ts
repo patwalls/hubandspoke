@@ -40,6 +40,12 @@ test("My Work button shows what's waiting and the To review section", async ({ p
       VALUES (${approvedId}, ${me}, 'status_change',
         ${sql.json({ type: "status_change", from: "Review", to: "Ready To Publish" })},
         now() - interval '7 days')`;
+    // The post to review went into Review two days ago: its row says 2d, in red.
+    await sql`
+      INSERT INTO content_events (content_item_id, user_id, event_type, payload, created_at)
+      VALUES (${reviewId}, ${me}, 'status_change',
+        ${sql.json({ type: "status_change", from: "Assigned", to: "Review" })},
+        now() - interval '50 hours')`;
 
     const expected = await (await page.request.get("/api/my-work/count")).json();
     expect(expected.count).toBeGreaterThanOrEqual(2);
@@ -60,6 +66,13 @@ test("My Work button shows what's waiting and the To review section", async ({ p
     await expect(toReview.getByRole("link", { name: `E2E my-work review ${stamp}` })).toBeVisible();
     const yourTurn = page.locator("div.rounded-lg", { has: page.getByRole("heading", { name: /Your turn/ }) });
     await expect(yourTurn.getByRole("link", { name: `E2E my-work assigned ${stamp}` })).toBeVisible();
+
+    // How long each row has waited in its status (my-day M11).
+    const reviewWait = toReview.getByRole("row", { name: new RegExp(`E2E my-work review ${stamp}`) }).getByTestId("my-work-waiting");
+    await expect(reviewWait).toHaveText("2d");
+    await expect(reviewWait).toHaveAttribute("data-tone", "late");
+    const assignedWait = yourTurn.getByRole("row", { name: new RegExp(`E2E my-work assigned ${stamp}`) }).getByTestId("my-work-waiting");
+    await expect(assignedWait).toHaveAttribute("data-tone", "fresh");
     if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT, fullPage: true });
   } finally {
     await sql.end();
