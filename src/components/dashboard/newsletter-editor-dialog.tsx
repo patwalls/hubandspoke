@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { AlertTriangle, Check, CheckCircle2, RotateCcw, CircleAlert, Eye, ExternalLink, History, LayoutTemplate, Lightbulb, ListChecks, Loader2, Mail, Monitor, MoreHorizontal, MousePointerClick, RefreshCw, Smartphone, SpellCheck, Sparkles, Wand2, X } from "lucide-react";
+import { beehiivPreviewUrlFromEditUrl } from "@/lib/beehiiv-links";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -521,6 +522,7 @@ function Workspace({
   const sponsorArg = specialCopy.trim() ? { copy: specialCopy, landingUrl: draft.specialSource?.landingUrl ?? null } : null;
   const tool = draft.template?.beehiiv ? "beehiiv" : "HubSpot";
   const pushUrl = draft.template?.beehiiv ? draft.beehiivPostUrl : draft.hubspotEmailUrl;
+  const beehiivPreview = draft.template?.beehiiv ? beehiivPreviewUrlFromEditUrl(draft.beehiivPostUrl) : null;
   const pushPending = draft.template?.beehiiv ? draft.beehiivStatus === "pending" : draft.hubspotStatus === "pending";
   const pushBusy = busyAction === "beehiiv" || busyAction === "hubspot" || pushPending;
   const words = draft.status === "ready" ? (draft.template ? sections.map((x) => x.markdown).join(" ") : body).split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w)).length : 0;
@@ -619,6 +621,12 @@ function Workspace({
                       <ExternalLink className="size-4" />
                       Open in {tool}
                     </DropdownMenuItem>
+                    {beehiivPreview && (
+                      <DropdownMenuItem onClick={() => window.open(beehiivPreview, "_blank", "noreferrer")} className="cursor-pointer gap-2">
+                        <Eye className="size-4" />
+                        Preview in beehiiv
+                      </DropdownMenuItem>
+                    )}
                   </>
                 )}
               </DropdownMenuContent>
@@ -635,7 +643,11 @@ function Workspace({
                 size="sm"
                 onClick={draft.template?.beehiiv ? pushToBeehiiv : pushToHubspot}
                 disabled={busyAction !== null || pushPending}
-                title={`Creates an unsent DRAFT in ${tool} — the whole email, exactly as shown here — and moves this newsletter out of the queue into production. Never sends or schedules.`}
+                title={
+                  draft.template?.beehiiv
+                    ? "Creates an unsent DRAFT post in beehiiv — this whole email as one HTML block, plus the feedback poll — and moves this newsletter out of the queue into production. beehiiv's editor shows that block as code; its Preview toggle renders it. Never sends or schedules."
+                    : `Creates an unsent DRAFT in ${tool} — the whole email, exactly as shown here — and moves this newsletter out of the queue into production. Never sends or schedules.`
+                }
               >
                 {pushBusy && <Loader2 className="animate-spin" />}
                 Create draft in {tool}
@@ -1106,6 +1118,19 @@ function Workspace({
       )}
       {draft.hubspotStatus === "failed" && draft.hubspotError && (
         <p className="mx-5 mt-3 rounded-md bg-red-50 p-2 text-xs text-red-800 dark:bg-red-900/30 dark:text-red-200">Email push: {draft.hubspotError}</p>
+      )}
+      {draft.template?.beehiiv && draft.beehiivPostUrl && (
+        <p className="mx-5 mt-3 rounded-md bg-muted p-2 text-xs text-muted-foreground">
+          In beehiiv this email is one <span className="font-medium text-foreground">HTML Snippet</span> block: the editor shows its code, and the block&apos;s <span className="font-medium text-foreground">Preview</span> toggle (or{" "}
+          {beehiivPreview ? (
+            <a className="underline" href={beehiivPreview} target="_blank" rel="noreferrer">
+              the post&apos;s preview
+            </a>
+          ) : (
+            "the post's preview"
+          )}
+          ) shows the design. Change the subject, preview text or send settings there. The words and design are edited here.
+        </p>
       )}
       {draft.beehiivStatus === "failed" && draft.beehiivError && (
         <p className="mx-5 mt-3 rounded-md bg-red-50 p-2 text-xs text-red-800 dark:bg-red-900/30 dark:text-red-200">beehiiv push: {draft.beehiivError}</p>

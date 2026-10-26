@@ -312,10 +312,8 @@ export async function getSkillLeapMembersSegment(): Promise<{ id: string; name: 
   return r.data;
 }
 
-/** beehiiv's editor link for a post id ("post_<uuid>" → /posts/<uuid>/edit). */
-export function beehiivEditUrl(postId: string): string {
-  return `https://app.beehiiv.com/posts/${postId.replace(/^post_/, "")}/edit`;
-}
+import { beehiivEditUrl } from "./beehiiv-links";
+export { beehiivEditUrl, beehiivPreviewUrl } from "./beehiiv-links";
 
 /**
  * Create ONE unsent draft post, then read it back and confirm beehiiv saved
