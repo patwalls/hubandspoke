@@ -79,12 +79,15 @@ const FLAGS = {
   },
   /**
    * My Work morning email (my-day M4): one email each weekday with what's
-   * waiting on you and the top five. Pat first; `e2e@local.test` only ever
-   * exists in the throwaway e2e database. See docs/features.md → "My Work".
+   * waiting on you and the top five. See docs/features.md → "My Work".
    */
   myWorkDigest: {
     emails: ["patrickswalls@gmail.com", "e2e@local.test"],
     envVar: "FEATURE_MY_WORK_DIGEST_EMAILS",
+    // Rolled out to every account (2026-10-26) after Pat read his own. The
+    // allowlist above is kept only so flipping this back off restores Pat-only.
+    // Each person can still turn it off on /my-work/email.
+    everyone: true,
   },
 } as const satisfies Record<string, FlagDefinition>;
 
