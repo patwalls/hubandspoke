@@ -205,3 +205,26 @@ export async function loadMyWorkDigest(userId: string, name: string | null) {
     baseUrl: appBaseUrl(),
   });
 }
+
+/**
+ * When each item entered its current status: its latest status_change event
+ * (my-day M11). Items with no status history aren't in the map; callers fall
+ * back to `updatedAt`.
+ */
+export async function getStatusSinceMany(itemIds: string[]): Promise<Map<string, Date>> {
+  if (itemIds.length === 0) return new Map();
+  const rows = await db
+    .selectDistinctOn([contentEvents.contentItemId], {
+      itemId: contentEvents.contentItemId,
+      at: contentEvents.createdAt,
+    })
+    .from(contentEvents)
+    .where(
+      and(
+        inArray(contentEvents.contentItemId, itemIds),
+        eq(contentEvents.eventType, "status_change"),
+      ),
+    )
+    .orderBy(contentEvents.contentItemId, desc(contentEvents.createdAt));
+  return new Map(rows.map((r) => [r.itemId, r.at]));
+}
