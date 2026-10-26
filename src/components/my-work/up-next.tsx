@@ -206,8 +206,8 @@ function UpNextLink({ data }: { data: UpNextData | null }) {
   );
 }
 
-/** "TikTok ·" before a title, when the post type is known. */
-function PostTypeTag({ postType }: { postType?: string | null }) {
+/** "TikTok ·" before a title, when the post type is known. Also on My Work rows. */
+export function PostTypeTag({ postType }: { postType?: string | null }) {
   const { platform, label } = postTypeDisplay(postType);
   if (!label) return null;
   return (

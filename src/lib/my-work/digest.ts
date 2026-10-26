@@ -9,7 +9,10 @@
  * - Top five: sent-back and new-comment rows first (someone is waiting on
  *   you to read them), then To review oldest first, then Your turn.
  * - One button to /my-work, where every row can be acted on.
+ * - Each line names the platform ("Instagram Reel"): cross-posts share their
+ *   post's title, so without it two lines read the same.
  */
+import { postTypeDisplay } from "@/lib/platforms";
 import type { RowNews } from "./news";
 
 export interface DigestRow {
@@ -17,6 +20,7 @@ export interface DigestRow {
   title: string | null;
   brand: string;
   status: string | null;
+  postType?: string | null;
 }
 
 export interface DigestInput {
@@ -78,13 +82,16 @@ export function buildMyWorkDigest(input: DigestInput): DigestEmail | null {
   const myWorkUrl = `${baseUrl}/my-work`;
   const itemUrl = (r: DigestRow) => `${baseUrl}/${r.brand}/content/${r.id}`;
   const more = total - top.length;
+  // "starter-story · Instagram Reel" — brand, then the platform when known.
+  const where = (r: DigestRow) =>
+    [r.brand, postTypeDisplay(r.postType).label].filter(Boolean).join(" · ");
 
   const text = [
     greeting,
     "",
     `${subject}.`,
     "",
-    ...top.map(({ row, why }) => `- ${row.title || "(Untitled)"} (${row.brand}) — ${why}\n  ${itemUrl(row)}`),
+    ...top.map(({ row, why }) => `- ${row.title || "(Untitled)"} (${where(row)}) — ${why}\n  ${itemUrl(row)}`),
     ...(more > 0 ? ["", `…and ${more} more.`] : []),
     "",
     `Open My Work: ${myWorkUrl}`,
@@ -99,7 +106,7 @@ export function buildMyWorkDigest(input: DigestInput): DigestEmail | null {
       <tr>
         <td style="padding:10px 0;border-bottom:1px solid #eee;">
           <a href="${itemUrl(row)}" style="color:#111;font-weight:500;text-decoration:none;">${escapeHtml(row.title || "(Untitled)")}</a>
-          <div style="color:#666;font-size:12px;margin-top:2px;">${escapeHtml(row.brand)} · ${escapeHtml(why)}</div>
+          <div style="color:#666;font-size:12px;margin-top:2px;">${escapeHtml(where(row))} · ${escapeHtml(why)}</div>
         </td>
       </tr>`,
     )
