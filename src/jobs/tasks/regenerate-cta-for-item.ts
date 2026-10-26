@@ -9,8 +9,9 @@ export interface RegenerateCtaForItemPayload {
 // touching the caption. Enqueued by the cross-post route after
 // seedRepostContent writes the verbatim caption. regenerateCtaForItem
 // self-skips with no_cta_field for post types that have no CTA slot
-// (instagram, tiktok, youtube_shorts), so it is safe to enqueue broadly
-// and let the service decide.
+// (instagram, tiktok, youtube_shorts), and with no_cta_offer when the
+// brand has no CTA offer set up for the post (a setup gap — retrying can't
+// fix it), so it is safe to enqueue broadly and let the service decide.
 export const regenerateCtaForItemTask: Task = async (rawPayload, helpers) => {
   const { productionItemId } =
     rawPayload as RegenerateCtaForItemPayload;

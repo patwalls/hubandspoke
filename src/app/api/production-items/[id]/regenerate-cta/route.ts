@@ -47,6 +47,7 @@ export async function POST(_request: NextRequest, context: RouteContext) {
       const userActionable =
         result.reason === "no_cta_field" ||
         result.reason === "no_current_draft" ||
+        result.reason === "no_cta_offer" ||
         result.reason === "unsupported_post_type" ||
         result.reason === "item_not_found";
       if (userActionable) {
@@ -84,6 +85,8 @@ function friendlyReason(reason: string | undefined): string {
       return "This post type doesn't have a reply CTA slot.";
     case "no_current_draft":
       return "This item has no draft yet — start typing or click Regenerate on the main caption first.";
+    case "no_cta_offer":
+      return "No CTA offer found for this post. Set a CTA source on its format, or a fallback offer in the brand's settings.";
     case "unsupported_post_type":
       return "This item has no post type set.";
     case "item_not_found":

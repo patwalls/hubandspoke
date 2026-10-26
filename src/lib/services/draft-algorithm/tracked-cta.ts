@@ -68,6 +68,19 @@ export interface GenerateTrackedCtaArgs {
   formatInstructions: string | null;
 }
 
+/** A usesCtaOffer post with no offer anywhere (format strategy, pillar, brand
+ *  fallback). A setup gap, not a fault: callers turn it into a skip with a
+ *  reason instead of an error, so the cross-post job doesn't retry it and
+ *  Sentry doesn't page on it (HUBANDSPOKE-3D). */
+export class NoCtaOfferError extends Error {
+  constructor() {
+    super(
+      "No CTA offer found for this post. Set a CTA source on its format, or a fallback offer in the brand's settings.",
+    );
+    this.name = "NoCtaOfferError";
+  }
+}
+
 interface CtaPlan {
   copyLine: string;
   targetType: ShortLinkTargetType;
@@ -87,11 +100,7 @@ export async function generateTrackedCta(
     .limit(1);
   if (usesCtaOffer(itemBrand?.brand)) {
     const offer = await resolveCtaOffer({ productionItemId: args.productionItemId, channel: args.channel });
-    if (!offer) {
-      throw new Error(
-        "No CTA offer found for this post. Set a CTA source on its format, or a fallback offer in the brand's settings.",
-      );
-    }
+    if (!offer) throw new NoCtaOfferError();
     return { cta: formatOfferCta(offer), slug: null, destinationUrl: offer.url, targetType: "custom", leadMagnetId: null };
   }
 
