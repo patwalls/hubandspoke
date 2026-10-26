@@ -29,6 +29,17 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-10-26-my-work-platform",
+    shippedAt: "2026-10-26T18:29:00Z",
+    kind: "feature",
+    title: "My Work says which platform each post is for",
+    body:
+      "Cross-posts share their post's title, so every row on My Work now starts with its platform (Instagram Reel, TikTok, YouTube Community…), " +
+      "and so does each line of the morning email. Pick the right one without opening it.",
+    href: "/my-work",
+    screen: "/my-work",
+  },
+  {
     id: "2026-10-26-my-work-digest-everyone",
     shippedAt: "2026-10-26T17:00:00Z",
     kind: "feature",

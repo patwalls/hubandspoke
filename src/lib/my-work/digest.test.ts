@@ -48,6 +48,23 @@ describe("buildMyWorkDigest", () => {
     expect(d.top[0]).toMatchObject({ row: { id: "a" }, why: "Handed to you by Evgeny" });
   });
 
+  it("names each line's platform, so same-titled cross-posts read apart", () => {
+    const d = buildMyWorkDigest({
+      ...base,
+      yourTurn: [
+        { ...row("a"), title: "Same post", postType: "instagram_reel" },
+        { ...row("b"), title: "Same post", postType: "tiktok" },
+        { ...row("c"), title: "No type" },
+      ],
+      toReview: [],
+    })!;
+    expect(d.text).toContain("- Same post (starter-story · Instagram Reel) — Assigned");
+    expect(d.text).toContain("- Same post (starter-story · TikTok) — Assigned");
+    expect(d.text).toContain("- No type (starter-story) — Assigned");
+    expect(d.html).toContain("starter-story · Instagram Reel · Assigned");
+    expect(d.html).toContain("starter-story · TikTok · Assigned");
+  });
+
   it("escapes titles in the html", () => {
     const d = buildMyWorkDigest({ ...base, yourTurn: [{ ...row("a"), title: "<b>Hi</b> & bye" }], toReview: [] })!;
     expect(d.html).toContain("&lt;b&gt;Hi&lt;/b&gt; &amp; bye");

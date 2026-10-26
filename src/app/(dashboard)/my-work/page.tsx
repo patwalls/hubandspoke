@@ -15,6 +15,7 @@ import { rowActionsFor, withHandoff, type MyWorkSection } from "@/lib/my-work/ac
 import { pickHandoff, ASSIGNED, type Handoff, type HandoffPerson } from "@/lib/handoff/pick";
 import { getBrandReviewers, getSentToReviewByMany } from "@/lib/handoff/queries";
 import { RowActions } from "@/components/my-work/row-actions";
+import { PostTypeTag } from "@/components/my-work/up-next";
 import { MyWorkKeys } from "@/components/my-work/my-work-keys";
 import { MyWorkSelection, SelectAll, SelectRow } from "@/components/my-work/bulk-select";
 import { isFeatureEnabled } from "@/lib/feature-flags";
@@ -252,6 +253,7 @@ type Row = {
   status: string | null;
   format: string | null;
   platform: string[] | null;
+  postType: string | null;
   publishedDate: string | null;
   thumbnail: string | null;
   editorUserId: string | null;
@@ -346,6 +348,11 @@ function Section({
                     <SelectRow id={r.id} brand={r.brand} title={r.title || "(Untitled)"} />
                   </td>
                   <td className="px-3 py-2">
+                    {/* Cross-posts share their post's title, so the platform
+                        is what tells two rows apart. */}
+                    <span data-my-work-platform className="mr-1 text-xs">
+                      <PostTypeTag postType={r.postType} />
+                    </span>
                     <Link
                       href={`/${r.brand}/content/${r.id}`}
                       className="text-foreground hover:text-primary hover:underline transition-colors"
