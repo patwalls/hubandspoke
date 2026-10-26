@@ -15,6 +15,7 @@ import { brands, formats, newsletterDrafts, type NewsletterReview, type Newslett
 import { composeIssue, templateFor } from "@/lib/newsletter-template";
 import { newsletterModel } from "./agent";
 import { getPastIssues } from "./sources";
+import { longRequestOptions } from "@/lib/long-request";
 
 const REQUEST_TIMEOUT_MS = 8 * 60 * 1000;
 const PAST_ISSUES_FOR_REVIEW = 3;
@@ -144,7 +145,7 @@ export async function reviewDraft(draftId: string, opts: { signal?: AbortSignal;
         tools: [REVIEW_TOOL],
         messages: [{ role: "user", content: prompt }],
       },
-      { signal: opts.signal, timeout: REQUEST_TIMEOUT_MS },
+      { signal: opts.signal, ...longRequestOptions(REQUEST_TIMEOUT_MS) },
     );
     const use = message.content.find((b): b is Anthropic.Beta.BetaToolUseBlock => b.type === "tool_use");
     const parsed = use ? ReviewInput.safeParse(use.input) : null;

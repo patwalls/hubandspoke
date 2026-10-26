@@ -29,6 +29,7 @@ import {
 } from "@/lib/diarization/identity";
 import type { DiarizationState, SpeakerTurn } from "@/lib/diarization/types";
 import { nameSpeakers, type SpeakerEvidence } from "@/lib/services/diarization/name-speakers";
+import { longRequestOptions } from "@/lib/long-request";
 import { downloadToFile } from "./descript-upload-helpers";
 
 export interface DiarizeTranscriptPayload {
@@ -194,7 +195,7 @@ async function diarizeOneChunk(args: {
           ? { known_speaker_names: knownNames, known_speaker_references: knownRefs }
           : {}),
       },
-      { timeout: API_TIMEOUT_MS, maxRetries: 0 }, // graphile owns retries
+      { ...longRequestOptions(API_TIMEOUT_MS), maxRetries: 0 }, // graphile owns retries
     )) as unknown as {
       segments?: DiarizedSegment[];
       usage?: { input_token_details?: { audio_tokens?: number }; output_tokens?: number };
