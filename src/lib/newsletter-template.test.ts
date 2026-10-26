@@ -49,6 +49,13 @@ describe("newsletter templates", () => {
     for (const t of Object.values(DEFAULT_TEMPLATES)) expect(parseNewsletterTemplate(t)).not.toBeNull();
   });
 
+  it("built-in images live on our own bucket (or the brand's own beehiiv), never another vendor's CDN", () => {
+    const ours = /^https:\/\/(s3\.us-east-1\.amazonaws\.com\/www\.starterstory\.com\/|media\.beehiiv\.com\/)/;
+    const urls = Object.values(DEFAULT_TEMPLATES).flatMap((t) => JSON.stringify(t).match(/https:\/\/[^"]+\.(png|jpe?g|gif|webp)/g) ?? []);
+    expect(urls.length).toBeGreaterThan(0);
+    for (const u of urls) expect(u).toMatch(ours);
+  });
+
   it("composes sections in template order with fixed headings, putting promo copy in the sponsor section", () => {
     const sections = [
       { key: "tips", markdown: "- **Do it**" },

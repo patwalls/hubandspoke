@@ -370,9 +370,12 @@ const s = (
   optional: extra.optional ?? false,
 });
 
-/** Starter Story's email look, read off past issues (Klaviyo/HubSpot HTML): the lavender masthead, #6B72C4 links and buttons. */
+/**
+ * Starter Story's email look, read off past issues (Klaviyo/HubSpot HTML): the lavender masthead, #6B72C4 links and buttons.
+ * The masthead is our own copy in the public frames bucket (the original sat on Klaviyo's CDN and dies with that account).
+ */
 const STARTER_STORY_STYLE: NewsletterStyle = styleSchema.parse({
-  mastheadImageUrl: "https://d3k81ch9hvuctc.cloudfront.net/company/Jchkiv/images/405af84f-b9e5-445e-86a4-68c2211e6876.png",
+  mastheadImageUrl: "https://s3.us-east-1.amazonaws.com/www.starterstory.com/hubandspoke/uploads/newsletter-assets/starter-story-masthead.png",
   mastheadLinkUrl: "https://www.starterstory.com/join",
   mastheadBackground: "#EBECFC",
   linkColor: "#6B72C4",
