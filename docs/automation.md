@@ -100,7 +100,8 @@ USER / API ENTRY POINTS
   POST /api/formats/[id]/design-template/import           → design-template-import (default queue, maxAttempts 2)  [UI: format page "Import from PDF" — flag `designEditor`; Opus reads the PDF into a template draft; never writes formats.design_template]
   POST /api/newsletter-drafts { formatId, days, notes }   → newsletter-draft (default queue, jobKey newsletter-draft:<draftId>, maxAttempts 2)  [UI: /<brand>/newsletters "Draft newsletter" — flag `newsletterDrafter`; Opus agent loop, writes `newsletter_drafts`, never production_items]
   POST /api/newsletter-drafts/[id]/draft { notes?, sourceItemId? } → newsletter-draft (jobKey newsletter-draft:<id>, maxAttempts 2)  [UI: the queue's "Start newsletter" dialog (pillar + angle, via `startEditionDraft`), Draft this issue on the board, Redraft, Try again]
-  POST /api/newsletter-drafts/[id]/sections/[key]/regenerate { instruction } → newsletter-section-regenerate (jobKey newsletter-section:<id>:<key>, maxAttempts 1)  [UI: a section's Regenerate in the newsletter editor]
+  POST /api/newsletter-drafts/[id]/sections/[key]/regenerate { instruction } → newsletter-section-regenerate (jobKey newsletter-section:<id>:<key>, maxAttempts 1)  [UI: a section's Revise / Regenerate in the newsletter editor]
+  POST /api/newsletter-drafts/[id]/revise { note }         → newsletter-revise (jobKey newsletter-revise:<id>, maxAttempts 1, 10s start delay) → newsletter-section-regenerate per touched section  [UI: the editor header's Revise]
   POST /api/newsletter-drafts/[id]/hubspot                → hubspot-newsletter-create-draft (default queue, jobKey hubspot-newsletter-create-draft:<draftId>, maxAttempts 1)  [UI: "Create HubSpot draft" — clones a portal-53 template email; never sends/schedules]
   POST /api/production-items (new row w/ link, no inline metrics) → refresh-item-metrics
   PUT  /api/production-items (→ Published w/ link, or link added on Published) → refresh-item-metrics
@@ -1681,6 +1682,13 @@ Regression guard: `src/lib/services/underlord-auto-fire.regression.test.ts` grep
 - **Files:** `src/jobs/tasks/newsletter-review.ts` → `reviewDraft` (`src/lib/services/newsletter-drafter/review.ts`; `buildReviewPrompt` pure).
 - **What it does:** one Opus 5.5 call (forced tool `submit_review`) over the composed issue, the subject options and preview text, the Skill, the template's `styleNotes`, the 3 most recent past issues (6k chars each) and the editor's notes → a 2–4 sentence summary and ≤10 findings `{ sectionKey | null, severity: fix | consider, note, instruction | null }`, each tied to a template section with the rewrite instruction that fixes it. Stored on `review` (`done`, with the draft `revision` it read — the editor says "from an earlier version" once the draft moves on). In the editor's review panel **Apply** = mark applied + `…/sections/[key]/regenerate` with that instruction (the usual section rewrite); **Dismiss** marks it; **Again** re-runs on the current issue.
 - **Failure:** `review.status = failed` + `error`; shown in the panel.
+
+### `newsletter-revise` — the editor's whole-email Revise (2026-10-27, flag `newsletterDrafter`)
+
+- **Trigger:** `POST /api/newsletter-drafts/[id]/revise { note }` (editor header → **Revise**, next to Preview; the editor saves first). `startRevision` puts every revisable section (the template's text sections — never the sponsor section, which the Ad panel owns) into `regenerating`, so the editor shows them all working, then enqueues `{ newsletterDraftId, note }`, jobKey `newsletter-revise:<id>`, maxAttempts 1, `runAt = now + NEWSLETTER_START_DELAY_MS`.
+- **Files:** `src/jobs/tasks/newsletter-revise.ts` → `reviseDraft` (`src/lib/services/newsletter-drafter/revise.ts`; `planRevision`, `revisionEdits`, `sectionInstruction` pure-ish/unit-tested).
+- **What it does:** one Sonnet 5.5 call (forced tool `submit_revision_plan`) over the note, the angle and the sections → a rewrite instruction for each section the note touches. Untouched sections leave `regenerating`; each touched one is `helpers.addJob("newsletter-section-regenerate", { instruction })` (same jobKey as a section's own Revise) with its instruction plus the whole note for context. A section the editor cancelled while the plan ran is skipped.
+- **Failure:** a failed plan releases every section it held and sets the draft's `error` ("Revise failed: …"); a plan that touches nothing says so in `error`. Idempotent enough to retry by hand: a second Revise just re-plans.
 
 ### Subject ideas, section presets, "like a past issue" (2026-10-23, request path — no worker task)
 

@@ -20,6 +20,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { startVisibleInterval } from "@/lib/visible-interval";
 import { composeIssue, sponsorBlock, variableNames, type NewsletterSection, type NewsletterTemplate } from "@/lib/newsletter-template";
@@ -386,6 +387,13 @@ function Workspace({
     await post(`/api/newsletter-drafts/${draft.id}/sections/${key}/regenerate`, { instruction: instruction || null, story }, `regen:${key}`);
   }
 
+  /** Whole-email Revise: one note for the issue; the worker works out which sections it touches and rewrites those. */
+  async function reviseAll(note: string) {
+    if (dirty && !(await save())) return;
+    deselect();
+    await post(`/api/newsletter-drafts/${draft.id}/revise`, { note }, "revise");
+  }
+
   async function cancelRun(section?: string) {
     await post(`/api/newsletter-drafts/${draft.id}/cancel`, section ? { section } : {}, section ? `cancel:${section}` : "cancel");
   }
@@ -567,17 +575,20 @@ function Workspace({
                 onClick={startReview}
                 disabled={busyAction !== null || draft.review?.status === "running"}
                 title="A senior-editor read of the whole issue: voice, structure, facts, links, subject line — with one-click fixes"
+                aria-label="AI review"
               >
                 {draft.review?.status === "running" ? <Loader2 className="animate-spin" /> : <Wand2 />}
-                AI review
+                {/* Icon-only on narrower screens, so the header doesn't run into the Desktop / Phone toggle. */}
+                <span className="hidden 2xl:inline">AI review</span>
               </Button>
             )}
             {draft.template && (
-              <Button variant="ghost" size="sm" onClick={() => setPreviewOpen(true)} title="The exact email that is sent, on desktop and on a phone">
+              <Button variant="ghost" size="sm" onClick={() => setPreviewOpen(true)} title="The exact email that is sent, on desktop and on a phone" aria-label="Preview">
                 <Eye />
-                Preview
+                <span className="hidden 2xl:inline">Preview</span>
               </Button>
             )}
+            {draft.template && <ReviseButton onRevise={reviseAll} disabled={busyAction !== null || draft.regenerating.length > 0} busy={busyAction === "revise" || draft.regenerating.length > 0} />}
             <DropdownMenu>
               <DropdownMenuTrigger aria-label="More" className={buttonVariants({ size: "icon-sm", variant: "ghost" })}>
                 <MoreHorizontal />
@@ -1626,28 +1637,87 @@ function SectionEditor({
           )}
         </div>
       )}
-      <div className={cn("flex items-center gap-2", hideText && "flex-wrap")}>
-        <Input
-          className={cn("h-7 text-xs", hideText && "basis-full")}
-          placeholder="Optional: how to change it (e.g. 'shorter', 'lead with the $50K')"
+      <div className="flex flex-col gap-1.5">
+        <Textarea
+          rows={3}
+          className="min-h-16 text-xs"
+          placeholder="Revise this section: say what to change (e.g. 'shorter', 'lead with the $50K', 'mention the database is free'). Blank = a fresh take."
           value={instruction}
           onChange={(e) => setInstruction(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !disabled && !regenerating) {
+              e.preventDefault();
+              onRegenerate(instruction);
+              setInstruction("");
+            }
+          }}
           disabled={regenerating}
+          data-testid="section-revise-note"
         />
         <Button
           size="sm"
           variant="outline"
+          className="self-end"
           onClick={() => {
             onRegenerate(instruction);
             setInstruction("");
           }}
           disabled={disabled || regenerating}
         >
-          <RefreshCw />
-          Regenerate
+          {instruction.trim() ? <Sparkles /> : <RefreshCw />}
+          {instruction.trim() ? "Revise" : "Regenerate"}
         </Button>
       </div>
     </div>
+  );
+}
+
+/** The header's Revise: a note for the whole email, dropped down under the button. */
+function ReviseButton({ onRevise, disabled, busy }: { onRevise: (note: string) => Promise<void>; disabled: boolean; busy: boolean }) {
+  const [open, setOpen] = useState(false);
+  const [note, setNote] = useState("");
+  const submit = () => {
+    if (!note.trim()) return;
+    setOpen(false);
+    void onRevise(note.trim()).then(() => setNote(""));
+  };
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        disabled={disabled}
+        data-testid="newsletter-revise"
+        title="Say what to change about the whole email; every section it touches is rewritten"
+        className={buttonVariants({ variant: "outline", size: "sm" })}
+      >
+        {busy ? <Loader2 className="animate-spin" /> : <Sparkles />}
+        Revise
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-96">
+        <span className="text-sm font-medium">Revise the whole email</span>
+        <Textarea
+          autoFocus
+          rows={4}
+          className="min-h-24 text-sm"
+          placeholder="e.g. Cut it by a third. The pitch should say the database is free. Less hype in the intro."
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault();
+              submit();
+            }
+          }}
+          data-testid="newsletter-revise-note"
+        />
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs text-muted-foreground">Only the sections it touches are rewritten.</span>
+          <Button size="sm" onClick={submit} disabled={!note.trim()} data-testid="newsletter-revise-submit">
+            <Sparkles />
+            Revise
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 
