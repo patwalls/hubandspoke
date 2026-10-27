@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { PROMO_TASK_NOTES } from "@/test/asana-fixtures";
 import { extractSpecial, pickPromoTask, promoCalendarFor } from "./promo";
-import { SPECIAL_MARKER, composeBody, composeSpecialBlock } from "./special-compose";
+import { SPECIAL_MARKER, adLink, composeBody, composeSpecialBlock, withAdLink } from "./special-compose";
 
 const task = (gid: string, due: string | null, section: string) => ({
   gid,
@@ -50,5 +50,19 @@ describe("composing The Special into the body", () => {
     expect(composeBody(body, { copy: "Pitch.", landingUrl: null })).toBe("## The Special 🍽️\n\nPitch.\n\n## The Eggs 🍳");
     expect(composeBody(body, { copy: null, landingUrl: url })).toBe(body);
     expect(composeBody(body, null)).toBe(body);
+  });
+});
+
+describe("the ad's main link", () => {
+  it("is the button line when there is one, else the last link, else the last bare URL", () => {
+    expect(adLink("Try [it](https://a.example) today.\n\n**[Check it out HERE](https://b.example/x?utm=1)**")).toBe("https://b.example/x?utm=1");
+    expect(adLink("Try [it](https://a.example) or [this](https://c.example).")).toBe("https://c.example");
+    expect(adLink("Go to https://d.example/page now.")).toBe("https://d.example/page");
+    expect(adLink("No link here.")).toBeNull();
+  });
+
+  it("swaps every copy of the main link, or adds a CTA line when there's none", () => {
+    expect(withAdLink("[Try](https://old.example) and **[Go](https://old.example)**", "https://new.example")).toBe("[Try](https://new.example) and **[Go](https://new.example)**");
+    expect(withAdLink("Just copy.", "https://new.example")).toBe("Just copy.\n\n**[Check it out HERE](https://new.example)**");
   });
 });

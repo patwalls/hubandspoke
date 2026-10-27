@@ -1,4 +1,4 @@
-// "Rewrite in our voice" for a newsletter draft's sponsored section (The
+// "Write it in our voice" / "Make changes" for a newsletter draft's sponsored section (The
 // Special). One Haiku call: the sponsor's copy in, the same offer in the
 // newsletter's voice out, anchored on past issues of the format. Runs inside
 // the request (a few seconds), not on the worker. Fail-soft: callers get
@@ -20,6 +20,8 @@ export async function rewriteSpecial(args: {
   sponsorCopy: string;
   landingUrl: string | null;
   pastIssues: PastIssue[];
+  /** "Make changes": what the editor wants different this time (shorter, lead with the free trial). */
+  instruction?: string | null;
   client?: Anthropic;
 }): Promise<SpecialRewriteResult> {
   const client = args.client ?? new Anthropic();
@@ -34,6 +36,7 @@ export async function rewriteSpecial(args: {
     args.landingUrl
       ? `End with one call-to-action line that links to exactly this URL: ${args.landingUrl}`
       : "Keep any call-to-action link from the sponsor copy unchanged.",
+    args.instruction?.trim() ? "The editor asked for specific changes (below the copy): make them, still without inventing claims the copy doesn't support." : "",
     "Match the voice, line length and formatting of the sponsored sections in the past issues below. Output only the section's content in Markdown (no course heading, no preamble).",
     args.formatInstructions?.trim() ? `\n## FORMAT SKILL\n${args.formatInstructions.trim()}` : "",
     examples ? `\n## PAST ISSUES\n${examples}` : "",
@@ -46,7 +49,7 @@ export async function rewriteSpecial(args: {
       max_tokens: 4000,
       output_config: { effort: "low" },
       system,
-      messages: [{ role: "user", content: `Sponsor copy:\n\n${args.sponsorCopy.trim()}` }],
+      messages: [{ role: "user", content: `Sponsor copy:\n\n${args.sponsorCopy.trim()}${args.instruction?.trim() ? `\n\nEditor's request: ${args.instruction.trim()}` : ""}` }],
     });
     if (res.stop_reason === "refusal") return { ok: false, failure: "model refused" };
     const text = res.content

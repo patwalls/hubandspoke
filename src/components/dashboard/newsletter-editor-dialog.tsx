@@ -4,7 +4,7 @@
 // editor's full-screen dialog. Opening an undrafted slot starts the draft;
 // once ready, each template section is edited on its own (with a per-section
 // Regenerate + optional instruction) next to a live preview of the whole
-// issue. The sponsor section shows the Asana promo controls; How-To slots can
+// issue. The sponsor section is the issue's ad (AdPanel: paste, rewrite, link, remove; Asana last); How-To slots can
 // switch their source video. Saves are revision-checked (409 on a stale tab).
 // Templated newsletters open in the visual view: the email itself is the canvas
 // (click text to edit it in place, click a screenshot to pick or upload its
@@ -13,7 +13,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { AlertTriangle, Check, CheckCircle2, RotateCcw, CircleAlert, Eye, ExternalLink, History, LayoutTemplate, Lightbulb, ListChecks, Loader2, Mail, Monitor, MoreHorizontal, MousePointerClick, RefreshCw, Smartphone, SpellCheck, Sparkles, Wand2, X } from "lucide-react";
+import { AlertTriangle, Check, CheckCircle2, ClipboardPaste, RotateCcw, CircleAlert, Eye, ExternalLink, Link2, Megaphone, Trash2, History, LayoutTemplate, Lightbulb, ListChecks, Loader2, Mail, Monitor, MoreHorizontal, MousePointerClick, RefreshCw, Smartphone, SpellCheck, Sparkles, Wand2, X } from "lucide-react";
 import { beehiivPreviewUrlFromEditUrl } from "@/lib/beehiiv-links";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -22,7 +22,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { startVisibleInterval } from "@/lib/visible-interval";
-import { composeIssue, variableNames, type NewsletterSection, type NewsletterTemplate } from "@/lib/newsletter-template";
+import { composeIssue, sponsorBlock, variableNames, type NewsletterSection, type NewsletterTemplate } from "@/lib/newsletter-template";
 import { EmailPreview, FOOTER_NOTE, MOBILE_WIDTH } from "@/components/dashboard/email-preview";
 import { EMAIL_WIDTH, renderEmailHtml } from "@/lib/newsletter-email-html";
 import { formatShortcut, useInlineFormat } from "@/components/dashboard/editable-section";
@@ -36,7 +36,8 @@ import { formatTimestamp, insertStepScreenshot, parseScreenshotMarks, removeScre
 import type { PreSendCheck } from "@/lib/services/newsletter-drafter/checks";
 import { applyFixes, type ProofreadFix } from "@/lib/services/newsletter-drafter/proofread";
 import type { NewsletterDraftProgress, NewsletterDraftSource, NewsletterReview, NewsletterReviewFinding, NewsletterSpecialSource } from "@/lib/db/schema";
-import { NEWSLETTER_START_DELAY_MS } from "@/lib/services/newsletter-drafter/format-config";
+import { NEWSLETTER_START_DELAY_MS, formatConfigFor } from "@/lib/services/newsletter-drafter/format-config";
+import { adLink } from "@/lib/services/newsletter-drafter/special-compose";
 import { DRAFT_PHASES, draftProgress, type DraftPhaseName } from "@/lib/estimated-progress";
 
 export interface EditorDraft {
@@ -64,7 +65,7 @@ export interface EditorDraft {
   error: string | null;
   specialCopy: string | null;
   specialOriginal: string | null;
-  specialMode: "verbatim" | "rewrite" | null;
+  specialMode: "verbatim" | "rewrite" | "removed" | null;
   specialSource: NewsletterSpecialSource | null;
   specialError: string | null;
   specialLabel: string | null;
@@ -389,9 +390,10 @@ function Workspace({
     await post(`/api/newsletter-drafts/${draft.id}/cancel`, section ? { section } : {}, section ? `cancel:${section}` : "cancel");
   }
 
-  async function special(action: "verbatim" | "rewrite" | "refresh") {
+  /** The ad's side panel (paste, rewrite, Make changes, link, remove, Asana). Saves first: the server reads the saved ad. */
+  async function special(body: SpecialBody) {
     if (dirty && !(await save())) return;
-    await post(`/api/newsletter-drafts/${draft.id}/special`, { action }, `special:${action}`);
+    await post(`/api/newsletter-drafts/${draft.id}/special`, body, `special:${body.action}`);
   }
 
   async function redraft() {
@@ -672,6 +674,8 @@ function Workspace({
   );
 
   const sectionMd = (key: string) => sections.find((x) => x.key === key)?.markdown ?? "";
+  /** The ad as the email shows it: its copy plus the CTA, else what the drafter wrote in its slot. */
+  const adText = (key: string) => (specialCopy.trim() ? sponsorBlock(specialCopy, draft.specialSource?.landingUrl ?? null) : sectionMd(key));
   const setSectionMd = (key: string, md: string) =>
     setSections((cur) => (cur.some((x) => x.key === key) ? cur.map((x) => (x.key === key ? { ...x, markdown: md } : x)) : [...cur, { key, markdown: md }]));
   const deselect = () => {
@@ -949,9 +953,10 @@ function Workspace({
         )}
         {selSection ? (
           selSection.kind === "sponsor" ? (
-            <SponsorSection
+            <AdPanel
               label={draft.specialLabel ?? selSection.heading ?? "Sponsor"}
               draft={draft}
+              adText={adText(selSection.key)}
               busyAction={busyAction}
               onAction={special}
             />
@@ -1221,13 +1226,9 @@ function Workspace({
             {draft.template ? (
               draft.template.sections.map((sec) =>
                 sec.kind === "sponsor" ? (
-                  <SponsorSection
-                    key={sec.key}
-                    label={draft.specialLabel ?? sec.heading ?? "Sponsor"}
-                    draft={draft}
-                    busyAction={busyAction}
-                    onAction={special}
-                  />
+                  <div key={sec.key} className="rounded-lg border p-3">
+                    <AdPanel label={draft.specialLabel ?? sec.heading ?? "Sponsor"} draft={draft} adText={adText(sec.key)} busyAction={busyAction} onAction={special} />
+                  </div>
                 ) : (
                   <SectionEditor
                     key={sec.key}
@@ -1873,57 +1874,219 @@ function ReviewPanel({
   );
 }
 
-function SponsorSection({
+export type SpecialBody =
+  | { action: "verbatim" | "refresh" | "remove" }
+  | { action: "rewrite"; instruction?: string | null; current?: string | null }
+  | { action: "paste"; copy: string; link?: string | null; rewrite?: boolean }
+  | { action: "link"; url: string; current: string };
+
+/**
+ * The side panel for the issue's ad (the template's sponsor section): what it
+ * is, its main link, paste-in copy (Slack, a doc, an email) used as written
+ * or written in our voice, "Make changes", and taking it out of the issue.
+ * Asana is the optional source, so it sits last. Nothing here changes how the
+ * ad looks in the email.
+ */
+function AdPanel({
   label,
   draft,
+  adText,
   busyAction,
   onAction,
 }: {
   label: string;
   draft: EditorDraft;
+  /** The ad as the email shows it now (the copy plus its CTA, or what the drafter wrote). */
+  adText: string;
   busyAction: string | null;
-  onAction: (a: "verbatim" | "rewrite" | "refresh") => void;
+  onAction: (body: SpecialBody) => void;
 }) {
-  const fromAsana = !!draft.specialSource;
+  const removed = draft.specialMode === "removed" && !adText.trim();
+  const link = adLink(adText);
+  const [linkDraft, setLinkDraft] = useState(link ?? "");
+  useEffect(() => setLinkDraft(link ?? ""), [link]);
+  const [paste, setPaste] = useState("");
+  const [pasteLink, setPasteLink] = useState("");
+  const [instruction, setInstruction] = useState("");
+  // Pasting copy that ends in a URL fills the link box (when it's empty).
+  const pastedUrl = adLink(paste);
+  const busy = busyAction !== null;
+  const spin = (a: string) => busyAction === `special:${a}` && <Loader2 className="animate-spin" />;
+  const asana = formatConfigFor(draft.formatName).promo;
+  const commitLink = () => {
+    const url = linkDraft.trim();
+    if (url && url !== link) onAction({ action: "link", url, current: adText });
+  };
+
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-amber-300/60 bg-amber-50/40 p-3 dark:border-amber-700/50 dark:bg-amber-900/10">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="flex flex-col gap-0.5">
-          <span className="text-sm font-medium">{label} (sponsor)</span>
-          {draft.specialSource ? (
-            <a className="text-xs text-primary underline" href={draft.specialSource.taskUrl} target="_blank" rel="noreferrer">
-              {draft.specialSource.taskName}
-            </a>
-          ) : (
-            <span className="text-xs text-muted-foreground">No sponsor from Asana{draft.specialError ? `: ${draft.specialError}` : ""} — the draft wrote this section.</span>
-          )}
-          {draft.specialSource?.copyFrom === "focus_field" && (
-            <span className="text-xs text-amber-700 dark:text-amber-300">
-              Placeholder: using the task&apos;s &quot;ad copy focus&quot;. Add a &quot;Final Newsletter Copy&quot; subtask in Asana for the real copy.
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-1.5 rounded-lg border border-amber-300/70 bg-amber-50/60 p-3 dark:border-amber-700/50 dark:bg-amber-900/15">
+        <div className="flex items-center justify-between gap-2">
+          <span className="flex items-center gap-2 text-sm font-semibold">
+            <span className="flex size-6 items-center justify-center rounded-md bg-amber-400/90 text-amber-950">
+              <Megaphone className="size-3.5" />
             </span>
+            Ad · {label}
+          </span>
+          {!removed && (
+            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive" onClick={() => onAction({ action: "remove" })} disabled={busy} title="Take the ad out of this issue (the section and its heading drop from the email)">
+              {spin("remove") || <Trash2 />}
+              Remove
+            </Button>
           )}
         </div>
-        <div className="flex flex-wrap gap-2">
-          {fromAsana && (
-            <>
-              <Button size="sm" variant={draft.specialMode === "verbatim" ? "secondary" : "outline"} onClick={() => onAction("verbatim")} disabled={busyAction !== null}>
-                {busyAction === "special:verbatim" && <Loader2 className="animate-spin" />}
+        <p className="text-xs text-muted-foreground">
+          {removed
+            ? "No ad in this issue: the section and its heading are left out of the email."
+            : "This section is a paid or promo spot. Click it in the email to edit the words, or paste new copy below."}
+        </p>
+        {removed && draft.specialOriginal && (
+          <Button size="sm" variant="outline" className="self-start" onClick={() => onAction({ action: "verbatim" })} disabled={busy}>
+            {spin("verbatim") || <RotateCcw />}
+            Put it back
+          </Button>
+        )}
+      </div>
+
+      {!removed && (
+        <div className="flex flex-col gap-1.5">
+          <span className="flex items-center gap-1.5 text-xs font-medium">
+            <Link2 className="size-3.5" /> Main link
+          </span>
+          {link || adText.trim() ? (
+            <div className="flex items-center gap-1.5">
+              <Input
+                value={linkDraft}
+                placeholder="https://… (the ad has no link yet)"
+                onChange={(e) => setLinkDraft(e.target.value)}
+                onBlur={commitLink}
+                onKeyDown={(e) => e.key === "Enter" && commitLink()}
+                disabled={busy}
+                className="h-8 text-xs"
+              />
+              {link && (
+                <a href={link} target="_blank" rel="noreferrer" title="Open the link" className={cn(buttonVariants({ variant: "outline", size: "icon" }), "size-8 shrink-0")}>
+                  <ExternalLink className="size-3.5" />
+                </a>
+              )}
+            </div>
+          ) : (
+            <span className="text-xs text-muted-foreground">Paste the ad below to set it.</span>
+          )}
+          {link && <span className="text-[11px] text-muted-foreground">Where the button in the ad goes. Change it here and every copy of it in the ad changes.</span>}
+        </div>
+      )}
+
+      {!removed && adText.trim() && (
+        <div className="flex flex-col gap-1.5">
+          <span className="text-xs font-medium">Make changes</span>
+          <div className="flex items-center gap-1.5">
+            <Input
+              value={instruction}
+              placeholder="Shorter, lead with the free trial…"
+              onChange={(e) => setInstruction(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && instruction.trim()) {
+                  onAction({ action: "rewrite", instruction, current: adText });
+                  setInstruction("");
+                }
+              }}
+              disabled={busy}
+              className="h-8 text-xs"
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy || !instruction.trim()}
+              onClick={() => {
+                onAction({ action: "rewrite", instruction, current: adText });
+                setInstruction("");
+              }}
+            >
+              {spin("rewrite") || <Wand2 />}
+              Change
+            </Button>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            <Button size="sm" variant={draft.specialMode === "rewrite" ? "secondary" : "outline"} onClick={() => onAction({ action: "rewrite", current: adText })} disabled={busy}>
+              {spin("rewrite") || <Sparkles />}
+              {draft.specialMode === "rewrite" ? "Rewrite again" : "Rewrite in our voice"}
+            </Button>
+            {draft.specialOriginal && draft.specialMode === "rewrite" && (
+              <Button size="sm" variant="outline" onClick={() => onAction({ action: "verbatim" })} disabled={busy}>
+                {spin("verbatim") || <RotateCcw />}
                 Use as written
               </Button>
-              <Button size="sm" variant={draft.specialMode === "rewrite" ? "secondary" : "outline"} onClick={() => onAction("rewrite")} disabled={busyAction !== null}>
-                {busyAction === "special:rewrite" && <Loader2 className="animate-spin" />}
-                {draft.specialMode === "rewrite" ? "Rewrite again" : "Rewrite in our voice"}
-              </Button>
-            </>
-          )}
-          <Button size="sm" variant="ghost" onClick={() => onAction("refresh")} disabled={busyAction !== null}>
-            {busyAction === "special:refresh" && <Loader2 className="animate-spin" />}
-            Refresh from Asana
+            )}
+          </div>
+        </div>
+      )}
+
+      <div className="flex flex-col gap-1.5 rounded-lg border border-dashed p-3">
+        <span className="flex items-center gap-1.5 text-xs font-medium">
+          <ClipboardPaste className="size-3.5" /> {adText.trim() ? "Replace with new ad copy" : "Write this ad"}
+        </span>
+        <Textarea
+          value={paste}
+          onChange={(e) => setPaste(e.target.value)}
+          placeholder="Paste the ad from Slack, a doc or an email. Or just a few lines about the offer and we'll write it."
+          className="min-h-24 text-xs"
+          disabled={busy}
+        />
+        <Input
+          value={pasteLink}
+          onChange={(e) => setPasteLink(e.target.value)}
+          placeholder={pastedUrl ? `Link: ${pastedUrl}` : "Link (optional): https://…"}
+          className="h-8 text-xs"
+          disabled={busy}
+        />
+        <div className="flex flex-wrap gap-1.5">
+          <Button
+            size="sm"
+            disabled={busy || !paste.trim()}
+            onClick={() => {
+              onAction({ action: "paste", copy: paste, link: pasteLink.trim() || null, rewrite: true });
+              setPaste("");
+              setPasteLink("");
+            }}
+          >
+            {busyAction === "special:paste" ? <Loader2 className="animate-spin" /> : <Sparkles />}
+            Write it in our voice
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy || !paste.trim()}
+            onClick={() => {
+              onAction({ action: "paste", copy: paste, link: pasteLink.trim() || null });
+              setPaste("");
+              setPasteLink("");
+            }}
+          >
+            Use as written
           </Button>
         </div>
       </div>
-      <p className="rounded-md bg-white/70 p-2 text-xs text-muted-foreground dark:bg-transparent">Edit the copy right in the email: click the section there.</p>
-      {draft.specialSource?.landingUrl && <span className="break-all text-xs text-muted-foreground">Landing page: {draft.specialSource.landingUrl}</span>}
+
+      {asana && (
+        <div className="flex flex-col gap-1 border-t pt-3 text-xs text-muted-foreground">
+          <span className="font-medium text-foreground/70">From Asana (optional)</span>
+          {draft.specialSource ? (
+            <a className="truncate text-primary underline" href={draft.specialSource.taskUrl} target="_blank" rel="noreferrer">
+              {draft.specialSource.taskName}
+            </a>
+          ) : (
+            <span>Nothing booked on the promo calendar for this date{draft.specialError ? `: ${draft.specialError}` : ""}.</span>
+          )}
+          {draft.specialSource?.copyFrom === "focus_field" && (
+            <span className="text-amber-700 dark:text-amber-300">The copy is a placeholder from the task&apos;s &quot;ad copy focus&quot;. Add a &quot;Final Newsletter Copy&quot; subtask in Asana for the real copy, or paste it above.</span>
+          )}
+          <Button size="sm" variant="ghost" className="h-7 self-start px-2 text-xs" onClick={() => onAction({ action: "refresh" })} disabled={busy}>
+            {spin("refresh") || <RefreshCw />}
+            Refresh from Asana
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

@@ -29,6 +29,15 @@ describe("findIssues", () => {
     expect(out.find((c) => c.kind === "link")?.sectionKey).toBe("orange_juice");
     expect(out.find((c) => c.kind === "sponsor")).toMatchObject({ level: "warn" });
   });
+
+  it("an ad taken out of the issue is fine, an ad nobody wrote is not, and pasted copy isn't called Asana's", () => {
+    const sponsorKey = sb.sections.find((s) => s.kind === "sponsor")!.key;
+    const secs = sections.map((s) => (s.key === sponsorKey ? { ...s, markdown: "" } : s));
+    const base = { template: sb, sections: secs, subject: "s", previewText: "p", specialCopy: null, screenshots: {} };
+    expect(findIssues({ ...base, specialMode: "removed" }).find((c) => c.kind === "sponsor")).toMatchObject({ level: "ok" });
+    expect(findIssues(base).find((c) => c.kind === "sponsor")).toMatchObject({ level: "warn" });
+    expect(findIssues({ ...base, specialCopy: "Pasted ad", specialCopyFrom: null }).find((c) => c.kind === "sponsor")?.message).toContain("ad copy set");
+  });
 });
 
 describe("collectUrls + checkLinks", () => {

@@ -22,6 +22,7 @@ export async function POST(_request: NextRequest, context: RouteContext) {
     previewText: draft.previewText,
     specialCopy: draft.specialCopy,
     specialCopyFrom: draft.specialSource?.copyFrom ?? null,
+    specialMode: draft.specialMode,
     screenshots: draft.screenshots,
   });
   const links = await checkLinks(collectUrls(draft.sections));

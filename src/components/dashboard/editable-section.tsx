@@ -13,7 +13,7 @@
 // Markdown on screen.
 
 import { useLayoutEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
-import { LayoutTemplate, Loader2, Sparkles } from "lucide-react";
+import { LayoutTemplate, Loader2, Megaphone, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toggleInline, type Edited, type InlineMark } from "@/lib/markdown-format";
 import { screenshotKey } from "@/lib/newsletter-screenshots";
@@ -121,6 +121,12 @@ export function EditableSection({
         </span>
       )}
       {edit.mode === "template" && <FillBadge isSponsor={isSponsor} />}
+      {/* Marks the issue's ad on the canvas only: the sent email never carries it. */}
+      {isSponsor && edit.mode !== "template" && (
+        <span className="pointer-events-none absolute -top-2.5 right-2 z-10 inline-flex items-center gap-1 rounded-full bg-amber-400 px-2 py-0.5 text-[10px] font-semibold uppercase leading-normal tracking-wide text-amber-950 shadow-sm">
+          <Megaphone className="size-3" /> Ad
+        </span>
+      )}
       {children}
     </div>
   );
@@ -170,7 +176,7 @@ function FillBadge({ isSponsor }: { isSponsor: boolean }) {
   return (
     <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-[#eef6ff] px-2 py-0.5 text-[11px] font-medium leading-normal text-[#2563eb]">
       <Sparkles className="size-3" />
-      {isSponsor ? "Filled from Asana each issue (the sponsor's copy)" : "AI writes this each draft, from these instructions"}
+      {isSponsor ? "The ad: pasted in each issue (or pulled from Asana)" : "AI writes this each draft, from these instructions"}
     </span>
   );
 }

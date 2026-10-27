@@ -45,6 +45,8 @@ export function findIssues(args: {
   previewText: string | null;
   specialCopy: string | null;
   specialCopyFrom?: "subtask" | "focus_field" | null;
+  /** "removed": the ad was taken out of this issue on purpose. */
+  specialMode?: string | null;
   screenshots: Record<string, ChosenScreenshot>;
 }): PreSendCheck[] {
   const out: PreSendCheck[] = [];
@@ -62,8 +64,9 @@ export function findIssues(args: {
     if (sec.kind === "sponsor") {
       if (args.specialCopy?.trim()) {
         if (args.specialCopyFrom === "focus_field") out.push({ kind: "sponsor", level: "warn", message: `${label}: the sponsor copy is a placeholder from the Asana form (no "Final Newsletter Copy" subtask yet).`, sectionKey: sec.key });
-        else out.push({ kind: "sponsor", level: "ok", message: `${label}: sponsor copy from Asana.`, sectionKey: sec.key });
-      } else if (!md) out.push({ kind: "sponsor", level: "warn", message: `${label} is empty — no sponsor booked and nothing written.`, sectionKey: sec.key });
+        else out.push({ kind: "sponsor", level: "ok", message: `${label}: ${args.specialCopyFrom ? "sponsor copy from Asana" : "ad copy set"}.`, sectionKey: sec.key });
+      } else if (args.specialMode === "removed" && !md) out.push({ kind: "sponsor", level: "ok", message: `${label}: ad taken out of this issue.`, sectionKey: sec.key });
+      else if (!md) out.push({ kind: "sponsor", level: "warn", message: `${label} is empty — no sponsor booked and nothing written.`, sectionKey: sec.key });
       continue;
     }
     if (!md) {
