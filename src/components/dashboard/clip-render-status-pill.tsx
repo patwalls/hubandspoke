@@ -8,14 +8,18 @@
  *
  * Everyone on the team sees the state (rendering / ready / failed). Only
  * users with the `clipEditor` flag (`canEdit` from the API) get the actions:
- * retry a failed render, or reopen the editor and re-export.
+ * retry a failed render, or reopen the editor and re-export. "Edit clip" also
+ * sits next to the chip, not only inside its popover: people asked teammates
+ * in comments how to edit a rendered clip.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { toast } from "sonner";
+import { ScissorsIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
+import { trackUsage } from "@/lib/usage/track";
 import type { ClipRenderStatus } from "@/lib/services/clip-editor/render-status";
 
 const ClipEditorDialog = dynamic(
@@ -139,6 +143,10 @@ export function ClipRenderStatusPill({
   if (!render) return null;
   const style = STATE_STYLE[render.state];
   const canAct = !!data?.canEdit && !!data?.clipIdeaId;
+  const openEditor = (mark: string) => {
+    trackUsage(mark, brand);
+    setEditorOpen(true);
+  };
 
   return (
     <>
@@ -173,13 +181,24 @@ export function ClipRenderStatusPill({
                   {retrying ? "Retrying…" : "Retry render"}
                 </Button>
               )}
-              <Button size="sm" variant="outline" onClick={() => setEditorOpen(true)}>
+              <Button size="sm" variant="outline" onClick={() => openEditor("content:edit-clip:popover")}>
                 Edit clip & re-export
               </Button>
             </div>
           )}
         </PopoverContent>
       </Popover>
+
+      {canAct && !inFlight && (
+        <button
+          type="button"
+          onClick={() => openEditor("content:edit-clip")}
+          className="inline-flex h-6 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted/40"
+        >
+          <ScissorsIcon className="size-3" aria-hidden />
+          Edit clip
+        </button>
+      )}
 
       {canAct && editorOpen && (
         <ClipEditorDialog

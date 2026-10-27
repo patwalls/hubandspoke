@@ -29,6 +29,17 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-10-28-edit-clip-chip",
+    shippedAt: "2026-10-28T00:15:00Z",
+    kind: "feature",
+    title: "Edit a rendered clip from its page",
+    body:
+      "A clip made in the clip editor now shows an Edit clip button at the top of its content page, next to Clip rendered. " +
+      "Click it to fix the text or the cut and export again, no need to dig into the status chip.",
+    screen: "content:edit-clip",
+    audience: { flag: "clipEditor" },
+  },
+  {
     id: "2026-10-27-home-waiting",
     shippedAt: "2026-10-27T12:15:00Z",
     kind: "feature",
