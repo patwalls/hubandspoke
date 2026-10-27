@@ -7,8 +7,8 @@ export const NEW_POST_KINDS = [
   { key: "instagram_post", label: "Instagram post", platform: "instagram", postType: "instagram_post" },
   { key: "instagram_reel", label: "Instagram reel", platform: "instagram", postType: "instagram_reel" },
   { key: "youtube_short", label: "YouTube Short", platform: "youtube", postType: "youtube_shorts" },
-  { key: "youtube_community", label: "YouTube community post", platform: "youtube", postType: "youtube_community" },
-  { key: "x_post", label: "X / Twitter post", platform: "x", postType: "x" },
+  { key: "youtube_community", label: "YouTube post", platform: "youtube", postType: "youtube_community" },
+  { key: "x_post", label: "X post", platform: "x", postType: "x" },
   { key: "linkedin_post", label: "LinkedIn post", platform: "linkedin", postType: "linkedin" },
 ] as const satisfies readonly { key: string; label: string; platform: string; postType: PostType }[];
 

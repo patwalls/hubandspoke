@@ -23,7 +23,7 @@ import {
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
-  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -67,10 +67,11 @@ interface VideoOption {
   hasTranscript?: boolean;
 }
 
-/** Every kind of content the menu offers, in order; `platform` draws its logo. */
-const KINDS: { key: "newsletter" | NewPostKind; label: string; platform: string }[] = [
-  { key: "newsletter", label: "Newsletter", platform: "newsletter" },
-  ...NEW_POST_KINDS.map((k) => ({ key: k.key, label: k.label, platform: k.platform })),
+/** Every kind of content the menu offers, in order — the newsletter, then the
+ *  posts — split by a divider; `platform` draws its logo. */
+const KIND_GROUPS: { key: "newsletter" | NewPostKind; label: string; platform: string }[][] = [
+  [{ key: "newsletter", label: "Newsletter", platform: "newsletter" }],
+  NEW_POST_KINDS.map((k) => ({ key: k.key, label: k.label, platform: k.platform })),
 ];
 
 export function NewContentMenu({
@@ -95,28 +96,28 @@ export function NewContentMenu({
           <span className="hidden sm:inline">New</span>
           <ChevronDown className="size-3.5 opacity-70" />
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="min-w-52">
-          <DropdownMenuGroup>
-            <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
-              Create new…
-            </DropdownMenuLabel>
-            {KINDS.map((k) => (
-              <DropdownMenuItem
-                key={k.key}
-                onClick={() => setOpen(k.key)}
-                className="cursor-pointer gap-2"
-                data-testid={`new-content-${k.key}`}
-              >
-                <PlatformIcon
-                  platform={k.platform}
-                  size={15}
-                  inheritColor
-                  className="text-muted-foreground"
-                />
-                <span className="flex-1">{k.label}</span>
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuGroup>
+        <DropdownMenuContent align="end" className="min-w-44">
+          {KIND_GROUPS.map((group, i) => (
+            <DropdownMenuGroup key={i}>
+              {i > 0 && <DropdownMenuSeparator />}
+              {group.map((k) => (
+                <DropdownMenuItem
+                  key={k.key}
+                  onClick={() => setOpen(k.key)}
+                  className="cursor-pointer gap-2 whitespace-nowrap"
+                  data-testid={`new-content-${k.key}`}
+                >
+                  <PlatformIcon
+                    platform={k.platform}
+                    size={15}
+                    inheritColor
+                    className="text-muted-foreground"
+                  />
+                  <span className="flex-1">{k.label}</span>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuGroup>
+          ))}
         </DropdownMenuContent>
       </DropdownMenu>
       {open === "newsletter" && (
@@ -713,7 +714,7 @@ function NewPostDialog({
           </span>
           <div className="flex flex-col">
             <DialogTitle className="text-base font-semibold">
-              New {meta.label.replace(/^X \/ Twitter/, "X")}
+              New {meta.label}
             </DialogTitle>
             <span className="text-xs text-muted-foreground">
               Pick the video it&apos;s made from and what it&apos;s about; the
