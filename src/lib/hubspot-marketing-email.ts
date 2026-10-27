@@ -53,6 +53,7 @@ export function emailEditUrl(emailId: string): string {
  */
 const ALLOWED_CALLS: ReadonlyArray<{ method: string; path: RegExp; why: string }> = [
   { method: "GET", path: /^\/marketing\/v3\/emails\/\d+$/, why: "read an email (the template, or the clone we just made)" },
+  { method: "GET", path: /^\/marketing\/v3\/emails\/\d+\?includeStats=true$/, why: "read a sent issue's opens/clicks for its content page" },
   { method: "POST", path: /^\/marketing\/v3\/emails\/clone$/, why: "copy the template into a new unsent email" },
   { method: "PATCH", path: /^\/marketing\/v3\/emails\/\d+$/, why: "fill in the clone's name, subject and body" },
   {
@@ -221,6 +222,24 @@ export async function createDraftEmailFromTemplate(args: {
 /** One email, for its send state (`state`, `publishDate`). The same GET the push already uses. */
 export async function getHubspotEmail(emailId: string): Promise<HubspotEmail> {
   return hubspotFetch<HubspotEmail>(`/marketing/v3/emails/${emailId}`, { method: "GET" });
+}
+
+/** A sent email's audience numbers: HubSpot's `open`/`click` counters are unique contacts. */
+export interface HubspotEmailStats {
+  delivered: number;
+  opens: number;
+  clicks: number;
+}
+
+/** A sent email's stats (read-only), or null while it has none (unsent). */
+export async function getHubspotEmailStats(emailId: string): Promise<HubspotEmailStats | null> {
+  const e = await hubspotFetch<HubspotEmail & { stats?: { counters?: Record<string, number> } }>(
+    `/marketing/v3/emails/${emailId}?includeStats=true`,
+    { method: "GET" },
+  );
+  const c = e.stats?.counters;
+  if (!c || !c.delivered) return null;
+  return { delivered: c.delivered, opens: c.open ?? 0, clicks: c.click ?? 0 };
 }
 
 export interface HubspotEmailSummary extends HubspotEmail {

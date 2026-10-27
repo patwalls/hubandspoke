@@ -29,6 +29,7 @@ import { extractStoryRefs, usageGroupFor, videoKeysForYoutubeIds } from "./usage
 import { resolveEditor } from "@/lib/services/assignees";
 import { scheduledPrimaries } from "./format-config";
 import { htmlToPlainText } from "./sources";
+import { syncRecentHubspotNewsletterStats } from "./hubspot-stats";
 
 const STARTER_STORY_BUSINESS_UNIT = "4057751";
 
@@ -327,12 +328,13 @@ export async function importHubspotIssues(since: Date): Promise<number> {
   return n;
 }
 
-export async function syncNewsletterHistory(opts: { since: Date }): Promise<{ hubspot: number; items: number; beehiiv: number; beehiivImported: number; hubspotImported: number }> {
+export async function syncNewsletterHistory(opts: { since: Date }): Promise<{ hubspot: number; items: number; beehiiv: number; beehiivImported: number; hubspotImported: number; hubspotStats: number }> {
   let hubspot = 0;
   let items = 0;
   const beehiiv = await syncBeehiivHistory(opts.since);
   const beehiivImported = await importBeehiivHowToIssues();
   const hubspotImported = await importHubspotIssues(opts.since).catch(() => 0);
+  const hubspotStats = await syncRecentHubspotNewsletterStats(opts.since).catch(() => 0);
 
   const pushed = await db
     .select({ id: newsletterDrafts.hubspotEmailId })
@@ -390,5 +392,5 @@ export async function syncNewsletterHistory(opts: { since: Date }): Promise<{ hu
     });
     items++;
   }
-  return { hubspot, items, beehiiv, beehiivImported, hubspotImported };
+  return { hubspot, items, beehiiv, beehiivImported, hubspotImported, hubspotStats };
 }

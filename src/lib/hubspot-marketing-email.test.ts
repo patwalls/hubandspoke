@@ -67,6 +67,7 @@ describe("buildHtmlEmailContent", () => {
 describe("assertAllowedHubspotCall", () => {
   it("allows only reading, cloning and editing marketing emails", () => {
     expect(() => assertAllowedHubspotCall("GET", "/marketing/v3/emails/123")).not.toThrow();
+    expect(() => assertAllowedHubspotCall("GET", "/marketing/v3/emails/123?includeStats=true")).not.toThrow();
     expect(() => assertAllowedHubspotCall("post", "/marketing/v3/emails/clone")).not.toThrow();
     expect(() => assertAllowedHubspotCall("PATCH", "/marketing/v3/emails/123")).not.toThrow();
     expect(() => assertAllowedHubspotCall("GET", "/marketing/v3/emails?limit=100&createdAfter=2026-06-01T00%3A00%3A00.000Z")).not.toThrow();

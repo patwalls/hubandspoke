@@ -42,6 +42,7 @@ import {
   creditsFor,
 } from "./metrics-provider";
 import { estimateViewsFromLikes } from "./view-estimator";
+import { hubspotEmailIdOf, syncHubspotNewsletterStats } from "./newsletter-drafter/hubspot-stats";
 
 // Opportunistic publish-date backfill for refreshItemMetrics. Returns SET
 // fragments that COALESCE-write publishedDate / publishedAt: existing values
@@ -209,7 +210,7 @@ async function stampSyncResult(itemId: string, error: string | null): Promise<vo
 export interface RefreshItemResult {
   itemId: string;
   updated: boolean;
-  platform: PlatformKind | "unknown";
+  platform: PlatformKind | "newsletter" | "unknown";
   views: number | null;
   likes: number | null;
   comments: number | null;
@@ -239,6 +240,7 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
       postType: productionItems.postType,
       platformContentId: productionItems.platformContentId,
       accountId: productionItems.accountId,
+      brand: productionItems.brand,
     })
     .from(productionItems)
     .where(eq(productionItems.id, itemId))
@@ -246,6 +248,22 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
 
   if (!item) {
     throw new Error(`Item not found: ${itemId}`);
+  }
+
+  // --- Starter Story HubSpot newsletter (opens → views, clicks; no SC credit) ---
+  const hubspotEmailId = hubspotEmailIdOf(item);
+  if (hubspotEmailId) {
+    const stats = await syncHubspotNewsletterStats(itemId, hubspotEmailId);
+    return {
+      itemId,
+      updated: !!stats,
+      platform: "newsletter",
+      views: stats?.opens ?? null,
+      likes: null,
+      comments: null,
+      ...(stats ? {} : { note: "HubSpot has no stats for this email yet" }),
+      creditsUsed: 0,
+    };
   }
 
   const url = item.publishedLink || item.youtubeUrl || "";

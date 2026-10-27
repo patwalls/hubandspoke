@@ -9,6 +9,7 @@ import {
 } from "@/lib/platform-field-schemas";
 import { Badge } from "@/components/ui/badge";
 import { PreviewEmbed } from "./embed";
+import { NewsletterLivePost } from "./platforms/newsletter";
 
 const PLATFORM_LABEL: Record<PlatformKey, string> = {
   instagram_post: "Instagram Post",
@@ -51,11 +52,15 @@ export function PublishedEmbed({ item }: { item: ProductionItem }) {
         </Badge>
       </div>
       <div className="border-t border-border px-4 py-4 sm:px-5">
-        <PreviewEmbed
-          platform={platform}
-          publishedLink={item.publishedLink}
-          newsletterBodyHtml={item.newsletterBodyHtml}
-        />
+        {platform === "newsletter" ? (
+          <NewsletterLivePost
+            itemId={item.id}
+            bodyHtml={item.newsletterBodyHtml ?? null}
+            fallback={<PreviewEmbed platform={platform} publishedLink={item.publishedLink} />}
+          />
+        ) : (
+          <PreviewEmbed platform={platform} publishedLink={item.publishedLink} />
+        )}
       </div>
     </div>
   );

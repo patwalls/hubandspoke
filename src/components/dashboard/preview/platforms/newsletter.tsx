@@ -7,6 +7,7 @@ import { NEWSLETTER_EDITOR_CLOSED, NewsletterItemEditor } from "@/components/das
 import { MonogramAvatar } from "../avatar";
 import { EditableField } from "../editable-field";
 import { readLive, type SimulatorProps } from "../simulator-types";
+import { liveNewsletterDocument } from "@/lib/newsletter-draft-html";
 
 interface EditionPreview {
   status: string;
@@ -33,6 +34,33 @@ export function NewsletterSimulator(props: SimulatorProps) {
   }
   if (enabled && edition) return <EditionEmail itemId={props.itemId} edition={edition} onClosed={reload} />;
   return <NewsletterMock {...props} />;
+}
+
+/**
+ * A published newsletter's "Live post": the edition's designed email when it
+ * has one, else the imported body set in a plain email column
+ * (`liveNewsletterDocument`). `fallback` when there's nothing to show.
+ */
+export function NewsletterLivePost({
+  itemId,
+  bodyHtml,
+  fallback,
+}: {
+  itemId: string;
+  bodyHtml: string | null;
+  fallback: React.ReactNode;
+}) {
+  const flags = useFeatureFlags();
+  const { edition, loading } = useEditionPreview(itemId, !!flags?.newsletterDrafter);
+  if (loading) {
+    return (
+      <div className="flex h-40 items-center justify-center text-muted-foreground">
+        <Loader2 className="size-5 animate-spin" />
+      </div>
+    );
+  }
+  const html = liveNewsletterDocument(edition?.html ?? null, bodyHtml);
+  return html ? <EmailFrame html={html} /> : <>{fallback}</>;
 }
 
 function useEditionPreview(itemId: string, enabled: boolean) {

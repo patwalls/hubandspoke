@@ -3555,7 +3555,11 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
             ) : null}
           </div>
           <p className="mt-3 text-xs text-muted-foreground">
-            {item.viewsEstimated ? "Estimated from likes" : "Reported"}
+            {item.postType === "newsletter" && item.newsletterRecipients
+              ? `Unique opens · ${(((item.views ?? 0) / item.newsletterRecipients) * 100).toFixed(1)}% of ${formatCompact(item.newsletterRecipients)} delivered`
+              : item.viewsEstimated
+                ? "Estimated from likes"
+                : "Reported"}
           </p>
         </div>
         <div className="rounded-lg border border-border bg-card p-4">

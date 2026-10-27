@@ -36,3 +36,35 @@ test("the content page shows a newsletter's designed email", async ({ page }) =>
     await sql.end();
   }
 });
+
+// A PUBLISHED newsletter's "Live post" is the same designed email — not the
+// imported HubSpot/beehiiv fragment in browser-default Times (Pat, 2026-10-27).
+test("a published newsletter's live post shows its designed email", async ({ page }) => {
+  const sql = postgres(process.env.DATABASE_URL!, { max: 1 });
+  try {
+    const [row] = await sql<{ id: string; brand: string }[]>`
+      SELECT p.id, b.slug AS brand
+      FROM newsletter_drafts d
+      JOIN production_items p ON p.id = d.production_item_id
+      JOIN accounts a ON a.id = p.account_id
+      JOIN brands b ON b.id = a.brand_id
+      WHERE d.status = 'ready' AND p.post_type = 'newsletter'
+        AND p.status = 'Published' AND p.published_link IS NOT NULL
+        AND (d.screenshots IS NULL OR d.screenshots = '{}'::jsonb)
+      ORDER BY d.updated_at DESC LIMIT 1`;
+    test.skip(!row, "no published newsletter with an edition in this DB");
+
+    await page.goto(`/${row.brand}/content/${row.id}`);
+    const popup = page.getByRole("dialog", { name: "What's new" });
+    await popup.getByRole("button", { name: "Got it" }).click({ timeout: 10_000 }).catch(() => {});
+    await expect(page.getByText("Live post", { exact: true })).toBeVisible({ timeout: 20_000 });
+    // The designed email is table-laid-out; the bare import has no tables.
+    const frame = page.frameLocator('iframe[title="Newsletter email"]');
+    await expect(frame.locator("table").first()).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator('iframe[title="Newsletter body"]')).toHaveCount(0);
+    await page.locator('iframe[title="Newsletter email"]').scrollIntoViewIfNeeded();
+    await page.screenshot({ path: ".playwright-mcp/screenshots/newsletter-live-post.png", fullPage: true });
+  } finally {
+    await sql.end();
+  }
+});
