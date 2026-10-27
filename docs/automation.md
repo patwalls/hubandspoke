@@ -1561,6 +1561,7 @@ Regression guard: `src/lib/services/underlord-auto-fire.regression.test.ts` grep
 - **design** editor → `findOrCreateDesignItem` (now takes `angle`, written in the insert so its `draft-algorithm-run` sees it) → the editor's open enqueues **`design-draft`**, whose first draft passes `item.angle` as the instruction.
 - **clip** editor, reel/Short → Haiku pick (in the request, ~2–5s; whole transcript, angle-first) → `clip_ideas` row (`generatedBy='clip-editor:new-menu'`) + item in one transaction; the editor's open runs `ensureClipPostDraft` (→ `draft-algorithm-run`) and makes the 9:16 edit doc. X video formats → `findOrCreateClipPost` (now takes `angle`); a whole-video / no-video X format falls back to the post path.
 - Not idempotent by design (each New is a new post) except where it reuses the queue paths' "open draft for this pillar × format".
+- `GET /api/new-post` (the dialog's options) → `listNewPostPillars` also returns each video's `youtubeId` (`youtube_id`, else parsed from `youtube_url` / `published_link`) so the dialog can embed it for a quick watch. Read-only.
 
 **Angle everywhere (2026-10-27).** `production_items.angle` → Draft Algorithm (`editorAngle`, rendered first as THE EDITOR'S ANGLE), `design-draft` first draft, the clip pick. Newsletters: `newsletter_drafts.notes` is shown as **Angle**; `newsletter-draft` puts it right after the pillar as THE ANGLE (ahead of the template and story plan, restated at the end), and `newsletter-review` / subject suggestions check against it.
 

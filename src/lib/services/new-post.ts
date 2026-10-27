@@ -29,6 +29,7 @@ import { recordItemCreated } from "@/lib/services/item-created";
 import { normalizeFormatForWrite } from "@/lib/services/format-validation";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 import { loadFormatTemplate } from "@/lib/services/design-editor/format-template";
+import { youtubeIdFrom } from "@/lib/services/design-editor/assets";
 import { findOrCreateDesignItem } from "@/lib/services/design-editor/create-item";
 import { ClipPostCreateError, findOrCreateClipPost, formatsForClipPosts } from "@/lib/services/clip-editor/from-candidate";
 import { pickPostClip, POST_CLIP_PICKER_VERSION } from "@/lib/services/clip-editor/pick-post-clip";
@@ -62,6 +63,8 @@ export interface NewPostPillarOption {
   hasTranscript: boolean;
   /** An archived video the clip editor can cut (not audio-only). */
   hasVideo: boolean;
+  /** For the dialog's watch-it preview; null when the item has no YouTube link. */
+  youtubeId: string | null;
 }
 
 /** The brand's formats that post to this kind's platform, each with the editor it opens in. */
@@ -94,6 +97,9 @@ export async function listNewPostPillars(brand: string): Promise<NewPostPillarOp
       transcriptId: transcripts.id,
       mediaS3Key: productionItems.mediaS3Key,
       mediaContentType: productionItems.mediaContentType,
+      youtubeId: productionItems.youtubeId,
+      youtubeUrl: productionItems.youtubeUrl,
+      publishedLink: productionItems.publishedLink,
     })
     .from(productionItems)
     .leftJoin(transcripts, eq(transcripts.productionItemId, productionItems.id))
@@ -114,6 +120,7 @@ export async function listNewPostPillars(brand: string): Promise<NewPostPillarOp
     publishedAt: r.publishedAt ? new Date(r.publishedAt).toISOString() : null,
     hasTranscript: r.transcriptId != null,
     hasVideo: !!r.mediaS3Key && !r.mediaContentType?.startsWith("audio/"),
+    youtubeId: r.youtubeId ?? youtubeIdFrom(r.youtubeUrl) ?? youtubeIdFrom(r.publishedLink),
   }));
 }
 

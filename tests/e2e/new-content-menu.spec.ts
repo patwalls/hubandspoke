@@ -1,10 +1,11 @@
 import { test, expect } from "@playwright/test";
 
 /**
- * The nav's New menu (flag `newsletterDrafter`): every kind is live, a
- * LinkedIn post made from it lands on its own page with the angle kept, and
- * the newsletter dialog asks for the Angle on its own row, between the
- * pillar content and the send date.
+ * The nav's New menu (flag `newsletterDrafter`): every kind is live; a post's
+ * dialog is titled with the brand and puts the pillar video (previewed) above
+ * the format; a LinkedIn post made from it lands on its own page with the
+ * angle kept; and the newsletter dialog asks for the Angle on its own row,
+ * between the pillar content and the send date.
  *
  * Writes one LinkedIn post to the local DB (status Assigned, created via
  * new-menu) per run.
@@ -28,6 +29,16 @@ test("every kind is live; a LinkedIn post opens on its page with the angle kept"
   await expect(page.getByTestId("new-post-format")).toBeVisible({ timeout: 15_000 });
   const pillar = page.getByTestId("new-post-pillar");
   test.skip((await pillar.locator("option:not([disabled])").count()) === 0 || (await pillar.inputValue()) === "", "no transcribed pillar video for starter-story in the last 120 days");
+  // The brand is in the title (no Brand field); pillar content comes first,
+  // with the video right under it to watch, then the format.
+  await expect(page.getByRole("dialog").getByRole("heading")).toHaveText("New Starter Story LinkedIn post");
+  await expect(page.getByTestId("new-post-change-brand")).toBeVisible();
+  const above = async (a: string, b: string) =>
+    (await page.getByTestId(a).boundingBox())!.y < (await page.getByTestId(b).boundingBox())!.y;
+  expect(await above("new-post-pillar", "new-post-format")).toBe(true);
+  await expect(page.getByTestId("new-post-pillar-preview")).toHaveAttribute("src", /youtube-nocookie\.com\/embed\/[\w-]{11}/);
+  expect(await above("new-post-pillar-preview", "new-post-format")).toBe(true);
+  await page.getByRole("dialog").screenshot({ path: ".playwright-mcp/screenshots/new-post-dialog.png" });
   await page.getByTestId("new-content-angle").fill("Lead with the first step of the playbook");
   await page.getByTestId("new-post-create").click();
   await page.waitForURL(/\/starter-story\/content\/[0-9a-f-]{36}/, { timeout: 30_000 });

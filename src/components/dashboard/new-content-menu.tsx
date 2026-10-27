@@ -15,7 +15,7 @@
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import { ChevronDown, Loader2, Mail, Plus, Sparkles } from "lucide-react";
+import { Check, ChevronDown, Loader2, Mail, Plus, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -29,6 +29,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { PlatformIcon } from "@/components/ui/platform-icon";
+import { BrandAvatar } from "@/components/ui/brand-avatar";
 import { useFeatureFlags } from "@/components/clip-editor/use-feature-flags";
 import { cn } from "@/lib/utils";
 import { NEW_POST_KINDS, type NewPostKind } from "@/lib/new-post-kinds";
@@ -49,6 +50,8 @@ interface BrandOption {
   label: string;
   disabled?: boolean;
   parent?: string | null;
+  avatar?: string | null;
+  color?: string | null;
 }
 
 interface FormatOption {
@@ -532,6 +535,7 @@ interface PillarOption {
   publishedAt: string | null;
   hasTranscript: boolean;
   hasVideo: boolean;
+  youtubeId: string | null;
 }
 
 const EDITOR_LINE: Record<PostFormatOption["editor"], string> = {
@@ -601,7 +605,9 @@ function NewPostFlow({
   );
 }
 
-/** Brand → format → pillar video → angle → create. */
+/** The brand is the title ("New Starter Story Instagram post", with its
+ *  avatar and a Change brand link) → pillar video, previewed inline so you
+ *  can watch it → format → angle → create. */
 function NewPostDialog({
   kind,
   brands,
@@ -666,6 +672,8 @@ function NewPostDialog({
     options?.pillars.some((p) => p.id === pickedPillarId && usable(p))
       ? pickedPillarId
       : (options?.pillars.find(usable)?.id ?? "");
+  const pillar = options?.pillars.find((p) => p.id === pillarId) ?? null;
+  const brandRow = brands.find((b) => b.slug === brand) ?? null;
 
   const ready = !!options && !!pillarId && !creating;
 
@@ -707,69 +715,63 @@ function NewPostDialog({
     "h-9 w-full rounded-lg border border-input bg-background px-2.5 text-sm";
   return (
     <Dialog open onOpenChange={(o) => !o && !creating && onClose()}>
-      <DialogContent className="flex max-w-lg flex-col gap-0 p-0">
-        <div className="flex items-center gap-3 border-b px-5 py-4">
-          <span className="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
-            <PlatformIcon platform={meta.platform} size={16} inheritColor />
-          </span>
-          <div className="flex flex-col">
-            <DialogTitle className="text-base font-semibold">
-              New {meta.label}
+      <DialogContent className="flex max-h-[92vh] max-w-lg flex-col gap-0 p-0">
+        <div className="flex items-center gap-3 border-b px-5 py-4 pr-12">
+          {brandRow && (
+            <BrandAvatar
+              label={brandRow.label}
+              avatarUrl={brandRow.avatar ?? null}
+              color={brandRow.color ?? null}
+              size={36}
+            />
+          )}
+          <div className="flex min-w-0 flex-col">
+            <DialogTitle className="flex items-center gap-1.5 text-base font-semibold leading-snug">
+              <span>
+                New {brandRow ? `${brandRow.label} ` : ""}
+                {meta.label}
+              </span>
+              <PlatformIcon
+                platform={meta.platform}
+                size={14}
+                inheritColor
+                className="shrink-0 text-muted-foreground"
+              />
             </DialogTitle>
-            <span className="text-xs text-muted-foreground">
-              Pick the video it&apos;s made from and what it&apos;s about; the
-              draft follows the format.
-            </span>
+            {brands.length > 1 && (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  className="self-start rounded text-xs text-muted-foreground hover:text-foreground hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  data-testid="new-post-change-brand"
+                  disabled={creating}
+                >
+                  Change brand
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="min-w-44">
+                  {brands.map((b) => (
+                    <DropdownMenuItem
+                      key={b.slug}
+                      onClick={() => setBrand(b.slug)}
+                      className="cursor-pointer gap-2"
+                    >
+                      <BrandAvatar
+                        label={b.label}
+                        avatarUrl={b.avatar ?? null}
+                        color={b.color ?? null}
+                        size={18}
+                      />
+                      <span className="flex-1">{b.label}</span>
+                      {b.slug === brand && (
+                        <Check className="size-3.5 text-muted-foreground" />
+                      )}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
           </div>
         </div>
-        <div className="flex flex-col gap-4 px-5 py-4">
-          {brands.length > 1 && (
-            <label className="flex flex-col gap-1.5 text-sm">
-              <span className="text-xs font-medium text-muted-foreground">
-                Brand
-              </span>
-              <select
-                className={field}
-                value={brand}
-                onChange={(e) => setBrand(e.target.value)}
-              >
-                {brands.map((b) => (
-                  <option key={b.slug} value={b.slug}>
-                    {b.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-          <label className="flex flex-col gap-1.5 text-sm">
-            <span className="text-xs font-medium text-muted-foreground">
-              Format
-            </span>
-            {options === null ? (
-              <span className="flex h-9 items-center gap-2 text-xs text-muted-foreground">
-                <Loader2 className="size-3.5 animate-spin" /> Loading formats…
-              </span>
-            ) : (
-              <select
-                className={field}
-                value={formatId}
-                onChange={(e) => setFormatId(e.target.value)}
-                data-testid="new-post-format"
-              >
-                {options.formats.map((f) => (
-                  <option key={f.id} value={f.id}>
-                    {f.name}
-                  </option>
-                ))}
-                <option value="">
-                  {options.formats.length === 0
-                    ? `No ${meta.label} format for this brand yet — platform defaults`
-                    : "No format — platform defaults"}
-                </option>
-              </select>
-            )}
-          </label>
-
+        <div className="flex min-h-0 flex-col gap-4 overflow-y-auto px-5 py-4">
           <label className="flex flex-col gap-1.5 text-sm">
             <span className="text-xs font-medium text-muted-foreground">
               Pillar content
@@ -798,6 +800,46 @@ function NewPostDialog({
                         : ""}
                   </option>
                 ))}
+              </select>
+            )}
+          </label>
+          {pillar?.youtubeId && (
+            <iframe
+              key={pillar.youtubeId}
+              src={`https://www.youtube-nocookie.com/embed/${pillar.youtubeId}?rel=0`}
+              title={pillar.title ?? "Pillar video"}
+              allow="encrypted-media; picture-in-picture; fullscreen"
+              allowFullScreen
+              className="aspect-video w-full shrink-0 rounded-lg border bg-muted"
+              data-testid="new-post-pillar-preview"
+            />
+          )}
+
+          <label className="flex flex-col gap-1.5 text-sm">
+            <span className="text-xs font-medium text-muted-foreground">
+              Format
+            </span>
+            {options === null ? (
+              <span className="flex h-9 items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="size-3.5 animate-spin" /> Loading formats…
+              </span>
+            ) : (
+              <select
+                className={field}
+                value={formatId}
+                onChange={(e) => setFormatId(e.target.value)}
+                data-testid="new-post-format"
+              >
+                {options.formats.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.name}
+                  </option>
+                ))}
+                <option value="">
+                  {options.formats.length === 0
+                    ? `No ${meta.label} format for this brand yet — platform defaults`
+                    : "No format — platform defaults"}
+                </option>
               </select>
             )}
           </label>

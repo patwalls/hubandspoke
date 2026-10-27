@@ -19,7 +19,7 @@ import type { pickPostClip } from "./clip-editor/pick-post-clip";
 
 const enqueue = vi.fn();
 vi.mock("@/jobs/enqueue", () => ({ enqueue: (...args: unknown[]) => enqueue(...args) }));
-const { createNewPost, listNewPostFormats, NewPostError } = await import("./new-post");
+const { createNewPost, listNewPostFormats, listNewPostPillars, NewPostError } = await import("./new-post");
 
 const madeItems: string[] = [];
 afterEach(async () => {
@@ -94,5 +94,19 @@ describe("createNewPost", () => {
     const args = { kind: "instagram_reel", formatId: null, pillarId: p.id, angle: null, actorUserId: await getTestUserId(), flags };
     await expect(createNewPost({ ...args, brand: "starter-story" })).rejects.toBeInstanceOf(NewPostError);
     await expect(createNewPost({ ...args, brand: "my-first-million" })).rejects.toThrow(/another brand/);
+  });
+});
+
+describe("listNewPostPillars", () => {
+  it("gives each video its YouTube id, from the YouTube URL or the published link, for the dialog's preview", async () => {
+    const fromUrl = await createTestProductionItem({ postType: "youtube_long", youtubeUrl: "https://www.youtube.com/watch?v=AbCdEfGhIj1" });
+    const fromLink = await createTestProductionItem({ postType: "youtube_long", publishedLink: "https://youtu.be/ZyXwVuTsRq2" });
+    const none = await createTestProductionItem({ postType: "youtube_long" });
+
+    const pillars = await listNewPostPillars("starter-story");
+    const id = (itemId: string) => pillars.find((p) => p.id === itemId)?.youtubeId;
+    expect(id(fromUrl.id)).toBe("AbCdEfGhIj1");
+    expect(id(fromLink.id)).toBe("ZyXwVuTsRq2");
+    expect(id(none.id)).toBeNull();
   });
 });
