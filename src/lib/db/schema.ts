@@ -434,6 +434,11 @@ export const productionItems = pgTable(
     // carries the full {actor_user_id, format, source_type, post_type}
     // payload for the Activity tab.
     createdVia: text("created_via"),
+    // What the post is about, in the words of whoever made it from the nav's
+    // New menu ("the part where he explains the SEO playbook"). The brief:
+    // the clip picker, the design editor's first draft and the Draft
+    // Algorithm all steer by it. Null for posts made any other way.
+    angle: text("angle"),
     // ── Scheduled-status reconciliation ──────────────────────────────────
     // Stamped (first transition only) when an item moves to status =
     // "Scheduled" via the publish route's schedule mode. The schedule-

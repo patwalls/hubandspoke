@@ -243,6 +243,9 @@ export type DraftSubstrate =
  *  optional — the renderer drops missing lines so slim items don't pay
  *  for empty placeholders. */
 export interface EditorialContext {
+  /** What the person who made the post said it is about (`productionItems.angle`,
+   *  the New menu's Angle field). Outranks every other signal here. */
+  editorAngle?: string | null;
   /** Operator's hand-edited on-screen hook. The most recent editorial
    *  signal — wins over `clipIdea.hook` when both are present. */
   itemHook: string | null;
@@ -450,6 +453,11 @@ export function renderEditorialContextBlock(
     return `${m}:${s.toString().padStart(2, "0")}`;
   };
 
+  if (ec.editorAngle && ec.editorAngle.trim()) {
+    lines.push(`THE EDITOR'S ANGLE (what the person who made this post said it is about — the caption makes THIS point; it outranks everything else in this block and the format's defaults where they conflict):`);
+    lines.push(ec.editorAngle.trim());
+    lines.push("");
+  }
   if (ec.itemHook && ec.itemHook.trim()) {
     lines.push(`HOOK (on-screen overlay; operator's most recent edit — bias the caption to land what THIS promises):`);
     lines.push(ec.itemHook.trim());

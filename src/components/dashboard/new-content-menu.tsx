@@ -3,14 +3,17 @@
 // The nav's "New" button (flag `newsletterDrafter`): start a piece of content
 // from anywhere in the app. The menu lists every kind we make; each kind's
 // dialog asks for what it needs — above all the PILLAR content it is made
-// from — and then opens the right editor. Newsletter is live: pick the
-// brand, the newsletter format, its pillar content (a video for one-video
-// formats; for roundups, the brand's videos and case studies from the last N
-// days, picked by the drafter) and a send date → the draft starts and the
-// newsletter editor opens on it. The other kinds (Instagram post / reel,
-// YouTube Short, LinkedIn post) are listed but not wired yet.
+// from, and the ANGLE (what it's about; the drafts steer by it) — and then
+// opens the right editor. Newsletter: brand, newsletter format, its pillar
+// content (a video for one-video formats; for roundups, the brand's videos
+// and case studies from the last N days, picked by the drafter), angle, send
+// date → the newsletter editor. Posts (NEW_POST_KINDS): brand, format,
+// pillar video, angle → the design editor (an IG post with a template), the
+// clip editor (reels, Shorts, video posts on X) or the post's page, where
+// the Draft Algorithm writes the copy (src/lib/services/new-post.ts).
 
 import { useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { ChevronDown, Loader2, Mail, Plus, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -28,6 +31,18 @@ import { Textarea } from "@/components/ui/textarea";
 import { PlatformIcon } from "@/components/ui/platform-icon";
 import { useFeatureFlags } from "@/components/clip-editor/use-feature-flags";
 import { cn } from "@/lib/utils";
+import { NEW_POST_KINDS, type NewPostKind } from "@/lib/new-post-kinds";
+
+// Lazy, like the Repurposed queue: only a post that opens in an editor
+// downloads it.
+const DesignEditorDialog = dynamic(
+  () => import("@/components/design-editor/design-editor-dialog").then((m) => m.DesignEditorDialog),
+  { ssr: false },
+);
+const ClipEditorDialog = dynamic(
+  () => import("@/components/clip-editor/clip-editor-dialog").then((m) => m.ClipEditorDialog),
+  { ssr: false },
+);
 
 interface BrandOption {
   slug: string;
@@ -53,38 +68,10 @@ interface VideoOption {
 }
 
 /** Every kind of content the menu offers, in order; `platform` draws its logo. */
-const KINDS = [
-  {
-    key: "newsletter",
-    label: "Newsletter",
-    platform: "newsletter",
-    soon: false,
-  },
-  {
-    key: "instagram_post",
-    label: "Instagram post",
-    platform: "instagram",
-    soon: true,
-  },
-  {
-    key: "instagram_reel",
-    label: "Instagram reel",
-    platform: "instagram",
-    soon: true,
-  },
-  {
-    key: "youtube_short",
-    label: "YouTube Short",
-    platform: "youtube",
-    soon: true,
-  },
-  {
-    key: "linkedin_post",
-    label: "LinkedIn post",
-    platform: "linkedin",
-    soon: true,
-  },
-] as const;
+const KINDS: { key: "newsletter" | NewPostKind; label: string; platform: string }[] = [
+  { key: "newsletter", label: "Newsletter", platform: "newsletter" },
+  ...NEW_POST_KINDS.map((k) => ({ key: k.key, label: k.label, platform: k.platform })),
+];
 
 export function NewContentMenu({
   brands,
@@ -94,7 +81,7 @@ export function NewContentMenu({
   currentBrand: string | null;
 }) {
   const flags = useFeatureFlags();
-  const [open, setOpen] = useState<"newsletter" | null>(null);
+  const [open, setOpen] = useState<"newsletter" | NewPostKind | null>(null);
   if (!flags?.newsletterDrafter) return null;
   return (
     <>
@@ -116,27 +103,17 @@ export function NewContentMenu({
             {KINDS.map((k) => (
               <DropdownMenuItem
                 key={k.key}
-                disabled={k.soon}
-                onClick={() => !k.soon && setOpen("newsletter")}
-                className={cn("gap-2", !k.soon && "cursor-pointer")}
-                title={k.soon ? "Coming soon" : undefined}
+                onClick={() => setOpen(k.key)}
+                className="cursor-pointer gap-2"
+                data-testid={`new-content-${k.key}`}
               >
                 <PlatformIcon
                   platform={k.platform}
                   size={15}
                   inheritColor
-                  className={
-                    k.soon
-                      ? "text-muted-foreground/60"
-                      : "text-muted-foreground"
-                  }
+                  className="text-muted-foreground"
                 />
                 <span className="flex-1">{k.label}</span>
-                {k.soon && (
-                  <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">
-                    Soon
-                  </span>
-                )}
               </DropdownMenuItem>
             ))}
           </DropdownMenuGroup>
@@ -144,6 +121,15 @@ export function NewContentMenu({
       </DropdownMenu>
       {open === "newsletter" && (
         <NewNewsletterDialog
+          brands={brands.filter((b) => b.slug !== "all" && !b.disabled)}
+          initialBrand={currentBrand}
+          onClose={() => setOpen(null)}
+        />
+      )}
+      {open && open !== "newsletter" && (
+        <NewPostFlow
+          key={open}
+          kind={open}
           brands={brands.filter((b) => b.slug !== "all" && !b.disabled)}
           initialBrand={currentBrand}
           onClose={() => setOpen(null)}
@@ -453,31 +439,24 @@ function NewNewsletterDialog({
             )}
           </div>
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-[160px_minmax(0,1fr)]">
-            <label className="flex flex-col gap-1.5 text-sm">
-              <span className="text-xs font-medium text-muted-foreground">
-                Send date
-              </span>
-              <Input
-                type="date"
-                className="h-9"
-                value={sendDate}
-                onChange={(e) => setSendDate(e.target.value)}
-              />
-            </label>
-            <label className="flex flex-col gap-1.5 text-sm">
-              <span className="text-xs font-medium text-muted-foreground">
-                Notes for the drafter (optional)
-              </span>
-              <Textarea
-                className="min-h-9 text-sm"
-                rows={1}
-                placeholder="An offer to pitch, an angle, anything it should know"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-              />
-            </label>
-          </div>
+          <AngleField
+            value={notes}
+            onChange={setNotes}
+            placeholder="e.g. Open on how I can't stop thinking about this business, then the why: automated marketing and SEO"
+            hint="What this issue is about: a topic, a point to make, a part of the video. The drafter builds the issue around it; leave it blank and it picks."
+          />
+
+          <label className="flex w-44 flex-col gap-1.5 text-sm">
+            <span className="text-xs font-medium text-muted-foreground">
+              Send date
+            </span>
+            <Input
+              type="date"
+              className="h-9"
+              value={sendDate}
+              onChange={(e) => setSendDate(e.target.value)}
+            />
+          </label>
           {error && <p className="text-xs text-destructive">{error}</p>}
         </div>
         <div className="flex items-center justify-between gap-3 border-t px-5 py-3">
@@ -501,6 +480,364 @@ function NewNewsletterDialog({
             >
               {creating ? <Loader2 className="animate-spin" /> : <Sparkles />}
               Create &amp; draft
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** The ANGLE: what the piece is about, in the editor's words. Its own full
+ *  row — the drafts treat it as the brief. */
+function AngleField({
+  value,
+  onChange,
+  placeholder,
+  hint,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+  hint: string;
+}) {
+  return (
+    <label className="flex flex-col gap-1.5 text-sm">
+      <span className="text-xs font-medium text-muted-foreground">
+        Angle <span className="font-normal">(optional)</span>
+      </span>
+      <Textarea
+        className="min-h-20 text-sm"
+        rows={3}
+        placeholder={placeholder}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        data-testid="new-content-angle"
+      />
+      <span className="text-xs text-muted-foreground">{hint}</span>
+    </label>
+  );
+}
+
+interface PostFormatOption {
+  id: string;
+  name: string;
+  editor: "design" | "clip" | "post";
+}
+
+interface PillarOption {
+  id: string;
+  title: string | null;
+  publishedAt: string | null;
+  hasTranscript: boolean;
+  hasVideo: boolean;
+}
+
+const EDITOR_LINE: Record<PostFormatOption["editor"], string> = {
+  design: "Opens in the design editor, drafted from the video.",
+  clip: "Opens in the clip editor on the moment AI picks.",
+  post: "Opens the post with its copy drafted.",
+};
+
+/** A new post: the dialog, then the editor it opens in. */
+function NewPostFlow({
+  kind,
+  brands,
+  initialBrand,
+  onClose,
+}: {
+  kind: NewPostKind;
+  brands: BrandOption[];
+  initialBrand: string | null;
+  onClose: () => void;
+}) {
+  const router = useRouter();
+  const [opened, setOpened] = useState<{
+    brand: string;
+    editor: "design" | "clip";
+    productionItemId: string;
+    clipIdeaId?: string;
+  } | null>(null);
+  const toPost = (brand: string, id: string) => {
+    onClose();
+    router.push(`/${brand}/content/${id}`);
+  };
+  if (opened?.editor === "design") {
+    return (
+      <DesignEditorDialog
+        open
+        onOpenChange={(o) => !o && onClose()}
+        productionItemId={opened.productionItemId}
+        brand={opened.brand}
+        onDone={() => router.refresh()}
+        onUnsupported={() => toPost(opened.brand, opened.productionItemId)}
+      />
+    );
+  }
+  if (opened?.editor === "clip" && opened.clipIdeaId) {
+    return (
+      <ClipEditorDialog
+        open
+        onOpenChange={(o) => !o && onClose()}
+        clipIdeaId={opened.clipIdeaId}
+        brand={opened.brand}
+        onDone={() => router.refresh()}
+        onUnsupported={() => toPost(opened.brand, opened.productionItemId)}
+      />
+    );
+  }
+  return (
+    <NewPostDialog
+      kind={kind}
+      brands={brands}
+      initialBrand={initialBrand}
+      onClose={onClose}
+      onCreated={(brand, r) => {
+        if (r.editor === "post") return toPost(brand, r.productionItemId);
+        setOpened({ brand, editor: r.editor, productionItemId: r.productionItemId, clipIdeaId: r.clipIdeaId });
+      }}
+    />
+  );
+}
+
+/** Brand → format → pillar video → angle → create. */
+function NewPostDialog({
+  kind,
+  brands,
+  initialBrand,
+  onClose,
+  onCreated,
+}: {
+  kind: NewPostKind;
+  brands: BrandOption[];
+  initialBrand: string | null;
+  onClose: () => void;
+  onCreated: (
+    brand: string,
+    r: { editor: PostFormatOption["editor"]; productionItemId: string; clipIdeaId?: string },
+  ) => void;
+}) {
+  const meta = NEW_POST_KINDS.find((k) => k.key === kind)!;
+  const [brand, setBrand] = useState(
+    brands.some((b) => b.slug === initialBrand)
+      ? initialBrand!
+      : (brands[0]?.slug ?? ""),
+  );
+  // Loaded per brand: options for another brand mean "loading".
+  const [optionsFor, setOptionsFor] = useState<{
+    brand: string;
+    formats: PostFormatOption[];
+    pillars: PillarOption[];
+  } | null>(null);
+  const [formatId, setFormatId] = useState("");
+  const [pickedPillarId, setPillarId] = useState("");
+  const [angle, setAngle] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!brand) return;
+    let cancelled = false;
+    void fetch(
+      `/api/new-post?brand=${encodeURIComponent(brand)}&kind=${encodeURIComponent(kind)}`,
+    )
+      .then((r) => (r.ok ? r.json() : { formats: [], pillars: [] }))
+      .then((j: { formats: PostFormatOption[]; pillars: PillarOption[] }) => {
+        if (cancelled) return;
+        setOptionsFor({ brand, formats: j.formats, pillars: j.pillars });
+        setFormatId(j.formats[0]?.id ?? "");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [brand, kind]);
+
+  const options = optionsFor?.brand === brand ? optionsFor : null;
+  const format = options?.formats.find((f) => f.id === formatId) ?? null;
+  // No format: reels and Shorts still go to the clip editor (the server
+  // decides; this only shapes the hint and which videos are pickable).
+  const short = meta.postType === "instagram_reel" || meta.postType === "youtube_shorts";
+  const editor: PostFormatOption["editor"] = format?.editor ?? (short ? "clip" : "post");
+  const usable = (p: PillarOption) =>
+    p.hasTranscript && (editor !== "clip" || p.hasVideo);
+  // The pick, unless the format change made it unusable: then the newest usable video.
+  const pillarId =
+    options?.pillars.some((p) => p.id === pickedPillarId && usable(p))
+      ? pickedPillarId
+      : (options?.pillars.find(usable)?.id ?? "");
+
+  const ready = !!options && !!pillarId && !creating;
+
+  async function create() {
+    setCreating(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/new-post", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          kind,
+          brand,
+          formatId: formatId || null,
+          pillarId,
+          angle: angle.trim() || null,
+        }),
+      });
+      const json = (await res.json().catch(() => ({}))) as {
+        editor?: PostFormatOption["editor"];
+        productionItemId?: string;
+        clipIdeaId?: string;
+        error?: string;
+      };
+      if (!res.ok || !json.productionItemId || !json.editor)
+        throw new Error(json.error ?? "Couldn't create the post");
+      onCreated(brand, {
+        editor: json.editor,
+        productionItemId: json.productionItemId,
+        clipIdeaId: json.clipIdeaId,
+      });
+    } catch (e) {
+      setError((e as Error).message);
+      setCreating(false);
+    }
+  }
+
+  const field =
+    "h-9 w-full rounded-lg border border-input bg-background px-2.5 text-sm";
+  return (
+    <Dialog open onOpenChange={(o) => !o && !creating && onClose()}>
+      <DialogContent className="flex max-w-lg flex-col gap-0 p-0">
+        <div className="flex items-center gap-3 border-b px-5 py-4">
+          <span className="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <PlatformIcon platform={meta.platform} size={16} inheritColor />
+          </span>
+          <div className="flex flex-col">
+            <DialogTitle className="text-base font-semibold">
+              New {meta.label.replace(/^X \/ Twitter/, "X")}
+            </DialogTitle>
+            <span className="text-xs text-muted-foreground">
+              Pick the video it&apos;s made from and what it&apos;s about; the
+              draft follows the format.
+            </span>
+          </div>
+        </div>
+        <div className="flex flex-col gap-4 px-5 py-4">
+          {brands.length > 1 && (
+            <label className="flex flex-col gap-1.5 text-sm">
+              <span className="text-xs font-medium text-muted-foreground">
+                Brand
+              </span>
+              <select
+                className={field}
+                value={brand}
+                onChange={(e) => setBrand(e.target.value)}
+              >
+                {brands.map((b) => (
+                  <option key={b.slug} value={b.slug}>
+                    {b.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <label className="flex flex-col gap-1.5 text-sm">
+            <span className="text-xs font-medium text-muted-foreground">
+              Format
+            </span>
+            {options === null ? (
+              <span className="flex h-9 items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="size-3.5 animate-spin" /> Loading formats…
+              </span>
+            ) : (
+              <select
+                className={field}
+                value={formatId}
+                onChange={(e) => setFormatId(e.target.value)}
+                data-testid="new-post-format"
+              >
+                {options.formats.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.name}
+                  </option>
+                ))}
+                <option value="">
+                  {options.formats.length === 0
+                    ? `No ${meta.label} format for this brand yet — platform defaults`
+                    : "No format — platform defaults"}
+                </option>
+              </select>
+            )}
+          </label>
+
+          <label className="flex flex-col gap-1.5 text-sm">
+            <span className="text-xs font-medium text-muted-foreground">
+              Pillar content
+            </span>
+            {options === null ? (
+              <span className="flex h-9 items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="size-3.5 animate-spin" /> Loading videos…
+              </span>
+            ) : (
+              <select
+                className={field}
+                value={pillarId}
+                onChange={(e) => setPillarId(e.target.value)}
+                data-testid="new-post-pillar"
+              >
+                {options.pillars.length === 0 && (
+                  <option value="">No recent videos for this brand</option>
+                )}
+                {options.pillars.map((p) => (
+                  <option key={p.id} value={p.id} disabled={!usable(p)}>
+                    {fmtDate(p.publishedAt)} · {p.title ?? "Untitled"}
+                    {!p.hasTranscript
+                      ? " (no transcript yet)"
+                      : editor === "clip" && !p.hasVideo
+                        ? " (not archived yet)"
+                        : ""}
+                  </option>
+                ))}
+              </select>
+            )}
+          </label>
+
+          <AngleField
+            value={angle}
+            onChange={setAngle}
+            placeholder={
+              editor === "clip"
+                ? "e.g. The part where he explains how SEO got him his first 1,000 users"
+                : "e.g. Lead with the $18K/month number, then the automated marketing behind it"
+            }
+            hint={
+              editor === "clip"
+                ? "Which part of the video, or what the clip should be about. The clip is picked and the post written around it; leave it blank and AI picks the strongest moment."
+                : "What the post is about: a topic, a point to make, a part of the video. The draft is built around it; leave it blank and it picks."
+            }
+          />
+          {error && <p className="text-xs text-destructive">{error}</p>}
+        </div>
+        <div className="flex items-center justify-between gap-3 border-t px-5 py-3">
+          <span className="text-xs text-muted-foreground">
+            {EDITOR_LINE[editor]}
+          </span>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onClose}
+              disabled={creating}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={create}
+              disabled={!ready}
+              data-testid="new-post-create"
+            >
+              {creating ? <Loader2 className="animate-spin" /> : <Sparkles />}
+              Create
             </Button>
           </div>
         </div>

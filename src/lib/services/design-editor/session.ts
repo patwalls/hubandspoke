@@ -215,7 +215,7 @@ export async function draftFirstDesign(args: { productionItemId: string; userId:
   // the best free one from the ManyChat pool, pointed at the post's
   // suggested destination — so the CTA never shows a placeholder.
   if (hasDmKeywordSlot(template.doc)) await ensureDmKeyword(item.id).catch((err) => console.error("[design-editor] ensureDmKeyword failed:", err));
-  const draft = await draftDoc(item.id, item.sourceItemId, template.doc, null);
+  const draft = await draftDoc(item.id, item.sourceItemId, template.doc, item.angle?.trim() || null);
   await db
     .insert(designDocs)
     .values({ productionItemId: item.id, doc: draft.doc, brief: draft.fill as unknown as Record<string, unknown>, createdByUserId: args.userId })
@@ -427,6 +427,7 @@ export async function loadItem(id: string) {
       status: productionItems.status,
       postType: productionItems.postType,
       pillarContentItemId: productionItems.pillarContentItemId,
+      angle: productionItems.angle,
     })
     .from(productionItems)
     .where(eq(productionItems.id, id))
@@ -447,6 +448,8 @@ export async function loadItem(id: string) {
     postType: row.postType,
     sourceItemId,
     sourceTitle: source?.title ?? null,
+    /** The New menu's Angle: the first draft is steered by it. */
+    angle: row.angle,
   };
 }
 

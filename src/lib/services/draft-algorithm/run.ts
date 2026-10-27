@@ -845,6 +845,7 @@ export async function runDraftAlgorithm(
     }
   }
   const editorialContext: EditorialContext = {
+    editorAngle: item.angle ?? null,
     itemHook: item.hook ?? null,
     itemOverlay: item.overlay ?? null,
     itemCoverDescription: item.coverDescription ?? null,

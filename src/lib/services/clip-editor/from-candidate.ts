@@ -96,6 +96,8 @@ export async function findOrCreateClipPost(args: {
   pillarId: string;
   targetFormatId: string;
   actorUserId: string;
+  /** The New menu's Angle: steers the pick and is kept on the item. */
+  angle?: string | null;
   /** Override for tests. */
   pick?: typeof pickPostClip;
 }): Promise<{ clipIdeaId: string; productionItemId: string; created: boolean }> {
@@ -131,6 +133,7 @@ export async function findOrCreateClipPost(args: {
     sourceTitle: source.title,
     segments: transcript.segments,
     durationSec: transcript.durationSec != null ? Number(transcript.durationSec) : null,
+    angle: args.angle,
   });
   if (!result) throw new ClipPostCreateError("The pillar has no transcript yet", 422, "no_transcript");
   if (result.kind === "whole_video") {
@@ -191,6 +194,7 @@ export async function findOrCreateClipPost(args: {
         utmCampaign: await generateUtmCampaign(source.title),
         editorUserId: args.actorUserId,
         createdVia: CLIP_POST_CREATED_VIA,
+        angle: args.angle?.trim() || null,
       })
       .returning({ id: productionItems.id });
 

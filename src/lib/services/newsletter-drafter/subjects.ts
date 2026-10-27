@@ -85,7 +85,7 @@ export function buildSubjectsPrompt(args: { formatName: string; subject: string;
     `Write six subject line + preview text pairs for this issue of the newsletter "${args.formatName}", each from a different angle. Match the newsletter's own subject habits (length, casing, punctuation, use of numbers and names) — the past subject lines below show them — and never repeat one of them or one of the current options. Lead with the issue's strongest, most specific hook; no clickbait, no fake urgency, nothing the issue doesn't deliver.`,
     `PAST SUBJECT LINES (newest first):\n${args.past.map((s) => `- ${s}`).join("\n") || "(none on record)"}`,
     `CURRENT SUBJECT: ${args.subject || "(none)"}\nCURRENT OPTIONS: ${args.options.join(" | ") || "(none)"}\nCURRENT PREVIEW TEXT: ${args.previewText || "(none)"}`,
-    args.notes?.trim() ? `EDITOR NOTES:\n${args.notes.trim()}` : null,
+    args.notes?.trim() ? `THE ANGLE (what the editor said this issue is about — the subject line should make its point):\n${args.notes.trim()}` : null,
     `THE ISSUE:\n${args.issue.length > ISSUE_CHAR_BUDGET ? `${args.issue.slice(0, ISSUE_CHAR_BUDGET)}\n[…]` : args.issue}`,
   ]
     .filter(Boolean)

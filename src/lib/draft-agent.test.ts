@@ -135,6 +135,16 @@ describe("renderEditorialContextBlock (v14)", () => {
     ).toBeNull();
   });
 
+  it("puts the editor's angle from the New menu first, ahead of the hook", () => {
+    const out = renderEditorialContextBlock({
+      ...EMPTY_EC,
+      editorAngle: "the part where he explains the SEO playbook",
+      itemHook: "He made $18K/month",
+    })!;
+    expect(out).toContain("THE EDITOR'S ANGLE");
+    expect(out.indexOf("the SEO playbook")).toBeLessThan(out.indexOf("He made $18K/month"));
+  });
+
   it("renders the item hook with the operator-edit primacy label", () => {
     const out = renderEditorialContextBlock({
       ...EMPTY_EC,

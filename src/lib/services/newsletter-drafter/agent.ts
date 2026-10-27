@@ -257,7 +257,7 @@ export interface NewsletterAgentArgs {
   window: DraftWindow;
   /** The issue's sections. When set the agent submits one block per section. */
   template?: NewsletterTemplate | null;
-  /** Editor steer for this issue (e.g. the offer to pitch). */
+  /** The editor's ANGLE for this issue ("Angle" in the New dialog; stored as `notes`): what the issue is about. The brief — see describeAngle. */
   notes?: string | null;
   /** YYYY-MM-DD the issue goes out. */
   sendDate?: string | null;
@@ -559,6 +559,12 @@ export function describePillar(v: SourceVideo): string {
   ].join("\n\n");
 }
 
+/** The editor's angle for this issue (`newsletter_drafts.notes`, "Angle" in
+ *  the New dialog): what the issue is about. Exported for tests. */
+export function describeAngle(angle: string): string {
+  return `THE ANGLE — the editor wrote this for this issue, and it is the brief. The issue is about this: build the subject line, the intro and the lead section around it, and make every other section serve it. Where it names a topic, a point to make, a part of the video or a story to use, use exactly that. It overrides the Skill and the story plan where they conflict; the Skill still decides the format and voice.\n${angle}`;
+}
+
 /** The first user turn. Exported for tests. */
 export function buildUserTurn(args: NewsletterAgentArgs): string {
   const today = args.window.end.toISOString().slice(0, 10);
@@ -599,6 +605,10 @@ export function buildUserTurn(args: NewsletterAgentArgs): string {
     );
   }
   if (args.pillar) parts.push(describePillar(args.pillar));
+  // The editor's angle is the brief, so it comes before the template and the
+  // story plan (which it outranks) and is restated last.
+  const angle = args.notes?.trim();
+  if (angle) parts.push(describeAngle(angle));
   if (args.template) parts.push(describeTemplate(args.template, sponsorSupplied, args.sectionExamples));
   if (!args.video && args.usage) parts.push(STORY_RULES);
   if (!args.video && args.storyPlan) parts.push(describeStoryPlan(args.storyPlan));
@@ -615,8 +625,8 @@ export function buildUserTurn(args: NewsletterAgentArgs): string {
       `No sponsor is booked for this send date. Still write the "${label}" section in full and on-layout (headline, a 2 to 3 sentence body, 3 Key Takeaways bullets, and a CTA link to "#"), but make every piece an obvious italic placeholder, e.g. *[PLACEHOLDER: offer headline]*. Any intro teaser for the offer is a placeholder too. Never invent an offer, product or link.`,
     );
   }
-  if (args.notes?.trim()) {
-    parts.push(`Editor notes for this issue (follow them; they override the Skill where they conflict):\n${args.notes.trim()}`);
+  if (angle) {
+    parts.push("Before you submit, re-read THE ANGLE: the subject line, the intro and the lead section must make its point, and nothing in the issue may wander off it.");
   }
   return parts.join("\n\n");
 }

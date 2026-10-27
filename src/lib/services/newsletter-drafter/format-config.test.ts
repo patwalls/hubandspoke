@@ -1,3 +1,4 @@
+import { DEFAULT_TEMPLATES } from "@/lib/newsletter-template";
 import { describe, expect, it } from "vitest";
 import { buildUserTurn, type NewsletterAgentArgs } from "./agent";
 import { formatConfigFor, voiceForChannel } from "./format-config";
@@ -64,6 +65,22 @@ describe("buildUserTurn", () => {
     const turn = buildUserTurn({ ...base, video, specialLabel: "Free Resource", sponsoredPlaceholder: true });
     expect(turn).toContain("[PLACEHOLDER:");
     expect(turn).not.toContain(SPECIAL_MARKER);
+  });
+
+  it("makes the editor's angle the brief: ahead of the template and the story plan, and restated at the end", () => {
+    const angle = "how I can't stop thinking about this business, then why (automated marketing and SEO)";
+    const turn = buildUserTurn({
+      ...base,
+      pillar: video,
+      notes: angle,
+      template: DEFAULT_TEMPLATES["sunday breakfast"],
+    });
+    const at = turn.indexOf("THE ANGLE");
+    expect(at).toBeGreaterThan(turn.indexOf(video.transcript));
+    expect(at).toBeLessThan(turn.indexOf("ISSUE TEMPLATE"));
+    expect(turn.slice(at)).toContain(angle);
+    expect(turn.trimEnd().endsWith("nothing in the issue may wander off it.")).toBe(true);
+    expect(buildUserTurn({ ...base, video })).not.toContain("THE ANGLE");
   });
 });
 

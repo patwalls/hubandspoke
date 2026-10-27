@@ -61,4 +61,23 @@ describe("pickPostClip", () => {
     const failed = await pickPostClip({ ...base, client: failing });
     expect(failed?.kind === "clip" && failed.pick.source).toBe("fallback");
   });
+
+  it("never turns a short into a whole-video post, and asks for a short", async () => {
+    let system = "";
+    const client = {
+      messages: {
+        create: async (req: { system: string }) => {
+          system = req.system;
+          return { content: [{ type: "tool_use", name: "return_clip", id: "t", input: { whole_video: true, first_line: 4, last_line: 8, hook: "She sold it for $2M", rationale: "r" } }] };
+        },
+      },
+    } as unknown as Anthropic;
+    let user = "";
+    const spy = { messages: { create: async (req: { system: string; messages: { content: string }[] }) => ((user = req.messages[0].content), client.messages.create(req as never)) } } as unknown as Anthropic;
+    const r = await pickPostClip({ ...base, destination: "short", angle: "the part about his SEO playbook", client: spy });
+    expect(system).toMatch(/vertical short-form/);
+    expect(user).toContain("THE EDITOR'S ANGLE");
+    expect(user).toContain("the part about his SEO playbook");
+    expect(r).toEqual({ kind: "clip", pick: expect.objectContaining({ startSec: 40, endSec: 89.5, hook: "She sold it for $2M" }) });
+  });
 });

@@ -31,6 +31,9 @@ export async function findOrCreateDesignItem(args: {
   pillarId: string;
   targetFormatId: string;
   actorUserId: string;
+  /** The New menu's Angle, written with the item so the first draft and
+   *  the Draft Algorithm (enqueued below) both see it. */
+  angle?: string | null;
 }): Promise<{ productionItemId: string; created: boolean }> {
   const [source] = await db.select().from(productionItems).where(eq(productionItems.id, args.pillarId)).limit(1);
   if (!source) throw new DesignItemCreateError("Source item not found", 404);
@@ -81,6 +84,7 @@ export async function findOrCreateDesignItem(args: {
       utmCampaign: await generateUtmCampaign(source.title),
       editorUserId: args.actorUserId,
       createdVia: "design-editor",
+      angle: args.angle?.trim() || null,
     })
     .returning({ id: productionItems.id });
 

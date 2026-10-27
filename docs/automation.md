@@ -1554,6 +1554,16 @@ Regression guard: `src/lib/services/underlord-auto-fire.regression.test.ts` grep
   ```
 - **Local source (2026-09-19):** the task downloads the source to the dyno before probing or rendering. The static ffmpeg on the dyno segfaults on any https input (see `design-frames` → ffmpeg note), so the old https-first order meant the size probe ALWAYS failed in prod and the graph took the aspect-only fallback — the editor's video inset/rounded-corner settings were silently dropped from every prod export until this fix (Pat noticed on 45334d1e).
 
+### New menu posts (`POST /api/new-post`, 2026-10-27, flag `newsletterDrafter`) — no new task
+
+`src/lib/services/new-post.ts`. Creates the post and hands it to existing machinery; enqueues nothing of its own:
+- **post** editor → inserts the item (`status='Assigned'`, `sourceType='repurposed'`, `createdVia='new-menu'`, `angle`) + a `repurpose_triggers` row when it has a format (so `threshold-monitor-sweep` won't make a twin) → enqueues **`draft-algorithm-run`** (jobKey `draft-algorithm-run:<itemId>`).
+- **design** editor → `findOrCreateDesignItem` (now takes `angle`, written in the insert so its `draft-algorithm-run` sees it) → the editor's open enqueues **`design-draft`**, whose first draft passes `item.angle` as the instruction.
+- **clip** editor, reel/Short → Haiku pick (in the request, ~2–5s; whole transcript, angle-first) → `clip_ideas` row (`generatedBy='clip-editor:new-menu'`) + item in one transaction; the editor's open runs `ensureClipPostDraft` (→ `draft-algorithm-run`) and makes the 9:16 edit doc. X video formats → `findOrCreateClipPost` (now takes `angle`); a whole-video / no-video X format falls back to the post path.
+- Not idempotent by design (each New is a new post) except where it reuses the queue paths' "open draft for this pillar × format".
+
+**Angle everywhere (2026-10-27).** `production_items.angle` → Draft Algorithm (`editorAngle`, rendered first as THE EDITOR'S ANGLE), `design-draft` first draft, the clip pick. Newsletters: `newsletter_drafts.notes` is shown as **Angle**; `newsletter-draft` puts it right after the pillar as THE ANGLE (ahead of the template and story plan, restated at the end), and `newsletter-review` / subject suggestions check against it.
+
 ### `design-draft` — the design editor's AI draft of a post: first draft and Regenerate (2026-10-14, flag `designEditor`)
 
 - **Why it's a job:** the draft (Opus fill of the format template from the transcript + best past posts, plus the DM keyword) takes 15–25s+ and ran inside `GET …/design`. A slow run crossed Heroku's 30s router limit: the 503 page wasn't JSON, so the dialog dropped to the classic view with no message (Pat, 2026-10-14). **Since 2026-10-16 the fill can also web-search / web-fetch the founder** (`research: true`, worker paths only — the in-request hero-cover and cover-style fills leave it off), which measured 89s, so **Regenerate runs here too**.

@@ -1085,8 +1085,8 @@ function Workspace({
               </div>
             )}
             <label className="flex flex-col gap-1 text-xs">
-              <span className="font-medium">Notes for the drafter</span>
-              <Textarea className="min-h-16 text-xs" placeholder="An offer to pitch, an angle, a story to feature — Regenerate and Redraft read this." value={notes} onChange={(e) => setNotes(e.target.value)} />
+              <span className="font-medium">Angle</span>
+              <Textarea className="min-h-16 text-xs" placeholder="What this issue is about: a topic, a point to make, a part of the video. Regenerate and Redraft steer by it." value={notes} onChange={(e) => setNotes(e.target.value)} />
             </label>
             <p className="rounded-md bg-muted/60 p-3 text-xs text-muted-foreground">
               Click any part of the email to edit it. Text opens right where it is, with Regenerate{draft.kind === "roundup" && !draft.sourceItemId ? " and Find new story" : ""} here{hasShots ? "; a screenshot opens its video scrubber, frames, Upload and Remove" : ""}. Headings, the masthead and other designed parts come from the template: edit them here for this issue, or open Template to change every issue.

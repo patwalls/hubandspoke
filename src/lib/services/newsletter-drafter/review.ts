@@ -69,14 +69,14 @@ export function buildReviewPrompt(args: {
 }): string {
   return [
     `You are the senior editor of the ${args.brandLabel} newsletter "${args.formatName}". Review this draft issue before it sends. Be specific and useful: a finding an editor can act on in one click beats a general remark. Don't praise; don't rewrite the issue yourself — say what to change. At most 8 findings, the important ones first; an issue that's genuinely ready gets a short summary and few or no findings.`,
-    "Check: voice and rhythm against the style notes / Skill / past issues; structure and length per section; every claim, number and quote grounded (flag anything that reads invented or vague); links present where the format expects them; the subject line and preview text (specific, curiosity, not clickbait, matches the lead story); repetition across sections; the sponsored section untouched if it's supplied copy; anything the editor's notes asked for that's missing.",
+    "Check: voice and rhythm against the style notes / Skill / past issues; structure and length per section; every claim, number and quote grounded (flag anything that reads invented or vague); links present where the format expects them; the subject line and preview text (specific, curiosity, not clickbait, matches the lead story); repetition across sections; the sponsored section untouched if it's supplied copy; the editor's ANGLE: the issue must be about it (subject line, intro and lead make its point) — an issue that drifts off it is the first finding.",
     `SECTIONS (use these keys in section_key): ${args.sectionKeys.map((s) => `${s.key}${s.heading ? ` ("${s.heading}")` : ""}`).join(", ")}`,
     args.styleNotes?.trim() ? `HOW THIS NEWSLETTER READS:\n${args.styleNotes.trim()}` : null,
     args.skill?.trim() ? `FORMAT SKILL:\n${args.skill.trim()}` : null,
     args.pastIssues.length
       ? `PAST ISSUES (voice reference):\n${args.pastIssues.map((p, i) => `### Past issue ${i + 1}\nSubject: ${p.subject ?? ""}\n\n${p.body}`).join("\n\n---\n\n")}`
       : null,
-    args.notes?.trim() ? `EDITOR NOTES FOR THIS ISSUE:\n${args.notes.trim()}` : null,
+    args.notes?.trim() ? `THE ANGLE (what the editor said this issue is about):\n${args.notes.trim()}` : null,
     `THE DRAFT\nSubject: ${args.subject}\nOther subject options: ${args.subjectOptions.filter((s) => s !== args.subject).join(" | ") || "(none)"}\nPreview text: ${args.previewText}\n\n${args.issue}`,
     "Call submit_review.",
   ]

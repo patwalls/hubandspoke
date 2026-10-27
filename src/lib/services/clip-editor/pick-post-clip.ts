@@ -22,6 +22,9 @@ export const POST_CLIP_PICKER_VERSION = `${MODEL}:post-clip:v1`;
 /** The transcript Haiku sees. Intros and most "a section of the video"
  *  formats live early; this is ~15–20 minutes of speech. */
 const TRANSCRIPT_CHAR_BUDGET = 20_000;
+/** A short's best moment (or the one the editor's angle names) can be
+ *  anywhere: the whole of a two-hour podcast. */
+const SHORT_TRANSCRIPT_CHAR_BUDGET = 150_000;
 
 /** Fallback intro: end on the first line boundary past this… */
 const FALLBACK_MIN_SEC = 40;
@@ -95,6 +98,11 @@ export function rangeFromLines(segments: PostClipSegment[], visible: number, fir
   return endSec > startSec ? { startSec, endSec } : null;
 }
 
+/** Where the clip goes: the video in a post on X (landscape, usually the
+ *  intro), or a vertical short (Instagram Reel / YouTube Short) made from
+ *  the New menu — the strongest self-contained moment, hook burned in. */
+export type PostClipDestination = "x" | "short";
+
 const SYSTEM_PROMPT = `You pick the part of a long YouTube video that goes out as the VIDEO in a post on X (Twitter).
 
 You get the post format's instructions (its "Skill", written by the team for a human editor) and the video's transcript as numbered lines with timestamps. Find the stretch of the video the Skill says to use and answer with the first and last line numbers of it.
@@ -105,6 +113,19 @@ RULES
 - If the Skill doesn't say which part, pick the strongest self-contained 30–90 seconds that sells the whole video — usually the opening.
 - Start on a line that begins a thought and end on a line that finishes one.
 - hook: one plain sentence saying what the clip is about, grounded in a specific (a number, a product, an outcome). Not a caption, no hashtags, no emoji.
+
+Never respond with plain text. Always call return_clip exactly once.`;
+
+const SHORT_SYSTEM_PROMPT = `You pick the part of a long YouTube video that becomes a vertical short-form clip (an Instagram Reel or a YouTube Short).
+
+You get the post format's instructions (its "Skill", written by the team for a human editor) and the video's transcript as numbered lines with timestamps. Find the stretch to clip and answer with the first and last line numbers of it.
+
+RULES
+- Follow the Skill when it says which part or what kind of moment to use.
+- Otherwise pick the single strongest self-contained moment: one story, one lesson or one surprising number that makes sense to someone who never saw the video. 20–75 seconds.
+- Start on a line that begins a thought (no "and so…", no answer without its question) and end on a line that lands it.
+- whole_video is always false for a short.
+- hook: the on-screen text that stops the scroll, at most 12 words, grounded in a specific (a number, a product, an outcome). No hashtags, no emoji.
 
 Never respond with plain text. Always call return_clip exactly once.`;
 
@@ -132,8 +153,14 @@ export async function pickPostClip(args: {
   sourceTitle: string | null;
   segments: PostClipSegment[];
   durationSec: number | null;
+  /** Default "x". */
+  destination?: PostClipDestination;
+  /** What the person making the post wants it to be about (the New menu's
+   *  Angle). Outranks the Skill on WHICH part to clip. */
+  angle?: string | null;
   client?: Anthropic;
 }): Promise<PickPostClipResult | null> {
+  const short = args.destination === "short";
   const { segments } = args;
   const fallback = fallbackIntroRange(segments);
   if (!fallback) return null;
@@ -148,14 +175,21 @@ export async function pickPostClip(args: {
     },
   });
 
-  const transcript = numberedTranscript(segments);
+  const transcript = numberedTranscript(segments, short ? SHORT_TRANSCRIPT_CHAR_BUDGET : TRANSCRIPT_CHAR_BUDGET);
   const duration = args.durationSec ?? segments[segments.length - 1].endSec;
   const user = [
     `FORMAT: ${args.formatName}`,
     "",
     "SKILL:",
-    args.skill?.trim() || "(none written — use the opening of the video)",
+    args.skill?.trim() || (short ? "(none written — pick the strongest moment)" : "(none written — use the opening of the video)"),
     "",
+    ...(args.angle?.trim()
+      ? [
+          "THE EDITOR'S ANGLE (follow it: when it names a part of the video, a topic or a moment, clip exactly that; it outranks the Skill on which part to use, and the hook makes its point):",
+          args.angle.trim(),
+          "",
+        ]
+      : []),
     `VIDEO: ${args.sourceTitle ?? "(untitled)"} — ${mmss(duration)} long. Transcript lines 0–${transcript.count - 1}${transcript.count < segments.length ? ` (of ${segments.length}; the rest is cut for length)` : ""}:`,
     transcript.text,
   ].join("\n");
@@ -166,7 +200,7 @@ export async function pickPostClip(args: {
     response = await client.messages.create({
       model: MODEL,
       max_tokens: 400,
-      system: SYSTEM_PROMPT,
+      system: short ? SHORT_SYSTEM_PROMPT : SYSTEM_PROMPT,
       tools: TOOLS,
       tool_choice: { type: "tool", name: "return_clip" },
       messages: [{ role: "user", content: user }],
@@ -179,7 +213,7 @@ export async function pickPostClip(args: {
   if (!block || block.type !== "tool_use") return fallbackPick("Opening of the video (the clip picker gave no answer).");
   const input = block.input as { whole_video?: unknown; first_line?: unknown; last_line?: unknown; hook?: unknown; rationale?: unknown };
   const rationale = typeof input.rationale === "string" ? input.rationale.trim() : "";
-  if (input.whole_video === true) return { kind: "whole_video", rationale };
+  if (input.whole_video === true && !short) return { kind: "whole_video", rationale };
   const range = rangeFromLines(segments, transcript.count, input.first_line, input.last_line);
   if (!range) return fallbackPick("Opening of the video (the clip picker's range was unusable).");
   const hook = typeof input.hook === "string" && input.hook.trim() ? input.hook.trim() : args.sourceTitle?.trim() || "The intro";
