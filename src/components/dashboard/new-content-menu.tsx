@@ -188,8 +188,8 @@ export function NewNewsletterDialog({
   } | null>(null);
   const [sourceItemId, setSourceItemId] = useState(slot?.sourceItemId ?? "");
   /** Roundup formats: the issue is about one piece of pillar content, or a roundup the drafter assembles.
-   *  A queue slot starts on one piece: the editor picks the pillar, nothing is chosen for them. */
-  const [mode, setMode] = useState<"one" | "roundup">(slot ? "one" : "roundup");
+   *  Starts on one piece, the common case (Pat, 2026-10-27); a queue slot leaves the pillar unpicked. */
+  const [mode, setMode] = useState<"one" | "roundup">("one");
   const [brandVideosFor, setBrandVideosFor] = useState<{
     brand: string;
     list: VideoOption[];

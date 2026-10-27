@@ -5,7 +5,7 @@ import { test, expect } from "@playwright/test";
  * dialog is titled with the brand and puts the pillar video (previewed) above
  * the format; a LinkedIn post made from it lands on its own page with the
  * angle kept; and the newsletter dialog asks for the Angle on its own row,
- * between the pillar content and the send date.
+ * between the pillar content and the send date, starting on One piece.
  *
  * Writes one LinkedIn post (status Assigned, created via new-menu) and one
  * Instagram design post to the local DB per run.
@@ -83,4 +83,14 @@ test("newsletter: the Angle row sits between pillar content and send date", asyn
   const y = async (l: import("@playwright/test").Locator) => (await l.boundingBox())!.y;
   expect(await y(page.getByText("Pillar content", { exact: true }))).toBeLessThan(await y(angle));
   expect(await y(angle)).toBeLessThan(await y(page.getByText("Send date", { exact: true })));
+});
+
+test("newsletter: a roundup format starts on One piece, not Roundup", async ({ page }) => {
+  await page.goto("/starter-story");
+  await page.getByTestId("new-content").click();
+  await page.getByTestId("new-content-newsletter").click();
+  const toggle = page.getByRole("radiogroup", { name: "What the issue is about" });
+  await expect(toggle).toBeVisible({ timeout: 15_000 });
+  await expect(toggle.getByRole("radio", { name: "One piece" })).toHaveAttribute("aria-checked", "true");
+  await expect(toggle.getByRole("radio", { name: "Roundup" })).toHaveAttribute("aria-checked", "false");
 });
