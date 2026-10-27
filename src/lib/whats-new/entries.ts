@@ -30,7 +30,7 @@ export interface WhatsNewEntry {
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
     id: "2026-10-27-confirm-leave-published",
-    shippedAt: "2026-10-27T03:40:00Z",
+    shippedAt: "2026-10-27T03:05:00Z",
     kind: "fix",
     title: "A live post asks before it moves back",
     body:
