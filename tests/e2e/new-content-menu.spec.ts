@@ -5,7 +5,9 @@ import { test, expect } from "@playwright/test";
  * dialog is titled with the brand and puts the pillar video (previewed) above
  * the format; a LinkedIn post made from it lands on its own page with the
  * angle kept; and the newsletter dialog asks for the Angle on its own row,
- * between the pillar content and the send date, starting on One piece.
+ * between the pillar content and the send date, starting on One piece; its
+ * pillar dropdown shows each video's thumbnail and views, with the picked
+ * one embedded under it.
  *
  * Writes one LinkedIn post (status Assigned, created via new-menu) and one
  * Instagram design post to the local DB per run.
@@ -28,7 +30,7 @@ test("every kind is live; a LinkedIn post opens on its page with the angle kept"
   await page.getByTestId("new-content-linkedin_post").click();
   await expect(page.getByTestId("new-post-format")).toBeVisible({ timeout: 15_000 });
   const pillar = page.getByTestId("new-post-pillar");
-  test.skip((await pillar.locator("option:not([disabled])").count()) === 0 || (await pillar.inputValue()) === "", "no transcribed pillar video for starter-story in the last 120 days");
+  test.skip(((await pillar.getAttribute("data-value")) ?? "") === "", "no transcribed pillar video for starter-story in the last 120 days");
   // The brand is in the title (no Brand field); pillar content comes first,
   // with the video right under it to watch, then the format.
   await expect(page.getByRole("dialog").getByRole("heading")).toHaveText("New Starter Story LinkedIn post");
@@ -61,7 +63,8 @@ test("an Instagram post that opens in the design editor puts it in the URL, and 
   await page.getByTestId("new-content").click();
   await page.getByTestId("new-content-instagram_post").click();
   await page.getByTestId("new-post-format").selectOption(fmt!.id);
-  await page.getByTestId("new-post-pillar").selectOption(pillar!.id);
+  await page.getByTestId("new-post-pillar").click();
+  await page.locator(`[data-testid="pillar-option"][data-id="${pillar!.id}"]`).click();
   await page.getByTestId("new-post-create").click();
   // Like the queue's own: the Repurposed queue with ?item=<the post>.
   await page.waitForURL(/\/starter-story\/queue\/repurposed\?item=[0-9a-f-]{36}/, { timeout: 30_000 });
@@ -93,4 +96,32 @@ test("newsletter: a roundup format starts on One piece, not Roundup", async ({ p
   await expect(toggle).toBeVisible({ timeout: 15_000 });
   await expect(toggle.getByRole("radio", { name: "One piece" })).toHaveAttribute("aria-checked", "true");
   await expect(toggle.getByRole("radio", { name: "Roundup" })).toHaveAttribute("aria-checked", "false");
+});
+
+test("newsletter: the pillar dropdown shows thumbnails + views, and the picked video plays under it", async ({ page }) => {
+  await page.goto("/starter-story");
+  await page.getByTestId("new-content").click();
+  await page.getByTestId("new-content-newsletter").click();
+  const pillar = page.getByTestId("newsletter-pillar");
+  await expect(pillar).toBeVisible({ timeout: 15_000 });
+  test.skip(((await pillar.getAttribute("data-value")) ?? "") === "", "no transcribed Starter Story video locally");
+  const preview = page.getByTestId("newsletter-pillar-preview");
+  await expect(preview).toHaveAttribute("src", /youtube-nocookie\.com\/embed\/[\w-]{11}/);
+  const first = await preview.getAttribute("src");
+
+  await pillar.click();
+  const options = page.getByTestId("pillar-option");
+  await expect(options.first()).toBeVisible();
+  await expect(options.first().locator("img")).toHaveAttribute("src", /i\.ytimg\.com\/vi\/[\w-]{11}\//);
+  await expect(options.first()).toContainText(/views/);
+  await page.screenshot({ path: ".playwright-mcp/screenshots/newsletter-pillar-dropdown.png" });
+  // Another video swaps the embed.
+  const other = page.locator('[data-testid="pillar-option"][aria-selected="false"]:enabled').first();
+  test.skip((await other.count()) === 0, "only one pickable video locally");
+  const otherId = await other.getAttribute("data-id");
+  await other.click();
+  await expect(pillar).toHaveAttribute("data-value", otherId!);
+  await expect(preview).not.toHaveAttribute("src", first!);
+  await expect(page.getByTestId("newsletter-pillar-list")).toBeHidden();
+  await page.screenshot({ path: ".playwright-mcp/screenshots/newsletter-pillar-picked.png" });
 });

@@ -29,13 +29,15 @@ test("an undrafted queue newsletter opens the start dialog, pillar first", async
 
   const pillar = dialog.getByTestId("newsletter-pillar");
   await expect(pillar).toBeVisible({ timeout: 15_000 });
-  await expect(pillar).toHaveValue("");
+  await expect(pillar).toHaveAttribute("data-value", "");
   await expect(dialog.getByTestId("new-newsletter-create")).toBeDisabled();
   await expect(dialog.getByTestId("new-content-angle")).toBeVisible();
 
-  const first = pillar.locator("option:not([disabled])").first();
+  await pillar.click();
+  const first = page.locator('[data-testid="pillar-option"]:enabled').first();
   test.skip((await first.count()) === 0, "no transcribed Starter Story video locally");
-  await pillar.selectOption(await first.getAttribute("value"));
+  await first.click();
+  await expect(dialog.getByTestId("newsletter-pillar-preview")).toBeVisible();
   await expect(dialog.getByTestId("new-newsletter-create")).toBeEnabled();
   await page.screenshot({ path: ".playwright-mcp/screenshots/newsletter-queue-start.png" });
 });

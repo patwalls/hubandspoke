@@ -1,9 +1,11 @@
 // Reads + writes behind the newsletter drafter's API routes.
 
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { accounts, formats, newsletterDrafts, productionItems, transcripts } from "@/lib/db/schema";
 import { templateFor } from "@/lib/newsletter-template";
+import { withPillarHeat } from "@/lib/pillar-heat";
+import { youtubeIdFrom } from "@/lib/services/design-editor/assets";
 import { formatConfigFor } from "./format-config";
 import { loadUsage, publishedLabel, usageGroupFor, usageLabel, withInferredSources } from "./usage";
 import { computeWindow } from "./window";
@@ -167,6 +169,14 @@ export interface FormatVideoOption {
   url: string | null;
   publishedAt: string | null;
   hasTranscript: boolean;
+  /** For the picker's thumbnail and watch-it preview; null without a YouTube link. */
+  youtubeId: string | null;
+  /** The YouTube channel's handle (a brand can have several). */
+  channel: string | null;
+  views: number | null;
+  leads: number | null;
+  /** Views ÷ the channel's median in this list (`withPillarHeat`). */
+  heat: number | null;
 }
 
 async function sourceAccountIds(formatName: string): Promise<string[]> {
@@ -179,76 +189,63 @@ async function sourceAccountIds(formatName: string): Promise<string[]> {
   return rows.map((r) => r.id);
 }
 
+/** Published long-form videos matching `where`, newest first, with what the pillar picker shows. */
+async function listPillarVideos(where: SQL, days: number, limit: number): Promise<FormatVideoOption[]> {
+  const published = sql`COALESCE(${productionItems.publishedAt}, ${productionItems.publishedDate}::timestamptz)`;
+  const rows = await db
+    .select({
+      id: productionItems.id,
+      title: productionItems.title,
+      publishedLink: productionItems.publishedLink,
+      youtubeUrl: productionItems.youtubeUrl,
+      youtubeId: productionItems.youtubeId,
+      publishedAt: sql<string | null>`${published}`,
+      transcriptId: transcripts.id,
+      accountId: productionItems.accountId,
+      channel: accounts.handle,
+      views: productionItems.views,
+      leads: productionItems.leads,
+    })
+    .from(productionItems)
+    .leftJoin(transcripts, eq(transcripts.productionItemId, productionItems.id))
+    .leftJoin(accounts, eq(accounts.id, productionItems.accountId))
+    .where(
+      and(
+        where,
+        eq(productionItems.postType, "youtube_long"),
+        eq(productionItems.status, "Published"),
+        isNull(productionItems.deletedAt),
+        sql`${published} > now() - make_interval(days => ${days})`,
+      ),
+    )
+    .orderBy(desc(published))
+    .limit(limit);
+  return withPillarHeat(rows).map((r) => ({
+    id: r.id,
+    title: r.title,
+    url: r.publishedLink ?? r.youtubeUrl,
+    publishedAt: r.publishedAt ? new Date(r.publishedAt).toISOString() : null,
+    hasTranscript: r.transcriptId != null,
+    youtubeId: r.youtubeId ?? youtubeIdFrom(r.youtubeUrl) ?? youtubeIdFrom(r.publishedLink),
+    channel: r.channel,
+    views: r.views,
+    leads: r.leads,
+    heat: r.heat,
+  }));
+}
+
 /** Recent published long-form videos from a single_video format's source channels, newest first. */
 export async function listFormatVideos(formatId: string): Promise<FormatVideoOption[] | null> {
   const [format] = await db.select({ name: formats.name }).from(formats).where(eq(formats.id, formatId)).limit(1);
   if (!format) return null;
   const accountIds = await sourceAccountIds(format.name);
   if (!accountIds.length) return [];
-  const published = sql`COALESCE(${productionItems.publishedAt}, ${productionItems.publishedDate}::timestamptz)`;
-  const rows = await db
-    .select({
-      id: productionItems.id,
-      title: productionItems.title,
-      publishedLink: productionItems.publishedLink,
-      youtubeUrl: productionItems.youtubeUrl,
-      publishedAt: sql<string | null>`${published}`,
-      transcriptId: transcripts.id,
-    })
-    .from(productionItems)
-    .leftJoin(transcripts, eq(transcripts.productionItemId, productionItems.id))
-    .where(
-      and(
-        inArray(productionItems.accountId, accountIds),
-        eq(productionItems.postType, "youtube_long"),
-        eq(productionItems.status, "Published"),
-        isNull(productionItems.deletedAt),
-        sql`${published} > now() - (${VIDEO_PICKER_DAYS} || ' days')::interval`,
-      ),
-    )
-    .orderBy(desc(published))
-    .limit(30);
-  return rows.map((r) => ({
-    id: r.id,
-    title: r.title,
-    url: r.publishedLink ?? r.youtubeUrl,
-    publishedAt: r.publishedAt ? new Date(r.publishedAt).toISOString() : null,
-    hasTranscript: r.transcriptId != null,
-  }));
+  return listPillarVideos(inArray(productionItems.accountId, accountIds), VIDEO_PICKER_DAYS, 30);
 }
 
 /** The brand's published long-form videos from the last 90 days (any channel), newest first — the pillar picker for "one piece of pillar content". */
 export async function listBrandVideos(brand: string): Promise<FormatVideoOption[]> {
-  const published = sql`COALESCE(${productionItems.publishedAt}, ${productionItems.publishedDate}::timestamptz)`;
-  const rows = await db
-    .select({
-      id: productionItems.id,
-      title: productionItems.title,
-      publishedLink: productionItems.publishedLink,
-      youtubeUrl: productionItems.youtubeUrl,
-      publishedAt: sql<string | null>`${published}`,
-      transcriptId: transcripts.id,
-    })
-    .from(productionItems)
-    .leftJoin(transcripts, eq(transcripts.productionItemId, productionItems.id))
-    .where(
-      and(
-        eq(productionItems.brand, brand),
-        eq(productionItems.postType, "youtube_long"),
-        eq(productionItems.status, "Published"),
-        isNull(productionItems.deletedAt),
-        sql`${published} > now() - interval '90 days'`,
-      ),
-    )
-    .orderBy(desc(published))
-    .limit(40);
-  return rows.map((r) => ({
-    id: r.id,
-    title: r.title,
-    url: r.publishedLink ?? r.youtubeUrl,
-    publishedAt: r.publishedAt ? new Date(r.publishedAt).toISOString() : null,
-    hasTranscript: r.transcriptId != null,
-  }));
+  return listPillarVideos(eq(productionItems.brand, brand), 90, 40);
 }
 
 /**

@@ -21,7 +21,8 @@
 import { randomUUID } from "node:crypto";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { clipIdeas, formatChannels, formats, productionItems, repurposeTriggers, transcripts } from "@/lib/db/schema";
+import { accounts, clipIdeas, formatChannels, formats, productionItems, repurposeTriggers, transcripts } from "@/lib/db/schema";
+import { withPillarHeat } from "@/lib/pillar-heat";
 import { enqueue } from "@/jobs/enqueue";
 import { editorForNewPost, isShortPostType, newPostKind } from "@/lib/new-post-kinds";
 import { pickBestAccountForFormat } from "@/lib/format-channels";
@@ -65,6 +66,12 @@ export interface NewPostPillarOption {
   hasVideo: boolean;
   /** For the dialog's watch-it preview; null when the item has no YouTube link. */
   youtubeId: string | null;
+  /** The YouTube channel's handle (a brand can have several). */
+  channel: string | null;
+  views: number | null;
+  leads: number | null;
+  /** Views ÷ the channel's median in this list (`withPillarHeat`). */
+  heat: number | null;
 }
 
 /** The brand's formats that post to this kind's platform, each with the editor it opens in. */
@@ -100,9 +107,14 @@ export async function listNewPostPillars(brand: string): Promise<NewPostPillarOp
       youtubeId: productionItems.youtubeId,
       youtubeUrl: productionItems.youtubeUrl,
       publishedLink: productionItems.publishedLink,
+      accountId: productionItems.accountId,
+      channel: accounts.handle,
+      views: productionItems.views,
+      leads: productionItems.leads,
     })
     .from(productionItems)
     .leftJoin(transcripts, eq(transcripts.productionItemId, productionItems.id))
+    .leftJoin(accounts, eq(accounts.id, productionItems.accountId))
     .where(
       and(
         eq(productionItems.brand, brand),
@@ -114,13 +126,17 @@ export async function listNewPostPillars(brand: string): Promise<NewPostPillarOp
     )
     .orderBy(desc(published))
     .limit(60);
-  return rows.map((r) => ({
+  return withPillarHeat(rows).map((r) => ({
     id: r.id,
     title: r.title,
     publishedAt: r.publishedAt ? new Date(r.publishedAt).toISOString() : null,
     hasTranscript: r.transcriptId != null,
     hasVideo: !!r.mediaS3Key && !r.mediaContentType?.startsWith("audio/"),
     youtubeId: r.youtubeId ?? youtubeIdFrom(r.youtubeUrl) ?? youtubeIdFrom(r.publishedLink),
+    channel: r.channel,
+    views: r.views,
+    leads: r.leads,
+    heat: r.heat,
   }));
 }
 

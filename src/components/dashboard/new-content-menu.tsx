@@ -34,6 +34,7 @@ import { BrandAvatar } from "@/components/ui/brand-avatar";
 import { useFeatureFlags } from "@/components/clip-editor/use-feature-flags";
 import { cn } from "@/lib/utils";
 import { NEW_POST_KINDS, type NewPostKind } from "@/lib/new-post-kinds";
+import { PillarVideoPicker, type PillarVideo } from "@/components/dashboard/pillar-video-picker";
 import { CLIP_PARAM } from "@/components/clip-editor/drafts";
 
 interface BrandOption {
@@ -52,11 +53,7 @@ interface FormatOption {
   kind: "roundup" | "single_video";
 }
 
-interface VideoOption {
-  id: string;
-  title: string | null;
-  publishedAt: string | null;
-  channel?: string;
+interface VideoOption extends PillarVideo {
   usedBySlot?: string | null;
   hasTranscript?: boolean;
 }
@@ -132,12 +129,6 @@ export function NewContentMenu({
       )}
     </>
   );
-}
-
-function fmtDate(iso: string | null): string {
-  if (!iso) return "";
-  const d = iso.length === 10 ? new Date(`${iso}T12:00:00`) : new Date(iso);
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 /** An undrafted scheduled edition (a queue newsletter): its brand, format and
@@ -315,7 +306,7 @@ export function NewNewsletterDialog({
     "h-9 w-full rounded-lg border border-input bg-background px-2.5 text-sm";
   return (
     <Dialog open onOpenChange={(o) => !o && !creating && onClose()}>
-      <DialogContent className="flex max-w-lg flex-col gap-0 p-0">
+      <DialogContent className="flex max-h-[92vh] flex-col gap-0 p-0 sm:max-w-lg">
         <div className="flex items-center gap-3 border-b px-5 py-4">
           <span className="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
             <Mail className="size-4" />
@@ -330,7 +321,7 @@ export function NewNewsletterDialog({
             </span>
           </div>
         </div>
-        <div className="flex flex-col gap-4 px-5 py-4">
+        <div className="flex min-h-0 flex-col gap-4 overflow-y-auto px-5 py-4">
           {brands.length > 1 && !slot && (
             <label className="flex flex-col gap-1.5 text-sm">
               <span className="text-xs font-medium text-muted-foreground">
@@ -421,36 +412,26 @@ export function NewNewsletterDialog({
                 </span>
               ) : (
                 <>
-                  <select
-                    className={field}
+                  <PillarVideoPicker
+                    videos={pickList}
                     value={sourceItemId}
-                    onChange={(e) => setSourceItemId(e.target.value)}
-                    data-testid="newsletter-pillar"
-                  >
-                    {slot && pickList.length > 0 && (
-                      <option value="" disabled>
-                        Pick the pillar video…
-                      </option>
-                    )}
-                    {pickList.length === 0 && (
-                      <option value="">
-                        {format?.kind === "single_video"
-                          ? "No recent videos on this format's channels"
-                          : "No recent videos for this brand"}
-                      </option>
-                    )}
-                    {pickList.map((v) => (
-                      <option key={v.id} value={v.id} disabled={v.hasTranscript === false}>
-                        {fmtDate(v.publishedAt)} · {v.channel ? `${v.channel} · ` : ""}
-                        {v.title ?? "Untitled"}
-                        {v.usedBySlot
-                          ? " (already used)"
-                          : v.hasTranscript === false
-                            ? " (no transcript yet)"
-                            : ""}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={setSourceItemId}
+                    noteFor={(v) => {
+                      const o = v as VideoOption;
+                      return o.usedBySlot
+                        ? { text: "already used", blocks: false }
+                        : o.hasTranscript === false
+                          ? { text: "no transcript yet", blocks: true }
+                          : null;
+                    }}
+                    emptyText={
+                      format?.kind === "single_video"
+                        ? "No recent videos on this format's channels"
+                        : "No recent videos for this brand"
+                    }
+                    testId="newsletter-pillar"
+                    previewTestId="newsletter-pillar-preview"
+                  />
                   {format?.kind === "roundup" && (
                     <span className="text-xs text-muted-foreground">
                       The whole issue is about this video: every story section takes a different angle on it.
@@ -569,13 +550,9 @@ interface PostFormatOption {
   editor: "design" | "clip" | "post";
 }
 
-interface PillarOption {
-  id: string;
-  title: string | null;
-  publishedAt: string | null;
+interface PillarOption extends PillarVideo {
   hasTranscript: boolean;
   hasVideo: boolean;
-  youtubeId: string | null;
 }
 
 const EDITOR_LINE: Record<PostFormatOption["editor"], string> = {
@@ -691,7 +668,6 @@ function NewPostDialog({
     options?.pillars.some((p) => p.id === pickedPillarId && usable(p))
       ? pickedPillarId
       : (options?.pillars.find(usable)?.id ?? "");
-  const pillar = options?.pillars.find((p) => p.id === pillarId) ?? null;
   const brandRow = brands.find((b) => b.slug === brand) ?? null;
 
   const ready = !!options && !!pillarId && !creating;
@@ -734,7 +710,7 @@ function NewPostDialog({
     "h-9 w-full rounded-lg border border-input bg-background px-2.5 text-sm";
   return (
     <Dialog open onOpenChange={(o) => !o && !creating && onClose()}>
-      <DialogContent className="flex max-h-[92vh] max-w-lg flex-col gap-0 p-0">
+      <DialogContent className="flex max-h-[92vh] flex-col gap-0 p-0 sm:max-w-lg">
         <div className="flex items-center gap-3 border-b px-5 py-4 pr-12">
           {brandRow && (
             <BrandAvatar
@@ -791,7 +767,7 @@ function NewPostDialog({
           </div>
         </div>
         <div className="flex min-h-0 flex-col gap-4 overflow-y-auto px-5 py-4">
-          <label className="flex flex-col gap-1.5 text-sm">
+          <div className="flex flex-col gap-1.5 text-sm">
             <span className="text-xs font-medium text-muted-foreground">
               Pillar content
             </span>
@@ -800,39 +776,24 @@ function NewPostDialog({
                 <Loader2 className="size-3.5 animate-spin" /> Loading videos…
               </span>
             ) : (
-              <select
-                className={field}
+              <PillarVideoPicker
+                videos={options.pillars}
                 value={pillarId}
-                onChange={(e) => setPillarId(e.target.value)}
-                data-testid="new-post-pillar"
-              >
-                {options.pillars.length === 0 && (
-                  <option value="">No recent videos for this brand</option>
-                )}
-                {options.pillars.map((p) => (
-                  <option key={p.id} value={p.id} disabled={!usable(p)}>
-                    {fmtDate(p.publishedAt)} · {p.title ?? "Untitled"}
-                    {!p.hasTranscript
-                      ? " (no transcript yet)"
-                      : editor === "clip" && !p.hasVideo
-                        ? " (not archived yet)"
-                        : ""}
-                  </option>
-                ))}
-              </select>
+                onChange={setPillarId}
+                noteFor={(v) => {
+                  const p = v as PillarOption;
+                  return !p.hasTranscript
+                    ? { text: "no transcript yet", blocks: true }
+                    : editor === "clip" && !p.hasVideo
+                      ? { text: "not archived yet", blocks: true }
+                      : null;
+                }}
+                emptyText="No recent videos for this brand"
+                testId="new-post-pillar"
+                previewTestId="new-post-pillar-preview"
+              />
             )}
-          </label>
-          {pillar?.youtubeId && (
-            <iframe
-              key={pillar.youtubeId}
-              src={`https://www.youtube-nocookie.com/embed/${pillar.youtubeId}?rel=0`}
-              title={pillar.title ?? "Pillar video"}
-              allow="encrypted-media; picture-in-picture; fullscreen"
-              allowFullScreen
-              className="aspect-video w-full shrink-0 rounded-lg border bg-muted"
-              data-testid="new-post-pillar-preview"
-            />
-          )}
+          </div>
 
           <label className="flex flex-col gap-1.5 text-sm">
             <span className="text-xs font-medium text-muted-foreground">
