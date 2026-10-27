@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_TEMPLATES } from "@/lib/newsletter-template";
-import { describeFields, describePillar, describeTemplate, phaseFor, submissionProblem, TEMPLATE_FRAMING, THUMBNAIL_RULE } from "./agent";
+import { ANGLE_STORY_TEST, buildUserTurn, describeFields, describePillar, describeTemplate, phaseFor, submissionProblem, TEMPLATE_FRAMING, THUMBNAIL_RULE } from "./agent";
 
 const sb = DEFAULT_TEMPLATES["sunday breakfast"];
 
@@ -118,5 +118,37 @@ describe("template fields in the drafter's prompt and submission", () => {
     expect(submissionProblem({ ...base, variables: { tool: "Claude", steps_heading: "How We Did It", closer_1: "Use Cases", closer_2: "Bonus Tips" } }, fp, true, undefined, null, fields)).toBeNull();
     // A template with no fields asks for none.
     expect(submissionProblem({ ...base, sections: sb.sections.map((s) => ({ key: s.key, markdown: "x" })) }, sb, true, undefined, null, [])).toBeNull();
+  });
+});
+
+describe("an angle that themes the stories", () => {
+  const plan = {
+    sections: [{ sectionKey: "orange_juice", story: "newest_video" as const, pick: { kind: "video" as const, key: "video:v1", title: "Habit tracker", url: "https://youtu.be/v1", publishedAt: "2026-10-25T00:00:00Z", productionItemId: "v1" } }],
+    caseStudies: [],
+    videos: [],
+  };
+  const args = {
+    brand: "Starter Story",
+    formatName: "Sunday Breakfast",
+    window: { start: new Date("2026-10-13T00:00:00Z"), end: new Date("2026-10-27T00:00:00Z") },
+    template: sb,
+    storyPlan: plan,
+    notes: "Cover businesses that won't be displaced by AI.",
+  } as unknown as Parameters<typeof buildUserTurn>[0];
+
+  // 2026-10-27: the date-picked lead (an AI-built habit tracker) stayed in and
+  // its section teased the fit instead of stating it.
+  it("makes every story pass the angle and say why, and tells the drafter the lineup predates the angle", () => {
+    const text = buildUserTurn(args);
+    expect(text).toContain(ANGLE_STORY_TEST);
+    expect(text).toMatch(/picked by date, BEFORE anyone read THE ANGLE/);
+    expect(text).toMatch(/never tease the reason the story is in this issue/);
+    expect(text).toMatch(/Swap any story that doesn't earn its place/);
+  });
+
+  it("leaves the lineup as a plain suggestion when there is no angle", () => {
+    const text = buildUserTurn({ ...args, notes: null });
+    expect(text).not.toContain(ANGLE_STORY_TEST);
+    expect(text).not.toMatch(/BEFORE anyone read THE ANGLE/);
   });
 });

@@ -153,10 +153,15 @@ const USUALLY: Record<StoryKind, string> = {
 };
 
 /** The lineup block of the agent's first turn. Pure; exported for tests. */
-export function describeStoryPlan(plan: StoryPlan): string {
+export function describeStoryPlan(plan: StoryPlan, hasAngle = false): string {
   const out = [
     "SUGGESTED STORY LINEUP (from the issue template: the usual shape of this newsletter when these stories are available — a starting point, not a quota; use your judgment and the section instructions, and swap in whatever makes the stronger issue, as long as the story rules hold):",
   ];
+  if (hasAngle) {
+    out.push(
+      "These suggestions were picked by date, BEFORE anyone read THE ANGLE. Keep a suggestion only if it passes THE ANGLE's story test; otherwise replace it with a story that does, from the lists below or the tools.",
+    );
+  }
   for (const s of plan.sections) {
     const tail = s.pick ? ` — suggested: ${line(s.pick)}` : s.story === "any" ? "" : " — nothing recent is free; see the tools";
     out.push(`- "${s.sectionKey}": ${USUALLY[s.story]}${tail}.`);

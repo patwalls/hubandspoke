@@ -562,8 +562,25 @@ export function describePillar(v: SourceVideo): string {
 /** The editor's angle for this issue (`newsletter_drafts.notes`, "Angle" in
  *  the New dialog): what the issue is about. Exported for tests. */
 export function describeAngle(angle: string): string {
-  return `THE ANGLE — the editor wrote this for this issue, and it is the brief. The issue is about this: build the subject line, the intro and the lead section around it, and make every other section serve it. Where it names a topic, a point to make, a part of the video or a story to use, use exactly that. It overrides the Skill and the story plan where they conflict; the Skill still decides the format and voice.\n${angle}`;
+  return [
+    `THE ANGLE — the editor wrote this for this issue, and it is the brief. The issue is about this: build the subject line, the intro and the lead section around it, and make every other section serve it. Where it names a topic, a point to make, a part of the video or a story to use, use exactly that. It overrides the Skill and the story plan where they conflict; the Skill still decides the format and voice.`,
+    angle,
+    ANGLE_STORY_TEST,
+  ].join("\n");
 }
+
+/**
+ * When the angle is a theme for the stories, every story must pass it and say
+ * why. 2026-10-27: Sunday Breakfast "businesses that won't be displaced by AI"
+ * kept the week's newest video (an AI-built habit tracker) as the lead because
+ * the story plan suggested it, then papered over the fit with a tease ("his
+ * answer is very... human"); the litter-pickup and drone-repair sections, which
+ * named the concrete reason, were the ones Pat liked.
+ */
+export const ANGLE_STORY_TEST = `IF THE ANGLE IS A THEME FOR THE STORIES (a kind of business, founder or lesson every story should show), it is a test every story section must pass:
+- Pick each story FOR the angle. Before you write a section, say to yourself in one sentence, from the source's own facts, why this story is a strong example of the angle. If you can't, or the reason is weak or generic ("he's human", "she works hard", "it's simple"), drop the story and find one that passes — even the lead, even a suggested pick, even the week's newest video. A weaker-fitting fresh story loses to a strong-fitting older one (list_older_videos, search_case_studies).
+- Every story section then makes that reason explicit, in the Skill's voice: the concrete thing about THIS business that makes it an example of the angle (e.g. for "businesses AI won't replace": the physical work, the trust, the lived experience, the local relationships, the hands-on skill — whatever the source shows). Tease the rest of the story if the format teases, but never tease the reason the story is in this issue.
+- Don't claim a fit the source doesn't support.`;
 
 /** The first user turn. Exported for tests. */
 export function buildUserTurn(args: NewsletterAgentArgs): string {
@@ -611,7 +628,7 @@ export function buildUserTurn(args: NewsletterAgentArgs): string {
   if (angle) parts.push(describeAngle(angle));
   if (args.template) parts.push(describeTemplate(args.template, sponsorSupplied, args.sectionExamples));
   if (!args.video && args.usage) parts.push(STORY_RULES);
-  if (!args.video && args.storyPlan) parts.push(describeStoryPlan(args.storyPlan));
+  if (!args.video && args.storyPlan) parts.push(describeStoryPlan(args.storyPlan, !!angle));
   if (sponsorSupplied) {
     const where =
       args.template && sponsorKey
@@ -626,7 +643,9 @@ export function buildUserTurn(args: NewsletterAgentArgs): string {
     );
   }
   if (angle) {
-    parts.push("Before you submit, re-read THE ANGLE: the subject line, the intro and the lead section must make its point, and nothing in the issue may wander off it.");
+    parts.push(
+      "Before you submit, re-read THE ANGLE: the subject line, the intro and the lead section must make its point, and nothing in the issue may wander off it. If it's a theme for the stories, check every story section: does it say, concretely, why this story is an example of the angle? Swap any story that doesn't earn its place.",
+    );
   }
   return parts.join("\n\n");
 }
@@ -851,7 +870,7 @@ export async function regenerateSection(
     args.pinnedStory
       ? pinnedStoryInstruction(args.pinnedStory, args.instruction)
       : args.newStoryExclude
-      ? `FIND A NEW STORY: replace this section's video/case study with a DIFFERENT one and rewrite the section around it. ${where ?? "Use the tools to find it: this window's stories first, then list_older_videos / search_case_studies."} Never use a story marked blocked, and never any of these: ${[...args.newStoryExclude].join(", ") || "(none)"}. Set source to the story you chose.${args.instruction?.trim() ? ` The editor's steer: ${args.instruction.trim()}` : ""}`
+      ? `FIND A NEW STORY: replace this section's video/case study with a DIFFERENT one and rewrite the section around it. ${where ?? "Use the tools to find it: this window's stories first, then list_older_videos / search_case_studies."} Never use a story marked blocked, and never any of these: ${[...args.newStoryExclude].join(", ") || "(none)"}. Set source to the story you chose.${args.notes?.trim() ? " The new story must pass THE ANGLE's story test." : ""}${args.instruction?.trim() ? ` The editor's steer: ${args.instruction.trim()}` : ""}`
       : args.instruction?.trim()
         ? `The editor's instruction (follow it): ${args.instruction.trim()}`
         : "Make it better: tighter, more specific, more on-voice, without changing what it's about. Keep the same story.",

@@ -79,7 +79,7 @@ describe("buildUserTurn", () => {
     expect(at).toBeGreaterThan(turn.indexOf(video.transcript));
     expect(at).toBeLessThan(turn.indexOf("ISSUE TEMPLATE"));
     expect(turn.slice(at)).toContain(angle);
-    expect(turn.trimEnd().endsWith("nothing in the issue may wander off it.")).toBe(true);
+    expect(turn.trimEnd().endsWith("Swap any story that doesn't earn its place.")).toBe(true);
     expect(buildUserTurn({ ...base, video })).not.toContain("THE ANGLE");
   });
 });
