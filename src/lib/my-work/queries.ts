@@ -1,7 +1,15 @@
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { contentEvents, productionItems } from "@/lib/db/schema";
-import { OFF_PLATE_STATUSES, REVIEW_STATUS, YOUR_TURN_STATUSES, splitMyWork, type MyWorkSplit } from "./split";
+import {
+  OFF_PLATE_STATUSES,
+  REVIEW_STATUS,
+  YOUR_TURN_STATUSES,
+  reviewLane,
+  splitMyWork,
+  type MyWorkSplit,
+  type ReviewLanes,
+} from "./split";
 import { htmlToPlainText } from "@/lib/comments/sanitize";
 import { rowNews, type RowNews } from "./news";
 import { buildMyWorkDigest } from "./digest";
@@ -41,26 +49,42 @@ export type MyWorkItem = {
   pillarContentItemId?: string | null;
 };
 
-/** Brands where this person moved an item out of Review in the last 30 days. */
-export async function getReviewBrands(userId: string): Promise<Set<string>> {
+/**
+ * The lanes (brand + format) where anyone moved an item out of Review in the
+ * last 30 days, and which of them this person did — see `ReviewLanes`.
+ */
+export async function getReviewLanes(userId: string): Promise<ReviewLanes> {
   const rows = await db
-    .selectDistinct({ brand: productionItems.brand })
+    .selectDistinct({
+      brand: productionItems.brand,
+      format: productionItems.format,
+      isMine: sql<boolean>`${contentEvents.userId} = ${userId}::uuid`,
+    })
     .from(contentEvents)
     .innerJoin(productionItems, eq(productionItems.id, contentEvents.contentItemId))
     .where(
       and(
-        eq(contentEvents.userId, userId),
         eq(contentEvents.eventType, "status_change"),
+        sql`${contentEvents.userId} IS NOT NULL`,
         sql`${contentEvents.payload}->>'from' = ${REVIEW_STATUS}`,
         sql`${contentEvents.createdAt} > now() - make_interval(days => ${REVIEWER_WINDOW_DAYS})`,
       ),
     );
-  return new Set(rows.map((r) => r.brand).filter(Boolean));
+  const lanes = { mine: new Set<string>(), brands: new Set<string>(), covered: new Set<string>() };
+  for (const r of rows) {
+    if (!r.brand) continue;
+    lanes.covered.add(reviewLane(r));
+    if (r.isMine) {
+      lanes.mine.add(reviewLane(r));
+      lanes.brands.add(r.brand);
+    }
+  }
+  return lanes;
 }
 
 /** Everything on this person's plate, split into your turn / to review / waiting. */
 export async function getMyWork(userId: string): Promise<MyWorkSplit<MyWorkItem>> {
-  const [mine, reviewBrands] = await Promise.all([
+  const [mine, lanes] = await Promise.all([
     db
       .select(myWorkColumns)
       .from(productionItems)
@@ -83,17 +107,17 @@ export async function getMyWork(userId: string): Promise<MyWorkSplit<MyWorkItem>
         desc(productionItems.updatedAt),
       )
       .limit(200) as Promise<MyWorkItem[]>,
-    getReviewBrands(userId),
+    getReviewLanes(userId),
   ]);
 
-  const inReview = reviewBrands.size
+  const inReview = lanes.brands.size
     ? ((await db
         .select(myWorkColumns)
         .from(productionItems)
         .where(
           and(
             eq(productionItems.status, REVIEW_STATUS),
-            inArray(productionItems.brand, [...reviewBrands]),
+            inArray(productionItems.brand, [...lanes.brands]),
             isNull(productionItems.deletedAt),
           ),
         )
@@ -102,7 +126,7 @@ export async function getMyWork(userId: string): Promise<MyWorkSplit<MyWorkItem>
         .limit(200)) as MyWorkItem[])
     : [];
 
-  return splitMyWork(mine, inReview, reviewBrands);
+  return splitMyWork(mine, inReview, lanes);
 }
 
 const NEWS_WINDOW_DAYS = 30;

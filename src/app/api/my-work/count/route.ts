@@ -7,7 +7,7 @@ import { waitingCount } from "@/lib/my-work/split";
  * GET /api/my-work/count
  *
  * The number on the header's My Work button: your turn (Assigned / Ready To
- * Publish on your items) + to review (Review items on brands you approve).
+ * Publish on your items) + to review (Review items in the brand + formats you approve).
  * Fetched once per page load, never on a timer.
  */
 export async function GET() {

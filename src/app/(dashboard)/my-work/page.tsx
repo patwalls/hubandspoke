@@ -172,7 +172,7 @@ export default async function MyWorkPage() {
       {toReview.length > 0 && (
         <Section
           title="To review"
-          subtitle="In Review on brands you've approved posts for this month. Longest wait first."
+          subtitle="In Review, in the formats you've approved posts for this month. Longest wait first."
           rows={toReview}
           section="to-review"
           emptyText="Nothing to review."

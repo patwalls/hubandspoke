@@ -1,20 +1,46 @@
 import { describe, expect, it } from "vitest";
-import { splitMyWork, upNext, waitingCount, waitingSummary, type MyWorkRow } from "./split";
+import {
+  NO_REVIEW_LANES,
+  reviewLane,
+  splitMyWork,
+  upNext,
+  waitingCount,
+  waitingSummary,
+  type MyWorkRow,
+  type ReviewLanes,
+} from "./split";
 
 const ME = "me";
-const row = (id: string, status: string | null, brand = "futurepedia", editorUserId: string | null = ME): MyWorkRow => ({
+const row = (
+  id: string,
+  status: string | null,
+  brand = "futurepedia",
+  editorUserId: string | null = ME,
+  format: string | null = "Clip",
+): MyWorkRow => ({
   id,
   brand,
   status,
   editorUserId,
+  format,
 });
+
+/** You approved posts in `mine` lanes; anyone approved posts in `covered`. */
+const lanes = (mine: [string, string | null][], covered: [string, string | null][] = []): ReviewLanes => {
+  const key = ([brand, format]: [string, string | null]) => reviewLane({ brand, format });
+  return {
+    mine: new Set(mine.map(key)),
+    brands: new Set(mine.map(([b]) => b)),
+    covered: new Set([...mine, ...covered].map(key)),
+  };
+};
 
 describe("splitMyWork", () => {
   it("puts Assigned and Ready To Publish on your turn, the rest waiting", () => {
     const s = splitMyWork(
       [row("a", "Assigned"), row("r", "Ready To Publish"), row("v", "Review"), row("h", "On Hold"), row("n", null)],
       [],
-      new Set(),
+      NO_REVIEW_LANES,
     );
     expect(s.yourTurn.map((r) => r.id)).toEqual(["a", "r"]);
     expect(s.waitingOnOthers.map((r) => r.id)).toEqual(["v", "h"]);
@@ -27,7 +53,7 @@ describe("splitMyWork", () => {
     const s = splitMyWork(
       [row("i", "Idea"), row("n", null), row("p", "Published"), row("k", "Killed"), row("a", "Assigned"), row("h", "On Hold")],
       [],
-      new Set(),
+      NO_REVIEW_LANES,
     );
     expect(s.yourTurn.map((r) => r.id)).toEqual(["a"]);
     expect(s.waitingOnOthers.map((r) => r.id)).toEqual(["h"]);
@@ -37,14 +63,45 @@ describe("splitMyWork", () => {
     const s = splitMyWork(
       [],
       [row("x", "Review", "futurepedia", "john"), row("y", "Review", "starter-story", "kate")],
-      new Set(["futurepedia"]),
+      lanes([["futurepedia", "Clip"]]),
     );
     expect(s.toReview.map((r) => r.id)).toEqual(["x"]);
   });
 
-  it("moves your own Review item to To review when you approve that brand, not both", () => {
+  it("only offers Review items in formats you approve, not your whole brand", () => {
+    // Pat approved one starter-story Business Breakdown; Evgeny approves the
+    // Shorts and X posts. Those went back and forth between Noman, Kate and
+    // Evgeny, yet filled Pat's morning email as "waiting on you".
+    const s = splitMyWork(
+      [],
+      [
+        row("bb", "Review", "starter-story", "noman", "Business Breakdown"),
+        row("short", "Review", "starter-story", "noman", "Repackage Section w/ Hook"),
+        row("x", "Review", "starter-story", "kate", "A Must Read For X"),
+      ],
+      lanes(
+        [["starter-story", "Business Breakdown"]],
+        [
+          ["starter-story", "Repackage Section w/ Hook"],
+          ["starter-story", "A Must Read For X"],
+        ],
+      ),
+    );
+    expect(s.toReview.map((r) => r.id)).toEqual(["bb"]);
+  });
+
+  it("offers a format nobody has approved lately to the brand's reviewers", () => {
+    const s = splitMyWork(
+      [],
+      [row("new", "Review", "starter-story", "kate", "Brand New Format")],
+      lanes([["starter-story", "Business Breakdown"]]),
+    );
+    expect(s.toReview.map((r) => r.id)).toEqual(["new"]);
+  });
+
+  it("moves your own Review item to To review when you approve that lane, not both", () => {
     const own = row("o", "Review", "my-first-million");
-    const s = splitMyWork([own], [own], new Set(["my-first-million"]));
+    const s = splitMyWork([own], [own], lanes([["my-first-million", "Clip"]]));
     expect(s.toReview.map((r) => r.id)).toEqual(["o"]);
     expect(s.waitingOnOthers).toEqual([]);
     expect(waitingCount(s)).toBe(1);
@@ -54,7 +111,7 @@ describe("splitMyWork", () => {
     const s = splitMyWork(
       [row("a", "Assigned"), row("h", "On Hold")],
       [row("x", "Review", "futurepedia", "john")],
-      new Set(["futurepedia"]),
+      lanes([["futurepedia", "Clip"]]),
     );
     expect(s.waitingOnOthers.map((r) => r.id)).toEqual(["h"]);
     expect(waitingCount(s)).toBe(2);

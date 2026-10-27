@@ -3,11 +3,15 @@
  *
  * - **Your turn**: items you're the editor on that are waiting on you —
  *   Assigned (edit it) or Ready To Publish (post it).
- * - **To review**: items in Review on a brand where you've moved something
- *   out of Review in the last 30 days. Nobody is assigned as a reviewer in the
- *   data, so the history is the assignment: the person who approved a brand's
- *   posts last month is the one who'll approve them this week. Includes your
- *   own items on that brand (some people approve their own).
+ * - **To review**: items in Review in a lane (brand + format) where you've
+ *   moved something out of Review in the last 30 days. Nobody is assigned as a
+ *   reviewer in the data, so the history is the assignment: the person who
+ *   approved a lane's posts last month is the one who'll approve them this
+ *   week. Per lane, not per brand: Pat approved one starter-story Business
+ *   Breakdown and got every starter-story Short and X post Evgeny reviews in
+ *   his morning email. A lane nobody has approved in the window (a new format)
+ *   falls back to the brand's reviewers, so it isn't on no one's plate.
+ *   Includes your own items in that lane (some people approve their own).
  * - **Waiting on others**: the rest of your items (Review on a brand someone
  *   else approves, On Hold, Scheduled, …).
  *
@@ -30,6 +34,29 @@ export interface MyWorkRow {
   brand: string;
   status: string | null;
   editorUserId: string | null;
+  format?: string | null;
+}
+
+/** Who reviews what, from who moved posts out of Review lately. */
+export interface ReviewLanes {
+  /** Lanes (`reviewLane`) you approved posts in. */
+  mine: ReadonlySet<string>;
+  /** Brands you approved posts on. */
+  brands: ReadonlySet<string>;
+  /** Lanes anyone approved posts in. */
+  covered: ReadonlySet<string>;
+}
+
+export const NO_REVIEW_LANES: ReviewLanes = { mine: new Set(), brands: new Set(), covered: new Set() };
+
+export function reviewLane(r: { brand: string; format?: string | null }): string {
+  return `${r.brand}\u0000${r.format ?? ""}`;
+}
+
+/** Is this post yours to approve: your lane, or an uncovered lane on your brand. */
+export function isYourReview(r: { brand: string; format?: string | null }, lanes: ReviewLanes): boolean {
+  const lane = reviewLane(r);
+  return lanes.mine.has(lane) || (lanes.brands.has(r.brand) && !lanes.covered.has(lane));
 }
 
 export interface MyWorkSplit<R extends MyWorkRow> {
@@ -40,15 +67,16 @@ export interface MyWorkSplit<R extends MyWorkRow> {
 
 /**
  * `mine` = items you're the editor on (not Published/Killed). `inReview` =
- * Review items on the brands you approve (`reviewBrands`), anyone's.
+ * Review items on the brands you approve, anyone's; `lanes` narrows them to
+ * the formats you approve.
  */
 export function splitMyWork<R extends MyWorkRow>(
   mine: R[],
   inReview: R[],
-  reviewBrands: ReadonlySet<string>,
+  lanes: ReviewLanes,
 ): MyWorkSplit<R> {
   const toReview = inReview.filter(
-    (r) => r.status === REVIEW_STATUS && reviewBrands.has(r.brand),
+    (r) => r.status === REVIEW_STATUS && isYourReview(r, lanes),
   );
   const reviewIds = new Set(toReview.map((r) => r.id));
   const yourTurn: R[] = [];
