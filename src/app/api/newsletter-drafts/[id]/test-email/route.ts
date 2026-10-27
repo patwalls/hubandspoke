@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireFeature } from "@/lib/auth-guards";
 import { sendNewsletterTestEmail } from "@/lib/email";
-import { renderEmailHtml } from "@/lib/newsletter-email-html";
+import { draftEmailHtml } from "@/lib/newsletter-draft-html";
 import { composeIssue } from "@/lib/newsletter-template";
-import type { DocNode } from "@/lib/newsletter-rich-doc";
 import { getNewsletterDraft } from "@/lib/services/newsletter-drafter/queries";
 
 interface RouteContext {
@@ -26,17 +25,10 @@ export async function POST(_request: NextRequest, context: RouteContext) {
   if (!draft) return NextResponse.json({ error: "Not found" }, { status: 404 });
   if (draft.status !== "ready" || !draft.template) return NextResponse.json({ error: "The draft isn't ready" }, { status: 409 });
   const sponsor = draft.specialCopy ? { copy: draft.specialCopy, landingUrl: draft.specialSource?.landingUrl ?? null } : null;
-  const previews = draft.screenshotPreviews ?? {};
-  const html = renderEmailHtml({
-    template: draft.template,
-    sections: draft.sections,
-    sponsor,
-    subject: draft.subject,
-    previewText: draft.previewText,
-    screenshots: { chosen: draft.screenshots, urlFor: (_c, markKey) => previews[markKey] ?? null },
-    layout: draft.layout as DocNode | null,
-    footerNote: `Test send from Hub & Spoke. ${draft.template.beehiiv ? "beehiiv" : "HubSpot"} adds the real footer (unsubscribe link, address) when it sends.`,
-  });
+  const html = draftEmailHtml(
+    draft,
+    `Test send from Hub & Spoke. ${draft.template.beehiiv ? "beehiiv" : "HubSpot"} adds the real footer (unsubscribe link, address) when it sends.`,
+  )!;
   try {
     await sendNewsletterTestEmail({ to, subject: draft.subject || "(no subject)", html, text: composeIssue(draft.template, draft.sections, sponsor) });
   } catch (err) {

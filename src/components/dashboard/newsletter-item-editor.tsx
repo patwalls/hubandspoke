@@ -12,6 +12,9 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { NewsletterEditorDialog } from "@/components/dashboard/newsletter-editor-dialog";
 import { refreshNewsletterDraftBadges } from "@/components/dashboard/newsletter-draft-badge";
 
+/** Window event fired when the editor closes (detail: { itemId }), so the content page's email preview re-renders. */
+export const NEWSLETTER_EDITOR_CLOSED = "newsletter-editor-closed";
+
 export function NewsletterItemEditor({
   itemId,
   open,
@@ -32,6 +35,7 @@ export function NewsletterItemEditor({
   const changed = useRef(false);
   const close = (o: boolean) => {
     onOpenChange(o);
+    if (!o) window.dispatchEvent(new CustomEvent(NEWSLETTER_EDITOR_CLOSED, { detail: { itemId } }));
     if (!o && changed.current) {
       changed.current = false;
       refreshNewsletterDraftBadges();
