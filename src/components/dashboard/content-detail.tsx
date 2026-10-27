@@ -131,6 +131,7 @@ import { startVisibleInterval } from "@/lib/visible-interval";
 import { validatePublishedLinkPlatform } from "@/lib/published-link-validation";
 import { trackUsage } from "@/lib/usage/track";
 import { HandoffButton } from "./handoff-button";
+import { leavePublishedConfirm } from "@/lib/status/leave-published";
 import { CrossPostPasteLinks } from "./cross-post-paste-links";
 
 interface BrandFormat {
@@ -2499,6 +2500,11 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                 if (next === "Killed") {
                   setPendingKill({ previousStatus: prev });
                   return;
+                }
+                const ask = leavePublishedConfirm(prev, next, item.postType);
+                if (ask) {
+                  trackUsage("status:leave-published-confirm");
+                  if (!window.confirm(ask)) return;
                 }
                 setStatus(next);
                 void persistField({ status: next || null }).then((ok) => {
