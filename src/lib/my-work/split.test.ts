@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { splitMyWork, upNext, waitingCount, type MyWorkRow } from "./split";
+import { splitMyWork, upNext, waitingCount, waitingSummary, type MyWorkRow } from "./split";
 
 const ME = "me";
 const row = (id: string, status: string | null, brand = "futurepedia", editorUserId: string | null = ME): MyWorkRow => ({
@@ -116,5 +116,14 @@ describe("upNext", () => {
     // No links on the post you're on (or no sibling waiting): the usual order.
     expect(upNext(mixed, "xp-a", { repostedFromItemId: null, pillarContentItemId: null })).toMatchObject({ next: { id: "rv-old" }, sameSource: false });
     expect(upNext(mixed, "xp-a", { repostedFromItemId: "nope" })).toMatchObject({ next: { id: "rv-old" }, sameSource: false, siblings: [] });
+  });
+});
+
+describe("waitingSummary", () => {
+  it("names both queues, reviews first, and leaves out an empty one", () => {
+    expect(waitingSummary({ toReview: 2, yourTurn: 3 })).toBe("2 to review · 3 your turn");
+    expect(waitingSummary({ toReview: 0, yourTurn: 1 })).toBe("1 your turn");
+    expect(waitingSummary({ toReview: 4, yourTurn: 0 })).toBe("4 to review");
+    expect(waitingSummary({ toReview: 0, yourTurn: 0 })).toBe("");
   });
 });

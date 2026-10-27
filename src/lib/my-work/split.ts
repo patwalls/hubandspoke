@@ -69,6 +69,15 @@ export function waitingCount(split: MyWorkSplit<MyWorkRow>): number {
   return split.yourTurn.length + split.toReview.length;
 }
 
+/** "2 to review · 3 your turn" — the brand dashboard's Waiting on you strip.
+ *  Empty parts are left out; nothing waiting is "". */
+export function waitingSummary(counts: { toReview: number; yourTurn: number }): string {
+  const parts: string[] = [];
+  if (counts.toReview > 0) parts.push(`${counts.toReview} to review`);
+  if (counts.yourTurn > 0) parts.push(`${counts.yourTurn} your turn`);
+  return parts.join(" · ");
+}
+
 /** Which post a row was made from: the post it cross-posts / reposts, or the
  *  video it is a derivative of. Two rows with a shared link are siblings. */
 export interface SourceLinks {
