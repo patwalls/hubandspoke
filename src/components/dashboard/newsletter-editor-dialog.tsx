@@ -425,6 +425,12 @@ function Workspace({
     await post(`/api/newsletter-drafts/${draft.id}/hubspot`, {}, "hubspot");
   }
 
+  /** "Update in HubSpot": saves, then the HubSpot draft gets this email as it is now (body, subject, preview); `force` after a "edited by hand there" refusal. Only while it's still a draft there. */
+  async function updateHubspot(force = false) {
+    if (dirty && !(await save())) return;
+    await post(`/api/newsletter-drafts/${draft.id}/hubspot/update`, { force }, "hubspot");
+  }
+
   /** The AI review: saves first (it reads the saved issue), then runs on the worker; the panel shows the findings. */
   async function startReview() {
     if (dirty && !(await save())) return;
@@ -543,7 +549,8 @@ function Workspace({
   const pushBusy = busyAction === "beehiiv" || busyAction === "hubspot" || pushPending;
   const words = draft.status === "ready" ? (draft.template ? sections.map((x) => x.markdown).join(" ") : body).split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w)).length : 0;
   const header = (
-    <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 border-b px-4 py-2.5">
+    <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(max-content,1fr)] items-center gap-3 border-b px-4 py-2.5">
+      {/* The right column is never narrower than its buttons (they used to spill over the Desktop / Phone toggle); the title truncates instead. */}
       <div className="flex min-w-0 flex-col">
         <span className="flex min-w-0 items-center gap-2">
           <span className="truncate text-sm font-semibold">{draft.formatName}</span>
@@ -555,7 +562,7 @@ function Workspace({
         </span>
         <span className="truncate text-xs text-muted-foreground">
           {draft.sendDate ? `Sends ${fmtDate(draft.sendDate)}` : "No send date"}
-          {pushUrl ? ` · draft in ${tool}${draft.beehiivStatus === "updated" ? " (updated)" : ""}` : draft.status === "ready" ? " · draft" : ""}
+          {pushUrl ? ` · draft in ${tool}${(draft.template?.beehiiv ? draft.beehiivStatus : draft.hubspotStatus) === "updated" ? " (updated)" : ""}` : draft.status === "ready" ? " · draft" : ""}
           {words > 0 && ` · ${words} words · ~${Math.max(1, Math.round(words / 200))} min read`}
         </span>
       </div>
@@ -652,6 +659,12 @@ function Workspace({
                         Update in beehiiv
                       </DropdownMenuItem>
                     )}
+                    {!draft.template?.beehiiv && (
+                      <DropdownMenuItem onClick={() => updateHubspot(false)} disabled={busyAction !== null || pushPending} className="cursor-pointer gap-2">
+                        <RefreshCw className="size-4" />
+                        Update in HubSpot
+                      </DropdownMenuItem>
+                    )}
                   </>
                 )}
               </DropdownMenuContent>
@@ -659,6 +672,18 @@ function Workspace({
             <Button variant="outline" size="sm" onClick={onClose} disabled={saving} title="Saves your edits and closes. The newsletter stays in the queue as a Draft until you create the email draft.">
               Save &amp; close
             </Button>
+            {pushUrl && !draft.template?.beehiiv && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => updateHubspot(false)}
+                disabled={busyAction !== null || pushPending}
+                title="Saves, then puts this email as it is now — words, design, subject and preview text — into the HubSpot draft. Only while it's a draft there: a scheduled or sent email is refused. Edits made in HubSpot itself are kept unless you choose to replace them."
+              >
+                {pushBusy ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+                Update in HubSpot
+              </Button>
+            )}
             {pushUrl ? (
               <a href={pushUrl} target="_blank" rel="noreferrer" className={buttonVariants({ size: "sm" })}>
                 Open in {tool} <ExternalLink />
@@ -1145,7 +1170,14 @@ function Workspace({
         </div>
       )}
       {draft.hubspotStatus === "failed" && draft.hubspotError && (
-        <p className="mx-5 mt-3 rounded-md bg-red-50 p-2 text-xs text-red-800 dark:bg-red-900/30 dark:text-red-200">Email push: {draft.hubspotError}</p>
+        <p className="mx-5 mt-3 flex flex-wrap items-center gap-2 rounded-md bg-red-50 p-2 text-xs text-red-800 dark:bg-red-900/30 dark:text-red-200">
+          <span>Email push: {draft.hubspotError}</span>
+          {draft.hubspotEmailUrl && draft.hubspotError.includes("edited by hand") && (
+            <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={() => updateHubspot(true)} disabled={busyAction !== null || pushPending}>
+              Replace anyway
+            </Button>
+          )}
+        </p>
       )}
       {draft.template?.beehiiv && draft.beehiivPostUrl && (
         <p className="mx-5 mt-3 rounded-md bg-muted p-2 text-xs text-muted-foreground">

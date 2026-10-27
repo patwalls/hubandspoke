@@ -1,5 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { assertAllowedHubspotCall, buildHtmlEmailContent, createDraftEmailFromTemplate, emailRichTextHtml, HUBSPOT_EMAIL_HTML_MODULE_ID } from "./hubspot-marketing-email";
+import {
+  assertAllowedHubspotCall,
+  buildHtmlEmailContent,
+  createDraftEmailFromTemplate,
+  emailModuleHtml,
+  emailRichTextHtml,
+  HUBSPOT_EMAIL_HTML_MODULE_ID,
+  HubspotHandEditedError,
+  updateDraftEmail,
+} from "./hubspot-marketing-email";
 
 describe("buildHtmlEmailContent", () => {
   // The shape of "[TEMPLATE] Sunday Breakfast – Hub & Spoke": masthead section, course sections (label + divider + rich text), footer section.
@@ -169,5 +178,76 @@ describe("createDraftEmailFromTemplate", () => {
     expect((err as Error).message).toContain("/edit/777/");
     expect((err as Error).message).toMatch(/delete it/i);
     expect(calls).toEqual(["POST /marketing/v3/emails/clone", "GET /marketing/v3/emails/777"]);
+  });
+});
+
+describe("updateDraftEmail", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  const template = {
+    id: "9",
+    content: {
+      flexAreas: { main: { sections: [{ id: "s1", columns: [{ id: "c1", widgets: ["body"], width: 12 }] }, { id: "s2", columns: [{ id: "c2", widgets: ["footer"], width: 12 }] }] } },
+      widgets: { body: { body: { path: "@hubspot/rich_text", html: "<p>old</p>" } }, footer: { body: { path: "@hubspot/email_footer" } } },
+    },
+  };
+  const moduleWith = (html: string) => ({ body: { type: "module", module_id: HUBSPOT_EMAIL_HTML_MODULE_ID, body: { module_id: HUBSPOT_EMAIL_HTML_MODULE_ID, html } } });
+  /** HubSpot with email 777 in `state` holding `html` in our module; records calls; PATCH stores what it's sent. */
+  const fake = (state: string, html: string) => {
+    const calls: string[] = [];
+    let email: Record<string, unknown> = { id: "777", state, content: { widgets: moduleWith(html) } };
+    const fetchMock = vi.fn(async (url: string, init: { method: string; body?: string }) => {
+      const path = new URL(url).pathname;
+      calls.push(`${init.method} ${path}`);
+      if (init.method === "PATCH") {
+        const b = JSON.parse(init.body!);
+        email = { ...email, subject: b.subject, content: b.content };
+        return new Response("{}", { status: 200 });
+      }
+      return new Response(JSON.stringify(path.endsWith("/9") ? template : email), { status: 200 });
+    });
+    return { calls, fetchMock, email: () => email };
+  };
+  const args = { emailId: "777", templateEmailId: "9", subject: "New subject", previewText: "pv", html: "<table><tr><td>new words</td></tr></table>", pushedText: "old words" };
+
+  it("refills a draft untouched since the last push: rebuilt from the template, subject too, read back", async () => {
+    vi.stubEnv("HUBSPOT_PORTAL_53_ACCESS_TOKEN", "test");
+    const h = fake("DRAFT", "<p>old words</p>");
+    vi.stubGlobal("fetch", h.fetchMock);
+    await expect(updateDraftEmail(args)).resolves.toMatchObject({ id: "777" });
+    expect(h.calls).toEqual(["GET /marketing/v3/emails/777", "GET /marketing/v3/emails/9", "PATCH /marketing/v3/emails/777", "GET /marketing/v3/emails/777"]);
+    expect(h.email().subject).toBe("New subject");
+    expect(emailModuleHtml(h.email() as never)).toBe(args.html);
+  });
+
+  it("refuses an email that is scheduled or sent in HubSpot, before writing anything", async () => {
+    vi.stubEnv("HUBSPOT_PORTAL_53_ACCESS_TOKEN", "test");
+    for (const state of ["SCHEDULED", "PUBLISHED", "PROCESSING", "PUBLISHED_OR_SCHEDULED"]) {
+      const h = fake(state, "<p>old words</p>");
+      vi.stubGlobal("fetch", h.fetchMock);
+      const err = await updateDraftEmail({ ...args, force: true }).catch((e: Error) => e);
+      expect((err as Error).message, state).toMatch(/not a draft any more/);
+      expect(h.calls, state).toEqual(["GET /marketing/v3/emails/777"]);
+    }
+  });
+
+  it("refuses an email edited by hand in HubSpot unless forced", async () => {
+    vi.stubEnv("HUBSPOT_PORTAL_53_ACCESS_TOKEN", "test");
+    const h = fake("DRAFT", "<p>old words, fixed in HubSpot</p>");
+    vi.stubGlobal("fetch", h.fetchMock);
+    await expect(updateDraftEmail(args)).rejects.toBeInstanceOf(HubspotHandEditedError);
+    expect(h.calls).toEqual(["GET /marketing/v3/emails/777"]);
+    await expect(updateDraftEmail({ ...args, force: true })).resolves.toMatchObject({ id: "777" });
+  });
+
+  it("an email pushed before we kept its words (old rich-text block) is refilled into the module", async () => {
+    vi.stubEnv("HUBSPOT_PORTAL_53_ACCESS_TOKEN", "test");
+    const h = fake("DRAFT", "");
+    vi.stubGlobal("fetch", h.fetchMock);
+    await expect(updateDraftEmail({ ...args, pushedText: null })).resolves.toMatchObject({ id: "777" });
+    expect(Object.values((h.email().content as { widgets: Record<string, { module_id?: number }> }).widgets).some((w) => w.module_id === HUBSPOT_EMAIL_HTML_MODULE_ID)).toBe(true);
   });
 });

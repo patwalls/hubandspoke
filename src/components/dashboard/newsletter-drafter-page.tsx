@@ -51,7 +51,8 @@ function fmtDate(iso: string | null): string {
 const STATUS_LABEL: Record<BoardRow["status"], string> = { idea: "Not drafted", drafting: "Drafting", ready: "Ready", failed: "Failed" };
 
 function StatusChip({ row }: { row: BoardRow }) {
-  const inEmail = row.hubspotStatus === "created";
+  // In HubSpot: created, or refilled since ("Update in HubSpot"); a failed Update leaves the email there too, but the row reads "failed" until retried.
+  const inEmail = row.hubspotStatus === "created" || row.hubspotStatus === "updated";
   return (
     <span
       className={cn(

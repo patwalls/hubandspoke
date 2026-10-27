@@ -34,7 +34,7 @@ const files = {
     [
       {
         name: "html",
-        label: "Email HTML — written by Hub & Spoke. Change the email there and re-push; edits here are overwritten.",
+        label: "Email HTML — written by Hub & Spoke. To change the email, edit it in Hub & Spoke and press Update in HubSpot.",
         type: "text",
         allow_new_line: true,
         required: false,

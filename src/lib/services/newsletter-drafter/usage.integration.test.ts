@@ -32,4 +32,20 @@ describe("loadUsage", () => {
       await db.delete(newsletterDrafts).where(eq(newsletterDrafts.id, unsent.id));
     }
   });
+
+  // "Update in HubSpot" moves hubspot_status past "created" (updated / pending / failed) — the email is still in HubSpot.
+  it("counts a draft pushed to HubSpot for a future date whatever an Update left its status at", async () => {
+    const fmt = await createTestFormat({ brand: "vitest-usage", name: "Sunday Breakfast" });
+    const story = { kind: "case_study" as const, key: K, title: "t", url: "https://www.starterstory.com/stories/vitest-usage-story" };
+    const base = { brand: "vitest-usage", formatId: fmt.id, windowStart: new Date(), windowEnd: new Date(), sections: [{ key: "coffee", markdown: "x", source: story }] };
+    const rows = await db
+      .insert(newsletterDrafts)
+      .values(["updated", "failed"].map((hubspotStatus) => ({ ...base, status: "ready", sendDate: "2999-01-01", hubspotStatus, hubspotEmailId: "1" })))
+      .returning({ id: newsletterDrafts.id });
+    try {
+      expect((await loadUsage("sunday-breakfast")).get(K)?.count).toBe(2);
+    } finally {
+      for (const r of rows) await db.delete(newsletterDrafts).where(eq(newsletterDrafts.id, r.id));
+    }
+  });
 });

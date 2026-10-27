@@ -24,6 +24,8 @@
 //   HUBSPOT_PORTAL_53_ACCESS_TOKEN   service key with ONLY the `content` scope
 //                                    (account 20627419 despite the name)
 
+import { htmlToText } from "@/lib/html-text";
+
 const BASE_URL = "https://api.hubapi.com";
 export const HUBSPOT_PORTAL_ID = "20627419";
 
@@ -246,6 +248,64 @@ export async function createDraftEmailFromTemplate(args: {
     throw new HubspotEmailError(status, `${(err as Error).message} — a half-filled copy was left in HubSpot (${editUrl}); delete it before trying again.`);
   }
   return { id: String(clone.id), editUrl };
+}
+
+/** The update was refused because HubSpot's copy no longer carries the words Hub & Spoke last sent (someone edited it there). */
+export class HubspotHandEditedError extends HubspotEmailError {
+  constructor(editUrl: string) {
+    super(409, `HubSpot's copy was edited by hand since the last push — Update would replace those edits (${editUrl})`);
+  }
+}
+
+/**
+ * Whether the email in HubSpot still carries the words Hub & Spoke last sent
+ * (`pushedText`, htmlToText of the pushed HTML). Emails pushed before the
+ * module (or before we kept the words) have no `pushedText` and pass. Pure;
+ * exported for tests.
+ */
+export function handEditedInHubspot(pushedText: string | null | undefined, email: HubspotEmail): boolean {
+  const expect = pushedText?.trim();
+  if (!expect) return false;
+  const html = emailModuleHtml(email);
+  return html === null || htmlToText(html) !== expect;
+}
+
+/**
+ * "Update in HubSpot": refill ONE draft email Hub & Spoke created with the
+ * email as it is now — body, subject and preview text. Refuses an email that
+ * is no longer a draft (scheduled, sending or sent there: HubSpot `state`
+ * other than DRAFT) and — unless `force` — one edited by hand there since the
+ * last push (HubspotHandEditedError, so the editor can ask). The layout is
+ * rebuilt from the template email (a GET of a pushed email reads `flexAreas`
+ * back as `{main: {}}`, so its own layout can't be round-tripped), which also
+ * moves an email pushed before the module into it. Reads it back after: the
+ * module must hold `html` byte for byte and the email must still be a draft.
+ * Never publishes, schedules or sends.
+ */
+export async function updateDraftEmail(args: {
+  emailId: string;
+  templateEmailId: string;
+  subject: string;
+  previewText: string | null;
+  html: string;
+  pushedText?: string | null;
+  force?: boolean;
+}): Promise<{ id: string; editUrl: string }> {
+  const editUrl = emailEditUrl(args.emailId);
+  if (String(args.emailId) === String(args.templateEmailId)) throw new HubspotEmailError(500, "refusing to update the template email itself");
+  const current = await hubspotFetch<HubspotEmail>(`/marketing/v3/emails/${args.emailId}`, { method: "GET" });
+  const state = String(current.state ?? "");
+  if (state !== "DRAFT") {
+    throw new HubspotEmailError(409, `this email is ${state ? state.toLowerCase().replace(/_/g, " ") : "not a draft"} in HubSpot, not a draft any more — it can't be updated from here (${editUrl})`);
+  }
+  if (!args.force && handEditedInHubspot(args.pushedText, current)) throw new HubspotHandEditedError(editUrl);
+  const template = await hubspotFetch<HubspotEmail>(`/marketing/v3/emails/${args.templateEmailId}`, { method: "GET" });
+  const content = buildHtmlEmailContent(template, args.html, args.previewText);
+  await hubspotFetch<HubspotEmail>(`/marketing/v3/emails/${args.emailId}`, { method: "PATCH", body: { subject: args.subject, content } });
+  const saved = await hubspotFetch<HubspotEmail>(`/marketing/v3/emails/${args.emailId}`, { method: "GET" });
+  if (emailModuleHtml(saved) !== args.html) throw new HubspotEmailError(502, `HubSpot didn't keep the email's design as sent — check it (${editUrl})`);
+  if (String(saved.state ?? "") !== "DRAFT") throw new HubspotEmailError(500, `the email reads back as "${saved.state}" after the update — check it in HubSpot (${editUrl})`);
+  return { id: args.emailId, editUrl };
 }
 
 /** One email, for its send state (`state`, `publishDate`). The same GET the push already uses. */

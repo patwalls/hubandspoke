@@ -11,7 +11,7 @@
 //   - newsletter_issue_history (HubSpot hand-built issues + Klaviyo-era issues,
 //     filled by the read-only `newsletter-history-sync` task)
 
-import { and, eq, inArray, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { formats, newsletterDrafts, newsletterIssueHistory, productionItems, type NewsletterDraftSource } from "@/lib/db/schema";
 import type { NewsletterSection } from "@/lib/newsletter-template";
@@ -161,7 +161,7 @@ export async function loadUsage(group: string, opts: { excludeDraftId?: string; 
   const today = (opts.now ?? new Date()).toISOString().slice(0, 10);
   const usage = new Map<string, StoryUsage>();
 
-  // Hub & Spoke drafts that went out (pushed to the email tool, or ready and past their send date).
+  // Hub & Spoke drafts that went out (pushed to HubSpot — whatever an Update left the status at — or ready and past their send date).
   const names = group.startsWith("format:") ? [group.slice("format:".length)] : groupFormatNames(group);
   if (names.length) {
     const drafts = await db
@@ -171,7 +171,7 @@ export async function loadUsage(group: string, opts: { excludeDraftId?: string; 
       .where(
         and(
           inArray(sql`lower(${formats.name})`, names),
-          or(eq(newsletterDrafts.hubspotStatus, "created"), and(eq(newsletterDrafts.status, "ready"), sql`${newsletterDrafts.sendDate} < ${today}`)),
+          or(isNotNull(newsletterDrafts.hubspotEmailId), and(eq(newsletterDrafts.status, "ready"), sql`${newsletterDrafts.sendDate} < ${today}`)),
         ),
       );
     for (const d of drafts) {

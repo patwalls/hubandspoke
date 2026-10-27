@@ -2720,9 +2720,11 @@ export const newsletterDrafts = pgTable(
     error: text("error"),
     hubspotEmailId: text("hubspot_email_id"),
     hubspotEmailUrl: text("hubspot_email_url"),
-    /** null | pending | created | failed */
+    /** null | pending | created | updated | failed */
     hubspotStatus: text("hubspot_status"),
     hubspotError: text("hubspot_error"),
+    /** The words of the email last pushed to HubSpot (html-text.ts), so "Update in HubSpot" can tell a hand-edited email from an untouched one. */
+    hubspotPushedText: text("hubspot_pushed_text"),
     /** Frames chosen for the How-To's screenshot placeholders, keyed by ScreenshotMark.key (newsletter-screenshots.ts). */
     screenshots: jsonb("screenshots").$type<Record<string, ChosenScreenshot>>().notNull().default({}),
     /**
