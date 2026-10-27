@@ -6,6 +6,8 @@ import { cn } from "@/lib/utils";
 import { AccountBadge } from "@/components/ui/account-badge";
 import { SourceBadge } from "@/components/ui/source-badge";
 import type { ProductionItem } from "@/types";
+import { postTypeDisplay } from "@/lib/platforms";
+import { trackUsage } from "@/lib/usage/track";
 
 export type SortKey =
   | "editor"
@@ -25,6 +27,10 @@ interface ProductionPipelineTableProps {
   sortKey: SortKey | null;
   sortDir: SortDir;
   onSort: (key: SortKey) => void;
+  /** Posts the content page's next card just offered (lib/my-work/next-rows):
+   *  marked "Next" so the curator, back on the list after a Publish, sees
+   *  which rows are the same post's remaining platforms. */
+  nextIds?: ReadonlySet<string>;
 }
 
 function formatRelativeTime(iso: string | null | undefined): string {
@@ -196,6 +202,7 @@ export function ProductionPipelineTable({
   sortKey,
   sortDir,
   onSort,
+  nextIds,
 }: ProductionPipelineTableProps) {
   const sortedItems = useMemo(() => {
     if (!sortKey) return items;
@@ -317,10 +324,16 @@ export function ProductionPipelineTable({
             {sortedItems.map((item) => {
               const editor = personDisplay(item.editorName, item.editorEmail);
               const editorColor = avatarColor(editor.seed || item.id);
+              const isNext = nextIds?.has(item.id) ?? false;
+              const nextLabel = postTypeDisplay(item.postType).label;
               return (
                 <tr
                   key={item.id}
-                  className="border-b border-border/50 hover:bg-accent/30 transition-colors"
+                  data-testid={isNext ? "production-next-row" : undefined}
+                  className={cn(
+                    "border-b border-border/50 hover:bg-accent/30 transition-colors",
+                    isNext && "bg-primary/5 shadow-[inset_3px_0_0_var(--color-primary)]",
+                  )}
                 >
                   <td className="px-3 py-2">
                     {item.editorName || item.editorEmail ? (
@@ -354,8 +367,14 @@ export function ProductionPipelineTable({
                   <td className="px-3 py-2 w-[40%]">
                     <div className="flex items-center gap-1.5 min-w-0">
                       <SourceBadge sourceType={item.sourceType} />
+                      {isNext && (
+                        <span className="shrink-0 rounded bg-primary px-1.5 py-0.5 text-[10px] font-semibold text-primary-foreground">
+                          Next{nextLabel ? ` · ${nextLabel}` : ""}
+                        </span>
+                      )}
                       <Link
                         href={`/${brand}/content/${item.id}`}
+                        onClick={isNext ? () => trackUsage("production:next-row:open", brand) : undefined}
                         className="text-sm font-medium text-foreground hover:text-primary hover:underline transition-colors truncate min-w-0"
                         title={item.title || "(Untitled)"}
                       >

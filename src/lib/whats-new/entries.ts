@@ -29,6 +29,17 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-10-27-production-next-rows",
+    shippedAt: "2026-10-27T08:00:00Z",
+    kind: "feature",
+    title: "The production list marks what's next",
+    body:
+      "After you publish or send on a post, the production list marks the posts still waiting on you with a green \"Next · Threads\" tag, " +
+      "so the same post's other platforms stand out when you head back to the list. Nothing else on the list moves.",
+    href: "/[brand]/production",
+    screen: "production:next-row",
+  },
+  {
     id: "2026-10-27-confirm-leave-published",
     shippedAt: "2026-10-27T03:05:00Z",
     kind: "fix",

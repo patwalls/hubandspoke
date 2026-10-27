@@ -16,6 +16,8 @@ import { buildChannelOptions, matchesChannel } from "@/lib/channel-options";
 import type { ProductionItem } from "@/types";
 import { useUrlState } from "@/lib/hooks/use-url-state";
 import { useRememberListUrl } from "@/lib/hooks/use-remember-list-url";
+import { readNextRows } from "@/lib/my-work/next-rows";
+import { trackUsage } from "@/lib/usage/track";
 import {
   Popover,
   PopoverContent,
@@ -145,6 +147,16 @@ export function ProductionView({ brand, currentUserId }: ProductionViewProps) {
   const { key: sortKey, dir: sortDir } = decodeSort(sortValue);
 
   useRememberListUrl({ brand, listKey: "production" });
+
+  // Rows the content page's next card just offered (lib/my-work/next-rows).
+  const [nextIds, setNextIds] = useState<ReadonlySet<string>>(() => new Set());
+  useEffect(() => {
+    setNextIds(new Set(readNextRows()));
+  }, []);
+  const showsNextRow = !loading && items.some((i) => nextIds.has(i.id));
+  useEffect(() => {
+    if (showsNextRow) trackUsage("production:next-row", brand);
+  }, [showsNextRow, brand]);
 
   const toggleSort = useCallback(
     (key: SortKey) => {
@@ -506,6 +518,7 @@ export function ProductionView({ brand, currentUserId }: ProductionViewProps) {
                   sortKey={sortKey}
                   sortDir={sortDir}
                   onSort={toggleSort}
+                  nextIds={nextIds}
                 />
               </section>
             );
