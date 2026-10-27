@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { parseDesignDoc, pageVideo, resizeCanvas, DEFAULT_CROP, IG_SQUARE, PHOTO_PLACEHOLDER, type DesignCaptionsElement, type DesignTextElement } from "./doc";
-import { layoutDesignText, coverGeometry, cropForOffset } from "./layout";
+import { layoutDesignText, coverGeometry, cropForOffset, textEditorMetrics } from "./layout";
 import { buildPlaybookTemplate } from "./playbook-template";
 import { buildTechStackTemplate } from "./tech-stack-template";
 import { buildStoryTemplate } from "./story-template";
@@ -226,6 +226,43 @@ describe("layoutDesignText", () => {
     const layout = layoutDesignText(tall);
     expect(layout.overflows).toBe(false);
     expect(layout.fontSizePx).toBeLessThan(80);
+  });
+});
+
+describe("textEditorMetrics (the inline editor matches the drawn text)", () => {
+  const el: DesignTextElement = {
+    id: "t", name: "t", type: "text", x: 40, y: 775, w: 1000, h: 535, opacity: 1, locked: false,
+    spans: [{ text: "x" }],
+    style: { fontId: "anton", sizePx: 92, lineHeight: 1.06, letterSpacing: 0, color: "#FFFFFF", align: "center", valign: "bottom", uppercase: true, shadow: null, autoFit: true, minSizePx: 48 },
+    slot: null, stack: null,
+  };
+  const hook = "My app that just encrypts photos and files made $41,000 in a single month";
+
+  it("a bottom-aligned hook stays at the bottom while you type, not at the top", () => {
+    const m = textEditorMetrics(el, hook);
+    const drawn = layoutDesignText({ ...el, spans: [{ text: hook }] });
+    expect(m.paddingTopPx).toBeGreaterThan(0);
+    expect(m.paddingTopPx + drawn.blockHeightPx).toBeCloseTo(el.h, 5);
+    expect(m.lineHeightPx).toBeCloseTo(drawn.linePitchPx, 5);
+  });
+
+  it("middle centres the block; top has no padding", () => {
+    const mid = textEditorMetrics({ ...el, style: { ...el.style, valign: "middle" } }, hook);
+    const drawn = layoutDesignText({ ...el, spans: [{ text: hook }] });
+    expect(mid.paddingTopPx).toBeCloseTo((el.h - drawn.blockHeightPx) / 2, 5);
+    expect(textEditorMetrics({ ...el, style: { ...el.style, valign: "top" } }, hook).paddingTopPx).toBe(0);
+  });
+
+  it("uses the auto-fit size, so long text doesn't grow back to the base size while editing", () => {
+    const small = { ...el, h: 200 };
+    const long = `${hook} ${hook}`;
+    expect(textEditorMetrics(small, long).fontSizePx).toBe(layoutDesignText({ ...small, spans: [{ text: long }] }).fontSizePx);
+    expect(textEditorMetrics(small, long).fontSizePx).toBeLessThan(92);
+  });
+
+  it("an emptied box keeps the caret where the line will be", () => {
+    const m = textEditorMetrics(el, "");
+    expect(m.paddingTopPx).toBeCloseTo(el.h - m.lineHeightPx, 5);
   });
 });
 

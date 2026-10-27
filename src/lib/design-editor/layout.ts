@@ -159,6 +159,31 @@ export function layoutDesignText(el: DesignTextElement): DesignTextLayout {
 }
 
 /**
+ * How the inline text editor (a textarea in the element's box) sits so typing
+ * looks like the finished text: the auto-fit size and line pitch of `text`
+ * laid out in this box, and the top padding that puts the block where the
+ * valign puts it. Without it the textarea was always top-aligned at the base
+ * size, so a bottom-aligned hook jumped up and grew while you typed (Pat,
+ * 2026-10-27).
+ */
+export function textEditorMetrics(
+  el: DesignTextElement,
+  text: string,
+): { fontSizePx: number; lineHeightPx: number; paddingTopPx: number } {
+  const layout = layoutDesignText({ ...el, spans: [{ text }] });
+  const pitch = layout.linePitchPx;
+  // No words (an emptied box): the caret line sits where one line would.
+  const top = layout.lines.length
+    ? layout.lines[0].y - el.y
+    : el.style.valign === "top"
+      ? 0
+      : el.style.valign === "bottom"
+        ? el.h - pitch
+        : (el.h - pitch) / 2;
+  return { fontSizePx: layout.fontSizePx, lineHeightPx: pitch, paddingTopPx: Math.max(0, top) };
+}
+
+/**
  * Where a `cover`-fitted picture (or video) is drawn inside its box, in box
  * px: scaled so it covers the box times `crop.zoom`, then panned so the focal
  * point sits at the box centre — clamped so the box never shows a gap. The

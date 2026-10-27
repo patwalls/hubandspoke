@@ -84,3 +84,44 @@ test("flag on → the format page shows the design template card and opens the t
   await page.getByRole("button", { name: "Save template & close" }).click();
   await expect(page.getByText("Template saved")).toBeVisible({ timeout: 10_000 });
 });
+
+test("inline text editing: stays bottom-aligned while typing, and clicking away keeps the edit", async ({ page }) => {
+  const { flags } = await (await page.request.get("/api/feature-flags")).json();
+  test.skip(flags.designEditor !== true, "e2e user does not have the designEditor flag");
+  const formats = (await (await page.request.get("/api/formats?brand=starter-story")).json()) as Array<{ id: string; name: string }> | { formats?: Array<{ id: string; name: string }> };
+  const fmt = (Array.isArray(formats) ? formats : (formats.formats ?? [])).find((f) => f.name === "Instagram PLAYBOOK");
+  test.skip(!fmt, "no Instagram PLAYBOOK format in this DB");
+  await page.goto(`/starter-story/formats/${fmt!.id}`);
+  await page.getByRole("button", { name: "Edit template" }).click();
+  const stage = page.locator(".shadow-xl.ring-1");
+  await expect(stage.getByText("AI", { exact: true }).first()).toBeVisible({ timeout: 20_000 });
+  const box = (await stage.boundingBox())!;
+  const s = box.width / 1080;
+
+  // The headline is bottom-aligned: the textarea pads its text down to the
+  // same spot, at the same size, instead of jumping to the top of the box.
+  const headline = stage.getByText("FLIPPED", { exact: false }).first();
+  const drawnTop = (await headline.boundingBox())!.y;
+  await headline.dblclick();
+  const ta = stage.locator("textarea");
+  await expect(ta).toBeVisible();
+  const pad = await ta.evaluate((t) => parseFloat(getComputedStyle(t).paddingTop));
+  const taTop = (await ta.boundingBox())!.y;
+  expect(pad).toBeGreaterThan(0);
+  expect(Math.abs(taTop + pad * s - drawnTop)).toBeLessThan(12);
+
+  // Type, then click the grey around the page: the edit is kept. (That
+  // click ends editing on pointer-down, before the textarea blurs — it
+  // dropped the typing, 2026-10-27.)
+  await ta.press("End");
+  await ta.pressSequentially(" ZZTOP");
+  await page.mouse.click(box.x - 100, box.y + 300);
+  await expect(ta).toBeHidden();
+  await expect(stage.getByText("ZZTOP")).toBeVisible();
+  // Escape still throws an edit away.
+  await stage.getByText("ZZTOP").dblclick();
+  await stage.locator("textarea").pressSequentially(" NOPE");
+  await stage.locator("textarea").press("Escape");
+  await expect(stage.getByText("NOPE")).toHaveCount(0);
+  await expect(stage.getByText("ZZTOP")).toBeVisible();
+});

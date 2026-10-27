@@ -10,10 +10,11 @@
 // date → the newsletter editor. Posts (NEW_POST_KINDS): brand, format,
 // pillar video, angle → the design editor (an IG post with a template), the
 // clip editor (reels, Shorts, video posts on X) or the post's page, where
-// the Draft Algorithm writes the copy (src/lib/services/new-post.ts).
+// the Draft Algorithm writes the copy (src/lib/services/new-post.ts). An
+// editor opens on the Repurposed queue with the post in the URL, like the
+// queue's own, so a reload comes back to it.
 
 import { useEffect, useState } from "react";
-import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { Check, ChevronDown, Loader2, Mail, Plus, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -33,17 +34,7 @@ import { BrandAvatar } from "@/components/ui/brand-avatar";
 import { useFeatureFlags } from "@/components/clip-editor/use-feature-flags";
 import { cn } from "@/lib/utils";
 import { NEW_POST_KINDS, type NewPostKind } from "@/lib/new-post-kinds";
-
-// Lazy, like the Repurposed queue: only a post that opens in an editor
-// downloads it.
-const DesignEditorDialog = dynamic(
-  () => import("@/components/design-editor/design-editor-dialog").then((m) => m.DesignEditorDialog),
-  { ssr: false },
-);
-const ClipEditorDialog = dynamic(
-  () => import("@/components/clip-editor/clip-editor-dialog").then((m) => m.ClipEditorDialog),
-  { ssr: false },
-);
+import { CLIP_PARAM } from "@/components/clip-editor/drafts";
 
 interface BrandOption {
   slug: string;
@@ -557,40 +548,18 @@ function NewPostFlow({
   onClose: () => void;
 }) {
   const router = useRouter();
-  const [opened, setOpened] = useState<{
-    brand: string;
-    editor: "design" | "clip";
-    productionItemId: string;
-    clipIdeaId?: string;
-  } | null>(null);
   const toPost = (brand: string, id: string) => {
     onClose();
     router.push(`/${brand}/content/${id}`);
   };
-  if (opened?.editor === "design") {
-    return (
-      <DesignEditorDialog
-        open
-        onOpenChange={(o) => !o && onClose()}
-        productionItemId={opened.productionItemId}
-        brand={opened.brand}
-        onDone={() => router.refresh()}
-        onUnsupported={() => toPost(opened.brand, opened.productionItemId)}
-      />
-    );
-  }
-  if (opened?.editor === "clip" && opened.clipIdeaId) {
-    return (
-      <ClipEditorDialog
-        open
-        onOpenChange={(o) => !o && onClose()}
-        clipIdeaId={opened.clipIdeaId}
-        brand={opened.brand}
-        onDone={() => router.refresh()}
-        onUnsupported={() => toPost(opened.brand, opened.productionItemId)}
-      />
-    );
-  }
+  // An editor opens where the queue opens it — the Repurposed queue with the
+  // post in the URL (`?item=` design, `?clip=` clip), so a reload or a sent
+  // link comes back to the same draft (RestoredDesignEditor /
+  // RestoredClipEditor), never a lost one.
+  const toEditor = (brand: string, param: string, id: string) => {
+    onClose();
+    router.push(`/${brand}/queue/repurposed?${param}=${encodeURIComponent(id)}`);
+  };
   return (
     <NewPostDialog
       kind={kind}
@@ -598,8 +567,9 @@ function NewPostFlow({
       initialBrand={initialBrand}
       onClose={onClose}
       onCreated={(brand, r) => {
-        if (r.editor === "post") return toPost(brand, r.productionItemId);
-        setOpened({ brand, editor: r.editor, productionItemId: r.productionItemId, clipIdeaId: r.clipIdeaId });
+        if (r.editor === "design") return toEditor(brand, "item", r.productionItemId);
+        if (r.editor === "clip" && r.clipIdeaId) return toEditor(brand, CLIP_PARAM, r.clipIdeaId);
+        toPost(brand, r.productionItemId);
       }}
     />
   );

@@ -7,8 +7,8 @@ import { test, expect } from "@playwright/test";
  * angle kept; and the newsletter dialog asks for the Angle on its own row,
  * between the pillar content and the send date.
  *
- * Writes one LinkedIn post to the local DB (status Assigned, created via
- * new-menu) per run.
+ * Writes one LinkedIn post (status Assigned, created via new-menu) and one
+ * Instagram design post to the local DB per run.
  */
 test.use({ viewport: { width: 1400, height: 950 } });
 
@@ -47,6 +47,31 @@ test("every kind is live; a LinkedIn post opens on its page with the angle kept"
   const id = page.url().split("/content/")[1].split(/[?#]/)[0];
   const item = await (await page.request.get(`/api/production-items/${id}`)).json();
   expect(item.item?.angle ?? item.angle).toBe("Lead with the first step of the playbook");
+});
+
+test("an Instagram post that opens in the design editor puts it in the URL, and a reload reopens it", async ({ page }) => {
+  const { flags } = await (await page.request.get("/api/feature-flags")).json();
+  test.skip(flags.designEditor !== true, "e2e user does not have the designEditor flag");
+  const opts = await (await page.request.get("/api/new-post?brand=starter-story&kind=instagram_post")).json();
+  const fmt = (opts.formats as Array<{ id: string; editor: string }>).find((f) => f.editor === "design");
+  const pillar = (opts.pillars as Array<{ id: string; hasTranscript: boolean }>).find((p) => p.hasTranscript);
+  test.skip(!fmt || !pillar, "no templated Instagram format or transcribed pillar for starter-story");
+
+  await page.goto("/starter-story");
+  await page.getByTestId("new-content").click();
+  await page.getByTestId("new-content-instagram_post").click();
+  await page.getByTestId("new-post-format").selectOption(fmt!.id);
+  await page.getByTestId("new-post-pillar").selectOption(pillar!.id);
+  await page.getByTestId("new-post-create").click();
+  // Like the queue's own: the Repurposed queue with ?item=<the post>.
+  await page.waitForURL(/\/starter-story\/queue\/repurposed\?item=[0-9a-f-]{36}/, { timeout: 30_000 });
+  const opened = page.getByText("Editor beta").or(page.getByText("Drafting your post…"));
+  await expect(opened.first()).toBeVisible({ timeout: 30_000 });
+  const url = page.url();
+  await page.reload();
+  expect(page.url()).toBe(url);
+  await expect(opened.first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("dialog")).toHaveCount(1); // one editor, not two
 });
 
 test("newsletter: the Angle row sits between pillar content and send date", async ({ page }) => {

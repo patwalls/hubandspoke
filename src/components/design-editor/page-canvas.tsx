@@ -9,7 +9,7 @@
  * `interactive` adds selection, drag-to-move, resize handles and inline text
  * editing. Without it the same component is the page thumbnail.
  */
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { cn } from "@/lib/utils";
 import { ColorPicker } from "@/components/editor/color-picker";
 import { FONTS, fontFaceCss } from "@/lib/clip-editor/fonts";
@@ -21,7 +21,7 @@ import { layoutStatCard, sparklineSvg, svgDataUrl } from "@/lib/design-editor/st
 import { arrowBendPoint, arrowEnds, arrowFromEnds, arrowSvg, bendFromPoint, snapAngle } from "@/lib/design-editor/arrow";
 import { pageVideo } from "@/lib/design-editor/doc";
 import { activeCue, buildDesignCaptionCues, layoutCaptionCue } from "@/lib/design-editor/captions";
-import { coverGeometry, cropForOffset, layoutDesignText } from "@/lib/design-editor/layout";
+import { coverGeometry, cropForOffset, layoutDesignText, textEditorMetrics } from "@/lib/design-editor/layout";
 import { elementSnapTargets, snapMove, snapResize, snapThreshold, type SnapGuide } from "@/lib/editor/snap";
 import { commands, useDesign } from "./store";
 
@@ -336,10 +336,8 @@ export function PageCanvas({
               if (el.type === "text") setEditing(el.id);
               else if ((el.type === "image" || el.type === "video") && el.fit === "cover") setEditing(el.id);
             }}
-            onCommitText={(spans) => {
-              apply(commands.patchElement<DesignTextElement>(pageIndex, el.id, (cur) => ({ ...cur, spans })));
-              setEditing(null);
-            }}
+            onSaveText={(spans) => apply(commands.patchElement<DesignTextElement>(pageIndex, el.id, (cur) => ({ ...cur, spans })))}
+            onCloseText={() => setEditing(null)}
             onZoom={(zoom) => apply(commands.patchElement<DesignImageElement | DesignVideoElement>(pageIndex, el.id, (cur) => ({ ...cur, crop: { ...cur.crop, zoom } })), `zoom-${el.id}`)}
             onDoneAdjust={() => setEditing(null)}
           />
@@ -427,7 +425,8 @@ function ElementView({
   onNaturalSize,
   onPointerDown,
   onDoubleClick,
-  onCommitText,
+  onSaveText,
+  onCloseText,
   onZoom,
   onDoneAdjust,
 }: {
@@ -443,7 +442,8 @@ function ElementView({
   onNaturalSize: (size: { width: number; height: number }) => void;
   onPointerDown: (e: ReactPointerEvent) => void;
   onDoubleClick: () => void;
-  onCommitText: (spans: DesignSpan[]) => void;
+  onSaveText: (spans: DesignSpan[]) => void;
+  onCloseText: () => void;
   onZoom: (zoom: number) => void;
   onDoneAdjust: () => void;
 }) {
@@ -500,7 +500,7 @@ function ElementView({
     return <ArrowView el={el} base={base} interactive={interactive} onPointerDown={onPointerDown} />;
   }
   return (
-    <TextView el={el} base={base} hover={hover} editing={editing} onPointerDown={onPointerDown} onDoubleClick={onDoubleClick} onCommitText={onCommitText} />
+    <TextView el={el} base={base} hover={hover} editing={editing} onPointerDown={onPointerDown} onDoubleClick={onDoubleClick} onSaveText={onSaveText} onCloseText={onCloseText} />
   );
 }
 
@@ -735,7 +735,8 @@ function TextView({
   editing,
   onPointerDown,
   onDoubleClick,
-  onCommitText,
+  onSaveText,
+  onCloseText,
 }: {
   el: DesignTextElement;
   base: React.CSSProperties;
@@ -743,7 +744,8 @@ function TextView({
   editing: boolean;
   onPointerDown: (e: ReactPointerEvent) => void;
   onDoubleClick: () => void;
-  onCommitText: (spans: DesignSpan[]) => void;
+  onSaveText: (spans: DesignSpan[]) => void;
+  onCloseText: () => void;
 }) {
   const layout = useMemo(() => layoutDesignText(el), [el]);
   const font = FONTS[el.style.fontId];
@@ -751,7 +753,7 @@ function TextView({
     ? `${el.style.shadow.x}px ${el.style.shadow.y}px ${el.style.shadow.blur}px ${rgba({ color: el.style.shadow.color, alpha: el.style.shadow.alpha })}`
     : undefined;
 
-  if (editing) return <TextEditor el={el} onCommit={onCommitText} />;
+  if (editing) return <TextEditor el={el} onSave={onSaveText} onClose={onCloseText} />;
 
   return (
     <div className={hover} onPointerDown={onPointerDown} onDoubleClick={onDoubleClick} style={base}>
@@ -786,11 +788,18 @@ function TextView({
  * Inline editing: a textarea in the element's box and font. Highlights
  * survive an edit — the coloured phrases are re-applied to the new text —
  * and the toolbar colours the current textarea selection.
+ *
+ * What you typed is kept however the editor closes — Done, ⌘↵, blur, or the
+ * editor simply going away because you clicked something else on the stage
+ * (selecting ends editing on pointer-down, before the textarea ever blurs:
+ * that dropped Pat's typing, 2026-10-27). Only Escape throws it away.
  */
-function TextEditor({ el, onCommit }: { el: DesignTextElement; onCommit: (spans: DesignSpan[]) => void }) {
+function TextEditor({ el, onSave, onClose }: { el: DesignTextElement; onSave: (spans: DesignSpan[]) => void; onClose: () => void }) {
   const font = FONTS[el.style.fontId];
   const initial = el.spans.map((s) => s.text).join("");
   const [text, setText] = useState(initial);
+  // Same size, pitch and vertical position as the drawn text, live as you type.
+  const metrics = useMemo(() => textEditorMetrics(el, text), [el, text]);
   const [colored, setColored] = useState<Array<{ phrase: string; color: string }>>(
     el.spans.filter((s) => s.color).map((s) => ({ phrase: s.text, color: s.color! })),
   );
@@ -808,7 +817,27 @@ function TextEditor({ el, onCommit }: { el: DesignTextElement; onCommit: (spans:
   const pickerRange = useRef<[number, number]>([0, 0]);
   const [pickerValue, setPickerValue] = useState(el.style.color);
 
-  const commit = () => onCommit(rehighlight(text, colored));
+  // Saved at most once: by Done/⌘↵/blur, or on unmount. Escape marks it done unsaved.
+  const latest = useRef({ text, colored, el, onSave });
+  useLayoutEffect(() => {
+    latest.current = { text, colored, el, onSave };
+  });
+  const done = useRef(false);
+  const save = useCallback(() => {
+    if (done.current) return;
+    done.current = true;
+    const cur = latest.current;
+    const spans = rehighlight(cur.text, cur.colored);
+    if (JSON.stringify(spans) !== JSON.stringify(cur.el.spans)) cur.onSave(spans);
+  }, []);
+  useEffect(() => {
+    done.current = false; // (Strict Mode's mount–unmount–mount must not count as done)
+    return save;
+  }, [save]);
+  const commit = () => {
+    save();
+    onClose();
+  };
   const selectedPhrase = (start: number, end: number) => text.slice(start, end).trim();
   const paint = (color: string | null, range?: [number, number]) => {
     const ta = ref.current;
@@ -846,15 +875,20 @@ function TextEditor({ el, onCommit }: { el: DesignTextElement; onCommit: (spans:
         }}
         onKeyDown={(e) => {
           e.stopPropagation();
-          if (e.key === "Escape") onCommit(el.spans);
+          if (e.key === "Escape") {
+            done.current = true;
+            onClose();
+          }
           if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) commit();
         }}
-        className="h-full w-full resize-none bg-white/10 outline outline-[4px] outline-sky-500"
+        className="h-full w-full resize-none overflow-hidden bg-white/10 p-0 outline outline-[4px] outline-sky-500"
         style={{
           fontFamily: `"${font.cssFamily}"`,
           fontWeight: font.cssWeight,
-          fontSize: el.style.sizePx,
-          lineHeight: el.style.lineHeight,
+          fontSize: metrics.fontSizePx,
+          lineHeight: `${metrics.lineHeightPx}px`,
+          paddingTop: metrics.paddingTopPx,
+          letterSpacing: `${el.style.letterSpacing}em`,
           color: el.style.color,
           textAlign: el.style.align,
           textTransform: el.style.uppercase ? "uppercase" : "none",
