@@ -8,6 +8,7 @@ import { PlatformIcon } from "@/components/ui/platform-icon";
 import { postTypeDisplay } from "@/lib/platforms";
 import { cn } from "@/lib/utils";
 import { trackUsage } from "@/lib/usage/track";
+import { rememberNextRows } from "@/lib/my-work/next-rows";
 
 interface NextPost {
   id: string;
@@ -65,6 +66,10 @@ export function UpNext({ itemId, status, editorUserId }: { itemId: string; statu
         setData(d);
         if (flipped) {
           setSentOnId(itemId);
+          // The curator goes back to the production list anyway: mark the
+          // same posts there (production-pipeline-table).
+          const offered = d.sameSource && d.siblings?.length ? d.siblings : d.next ? [d.next] : [];
+          rememberNextRows(offered.map((r) => r.id));
           trackUsage(d.sameSource ? "my-work:next-card:same-source" : "my-work:next-card", d.next?.brand);
         } else if (d.currentWaiting) {
           setSentOnId(null);
