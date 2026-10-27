@@ -29,6 +29,16 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-10-27-confirm-leave-published",
+    shippedAt: "2026-10-27T03:05:00Z",
+    kind: "fix",
+    title: "A live post asks before it moves back",
+    body:
+      "Changing the status of a Published post on its page now asks first and names the platform (\"This YouTube post is already Published. Move it back to Review?\"), " +
+      "so opening the wrong same-titled cross-post can't quietly unpublish it. Every other status change stays one click.",
+    screen: "/[brand]/content/[id]",
+  },
+  {
     id: "2026-10-26-notification-platform",
     shippedAt: "2026-10-26T23:40:00Z",
     kind: "feature",
