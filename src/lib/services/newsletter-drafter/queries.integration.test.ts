@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { accounts, newsletterDrafts } from "@/lib/db/schema";
+import { accounts, newsletterDrafts, productionItems } from "@/lib/db/schema";
 import { createTestAccount, createTestFormat, createTestProductionItem, createTestTranscript } from "@/test/factories";
-import { createNewsletterDraft, listFormatVideos } from "./queries";
+import { createNewsletterDraft, listFormatVideos, startEditionDraft } from "./queries";
 
 // Format behavior is keyed by name (format-config.ts), so the test uses the
 // real How-To name under a throwaway brand: the (brand, name) unique index
@@ -71,5 +71,52 @@ describe("roundup formats about one piece of pillar content", () => {
     const [p] = await db.select({ sourceItemId: newsletterDrafts.sourceItemId }).from(newsletterDrafts).where(eq(newsletterDrafts.id, (plain as { id: string }).id));
     expect(p.sourceItemId).toBeNull();
     await db.delete(newsletterDrafts).where(eq(newsletterDrafts.id, (plain as { id: string }).id));
+  });
+});
+
+// Pat, 2026-10-27: opening a queue newsletter drafted it from stories the drafter
+// picked itself. The queue now asks for the pillar + angle first; starting the
+// slot must carry them onto the edition (and the queue item's pillar).
+describe("starting a scheduled edition from the queue", () => {
+  async function slot(formatId: string) {
+    const item = await createTestProductionItem({ postType: "newsletter" });
+    const now = new Date();
+    const [d] = await db
+      .insert(newsletterDrafts)
+      .values({ brand: "starter-story", formatId, status: "idea", sendDate: "2026-11-05", windowStart: now, windowEnd: now, productionItemId: item.id })
+      .returning({ id: newsletterDrafts.id });
+    return { draftId: d.id, itemId: item.id };
+  }
+  const rowOf = async (id: string) => (await db.select().from(newsletterDrafts).where(eq(newsletterDrafts.id, id)))[0];
+
+  it("drafts the slot about the chosen pillar video, with the angle, and points the queue item at it", async () => {
+    const fmt = await createTestFormat({ brand: "starter-story", name: "Vitest Roundup Newsletter" });
+    const video = await createTestProductionItem({ postType: "youtube_long" });
+    await createTestTranscript({ productionItemId: video.id, segments: [{ startSec: 0, endSec: 3, text: "hi" }] });
+    const s = await slot(fmt.id);
+
+    expect(await startEditionDraft({ id: s.draftId, sourceItemId: video.id, notes: "  why SEO compounds ", userId: null })).toEqual({ ok: true });
+    const row = await rowOf(s.draftId);
+    expect(row).toMatchObject({ status: "drafting", sourceItemId: video.id, sourcePinned: true, notes: "why SEO compounds" });
+    const [item] = await db.select({ pillar: productionItems.pillarContentItemId }).from(productionItems).where(eq(productionItems.id, s.itemId));
+    expect(item.pillar).toBe(video.id);
+    // Already drafting: a second start is refused.
+    expect(await startEditionDraft({ id: s.draftId, sourceItemId: video.id, userId: null })).toMatchObject({ status: 409 });
+    await db.delete(newsletterDrafts).where(eq(newsletterDrafts.id, s.draftId));
+  });
+
+  it("refuses a video the format can't use and leaves the slot undrafted; a redraft without a pick keeps the pillar", async () => {
+    const fmt = await createTestFormat({ brand: "starter-story", name: "Vitest Roundup Newsletter" });
+    const noTranscript = await createTestProductionItem({ postType: "youtube_long" });
+    const s = await slot(fmt.id);
+
+    expect(await startEditionDraft({ id: s.draftId, sourceItemId: noTranscript.id, userId: null })).toEqual({ error: "That video has no transcript yet", status: 400 });
+    expect((await rowOf(s.draftId)).status).toBe("idea");
+
+    // The editor's Redraft / Try again send no pick: nothing about the pillar changes.
+    await db.update(newsletterDrafts).set({ sourceItemId: noTranscript.id, sourcePinned: true }).where(eq(newsletterDrafts.id, s.draftId));
+    expect(await startEditionDraft({ id: s.draftId, userId: null })).toEqual({ ok: true });
+    expect(await rowOf(s.draftId)).toMatchObject({ status: "drafting", sourceItemId: noTranscript.id, sourcePinned: true });
+    await db.delete(newsletterDrafts).where(eq(newsletterDrafts.id, s.draftId));
   });
 });

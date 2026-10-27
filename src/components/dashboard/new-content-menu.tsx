@@ -140,21 +140,41 @@ function fmtDate(iso: string | null): string {
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-/** Brand → format → pillar content → send date → the newsletter editor. */
-function NewNewsletterDialog({
+/** An undrafted scheduled edition (a queue newsletter): its brand, format and
+ *  send date are set; the dialog asks for the pillar and angle, then drafts it. */
+export interface NewsletterSlot {
+  draftId: string;
+  brand: string;
+  formatId: string;
+  sendDate: string | null;
+  /** A video the edition is already pinned to (a How-To's), else null. */
+  sourceItemId: string | null;
+  notes: string | null;
+}
+
+/** Brand → format → pillar content → send date → the newsletter editor. With
+ *  `slot`, starts that existing edition instead (brand, format, date fixed)
+ *  and calls `onStarted` rather than navigating. */
+export function NewNewsletterDialog({
   brands,
   initialBrand,
   onClose,
+  slot,
+  onStarted,
 }: {
   brands: BrandOption[];
   initialBrand: string | null;
   onClose: () => void;
+  slot?: NewsletterSlot;
+  onStarted?: () => void;
 }) {
   const router = useRouter();
   const [brand, setBrand] = useState(
-    brands.some((b) => b.slug === initialBrand)
-      ? initialBrand!
-      : (brands[0]?.slug ?? ""),
+    slot
+      ? slot.brand
+      : brands.some((b) => b.slug === initialBrand)
+        ? initialBrand!
+        : (brands[0]?.slug ?? ""),
   );
   // Loaded per brand / per format: a list for another brand or format means "loading".
   const [formatsFor, setFormatsFor] = useState<{
@@ -166,16 +186,17 @@ function NewNewsletterDialog({
     formatId: string;
     list: VideoOption[];
   } | null>(null);
-  const [sourceItemId, setSourceItemId] = useState("");
-  /** Roundup formats: the issue is about one piece of pillar content, or a roundup the drafter assembles. */
-  const [mode, setMode] = useState<"one" | "roundup">("roundup");
+  const [sourceItemId, setSourceItemId] = useState(slot?.sourceItemId ?? "");
+  /** Roundup formats: the issue is about one piece of pillar content, or a roundup the drafter assembles.
+   *  A queue slot starts on one piece: the editor picks the pillar, nothing is chosen for them. */
+  const [mode, setMode] = useState<"one" | "roundup">(slot ? "one" : "roundup");
   const [brandVideosFor, setBrandVideosFor] = useState<{
     brand: string;
     list: VideoOption[];
   } | null>(null);
   const [days, setDays] = useState(7);
-  const [notes, setNotes] = useState("");
-  const [sendDate, setSendDate] = useState("");
+  const [notes, setNotes] = useState(slot?.notes ?? "");
+  const [sendDate, setSendDate] = useState(slot?.sendDate ?? "");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -188,13 +209,16 @@ function NewNewsletterDialog({
         if (cancelled) return;
         setFormatsFor({ brand, list: j.formats });
         setFormatId(
-          j.formats.find((f) => f.hasSkill)?.id ?? j.formats[0]?.id ?? "",
+          slot?.formatId ??
+            j.formats.find((f) => f.hasSkill)?.id ??
+            j.formats[0]?.id ??
+            "",
         );
       });
     return () => {
       cancelled = true;
     };
-  }, [brand]);
+  }, [brand, slot?.formatId]);
 
   const formats = formatsFor?.brand === brand ? formatsFor.list : null;
   const format = formats?.find((f) => f.id === formatId) ?? null;
@@ -208,14 +232,15 @@ function NewNewsletterDialog({
       .then((j: { videos: VideoOption[] }) => {
         if (cancelled) return;
         setVideosFor({ formatId: format.id, list: j.videos });
-        setSourceItemId(
-          j.videos.find((v) => !v.usedBySlot)?.id ?? j.videos[0]?.id ?? "",
-        );
+        if (!slot)
+          setSourceItemId(
+            j.videos.find((v) => !v.usedBySlot)?.id ?? j.videos[0]?.id ?? "",
+          );
       });
     return () => {
       cancelled = true;
     };
-  }, [format?.id, format?.kind]);
+  }, [format?.id, format?.kind, slot]);
   const videos = format && videosFor?.formatId === format.id ? videosFor.list : null;
   // One piece for a roundup format: the brand's recent videos (any channel).
   useEffect(() => {
@@ -229,13 +254,15 @@ function NewNewsletterDialog({
         setSourceItemId((cur) =>
           j.videos.some((v) => v.id === cur && v.hasTranscript !== false)
             ? cur
-            : (j.videos.find((v) => v.hasTranscript !== false)?.id ?? ""),
+            : slot
+              ? ""
+              : (j.videos.find((v) => v.hasTranscript !== false)?.id ?? ""),
         );
       });
     return () => {
       cancelled = true;
     };
-  }, [brand, format?.kind, mode]);
+  }, [brand, format?.kind, mode, slot]);
   const brandVideos = brandVideosFor?.brand === brand ? brandVideosFor.list : null;
   const onePiece = format?.kind === "single_video" || mode === "one";
   const pickList = format?.kind === "single_video" ? videos : brandVideos;
@@ -246,20 +273,34 @@ function NewNewsletterDialog({
     setCreating(true);
     setError(null);
     try {
-      const res = await fetch("/api/newsletter-drafts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          formatId,
-          sendDate: sendDate || null,
-          notes: notes.trim() || null,
-          ...(onePiece ? { sourceItemId } : { days }),
-        }),
-      });
+      const res = slot
+        ? await fetch(`/api/newsletter-drafts/${slot.draftId}/draft`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              notes: notes.trim() || null,
+              sourceItemId: onePiece ? sourceItemId : null,
+            }),
+          })
+        : await fetch("/api/newsletter-drafts", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              formatId,
+              sendDate: sendDate || null,
+              notes: notes.trim() || null,
+              ...(onePiece ? { sourceItemId } : { days }),
+            }),
+          });
       const json = (await res.json().catch(() => ({}))) as {
         id?: string;
         error?: string;
       };
+      if (slot) {
+        if (!res.ok) throw new Error(json.error ?? "Couldn't start the draft");
+        onStarted?.();
+        return;
+      }
       if (!res.ok || !json.id)
         throw new Error(json.error ?? "Couldn't start the draft");
       onClose();
@@ -281,7 +322,7 @@ function NewNewsletterDialog({
           </span>
           <div className="flex flex-col">
             <DialogTitle className="text-base font-semibold">
-              New newsletter
+              {slot ? "Start newsletter" : "New newsletter"}
             </DialogTitle>
             <span className="text-xs text-muted-foreground">
               Pick what it&apos;s made from; the draft writes itself into the
@@ -290,7 +331,7 @@ function NewNewsletterDialog({
           </div>
         </div>
         <div className="flex flex-col gap-4 px-5 py-4">
-          {brands.length > 1 && (
+          {brands.length > 1 && !slot && (
             <label className="flex flex-col gap-1.5 text-sm">
               <span className="text-xs font-medium text-muted-foreground">
                 Brand
@@ -325,6 +366,7 @@ function NewNewsletterDialog({
                 className={field}
                 value={formatId}
                 onChange={(e) => setFormatId(e.target.value)}
+                disabled={!!slot}
               >
                 {formats.map((f) => (
                   <option key={f.id} value={f.id}>
@@ -383,7 +425,13 @@ function NewNewsletterDialog({
                     className={field}
                     value={sourceItemId}
                     onChange={(e) => setSourceItemId(e.target.value)}
+                    data-testid="newsletter-pillar"
                   >
+                    {slot && pickList.length > 0 && (
+                      <option value="" disabled>
+                        Pick the pillar video…
+                      </option>
+                    )}
                     {pickList.length === 0 && (
                       <option value="">
                         {format?.kind === "single_video"
@@ -450,6 +498,7 @@ function NewNewsletterDialog({
               className="h-9"
               value={sendDate}
               onChange={(e) => setSendDate(e.target.value)}
+              disabled={!!slot}
             />
           </label>
           {error && <p className="text-xs text-destructive">{error}</p>}

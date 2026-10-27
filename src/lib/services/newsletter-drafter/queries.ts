@@ -251,6 +251,41 @@ export async function listBrandVideos(brand: string): Promise<FormatVideoOption[
   }));
 }
 
+/**
+ * The pillar video an edition is drafted from, checked against its format: a
+ * How-To needs one of its own channels' videos; a roundup MAY be about one of
+ * the brand's long-form videos (with a transcript). null = a roundup the
+ * drafter assembles itself.
+ */
+async function resolvePillarSource(
+  format: { brand: string; name: string },
+  sourceItemId: string | null | undefined,
+): Promise<{ sourceItemId: string | null } | { error: string }> {
+  if (formatConfigFor(format.name).kind === "single_video") {
+    if (!sourceItemId) return { error: "Pick a video for this format" };
+    // Only videos from the format's own channels are valid sources.
+    const accountIds = await sourceAccountIds(format.name);
+    const [item] = await db
+      .select({ accountId: productionItems.accountId })
+      .from(productionItems)
+      .where(eq(productionItems.id, sourceItemId))
+      .limit(1);
+    if (!item || !item.accountId || !accountIds.includes(item.accountId)) return { error: "That video isn't from this format's channels" };
+    return { sourceItemId };
+  }
+  if (!sourceItemId) return { sourceItemId: null };
+  // A roundup format about ONE piece of pillar content: any of the brand's long-form videos with a transcript.
+  const [item] = await db
+    .select({ brand: productionItems.brand, postType: productionItems.postType, transcriptId: transcripts.id })
+    .from(productionItems)
+    .leftJoin(transcripts, eq(transcripts.productionItemId, productionItems.id))
+    .where(eq(productionItems.id, sourceItemId))
+    .limit(1);
+  if (!item || item.brand !== format.brand || item.postType !== "youtube_long") return { error: "That isn't one of this brand's videos" };
+  if (!item.transcriptId) return { error: "That video has no transcript yet" };
+  return { sourceItemId };
+}
+
 export async function createNewsletterDraft(args: {
   formatId: string;
   days?: number | null;
@@ -265,30 +300,9 @@ export async function createNewsletterDraft(args: {
     .where(eq(formats.id, args.formatId))
     .limit(1);
   if (!format) return null;
-  let sourceItemId: string | null = null;
-  if (formatConfigFor(format.name).kind === "single_video") {
-    if (!args.sourceItemId) return { error: "Pick a video for this format" };
-    // Only videos from the format's own channels are valid sources.
-    const accountIds = await sourceAccountIds(format.name);
-    const [item] = await db
-      .select({ accountId: productionItems.accountId })
-      .from(productionItems)
-      .where(eq(productionItems.id, args.sourceItemId))
-      .limit(1);
-    if (!item || !item.accountId || !accountIds.includes(item.accountId)) return { error: "That video isn't from this format's channels" };
-    sourceItemId = args.sourceItemId;
-  } else if (args.sourceItemId) {
-    // A roundup format about ONE piece of pillar content: any of the brand's long-form videos with a transcript.
-    const [item] = await db
-      .select({ brand: productionItems.brand, postType: productionItems.postType, transcriptId: transcripts.id })
-      .from(productionItems)
-      .leftJoin(transcripts, eq(transcripts.productionItemId, productionItems.id))
-      .where(eq(productionItems.id, args.sourceItemId))
-      .limit(1);
-    if (!item || item.brand !== format.brand || item.postType !== "youtube_long") return { error: "That isn't one of this brand's videos" };
-    if (!item.transcriptId) return { error: "That video has no transcript yet" };
-    sourceItemId = args.sourceItemId;
-  }
+  const source = await resolvePillarSource(format, args.sourceItemId);
+  if ("error" in source) return source;
+  const { sourceItemId } = source;
   const w = computeWindow(args.days);
   const [created] = await db
     .insert(newsletterDrafts)
@@ -307,4 +321,53 @@ export async function createNewsletterDraft(args: {
     })
     .returning({ id: newsletterDrafts.id });
   return { id: created.id, brand: format.brand };
+}
+
+/**
+ * Draft (or redraft) an existing edition — a scheduled slot from the queue or
+ * the board: flip it to `drafting`. Opening a slot from the queue first asks
+ * for its PILLAR (`sourceItemId`: a video, or null for a roundup the drafter
+ * assembles) and ANGLE (`notes`); either left undefined keeps what the row has.
+ * The queue item's pillar follows the chosen video. The caller enqueues the run.
+ */
+export async function startEditionDraft(args: {
+  id: string;
+  notes?: string | null;
+  sourceItemId?: string | null;
+  userId: string | null;
+}): Promise<{ ok: true } | { error: string; status: 400 | 404 | 409 }> {
+  const [row] = await db
+    .select({ brand: formats.brand, name: formats.name, productionItemId: newsletterDrafts.productionItemId })
+    .from(newsletterDrafts)
+    .innerJoin(formats, eq(formats.id, newsletterDrafts.formatId))
+    .where(eq(newsletterDrafts.id, args.id))
+    .limit(1);
+  if (!row) return { error: "Not found", status: 404 };
+  let pillar: { sourceItemId: string | null; sourcePinned: boolean } | null = null;
+  if (args.sourceItemId !== undefined) {
+    const source = await resolvePillarSource(row, args.sourceItemId);
+    if ("error" in source) return { ...source, status: 400 };
+    pillar = { sourceItemId: source.sourceItemId, sourcePinned: !!source.sourceItemId };
+  }
+  const [updated] = await db
+    .update(newsletterDrafts)
+    .set({
+      status: "drafting",
+      error: null,
+      regenerating: [],
+      ...(args.notes !== undefined ? { notes: args.notes?.trim() || null } : {}),
+      ...(pillar ?? {}),
+      createdByUserId: args.userId,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(newsletterDrafts.id, args.id), inArray(newsletterDrafts.status, ["idea", "failed", "ready"])))
+    .returning({ id: newsletterDrafts.id });
+  if (!updated) return { error: "Already drafting, or not found", status: 409 };
+  if (pillar && row.productionItemId) {
+    await db
+      .update(productionItems)
+      .set({ pillarContentItemId: pillar.sourceItemId, updatedAt: new Date() })
+      .where(eq(productionItems.id, row.productionItemId));
+  }
+  return { ok: true };
 }

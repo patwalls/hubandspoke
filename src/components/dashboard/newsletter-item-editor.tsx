@@ -2,8 +2,11 @@
 
 // Opens the newsletter editor for a queue item (post_type "newsletter"): looks
 // up the item's edition, then shows the same editor the Newsletters board
-// uses. Rendered only for users with the `newsletterDrafter` flag; everyone
-// else gets the regular triage dialog.
+// uses. An undrafted edition (`idea`) first gets the New-newsletter dialog,
+// prefilled with its format and send date, so the editor picks the pillar
+// video and angle instead of the drafter choosing its own stories. Rendered
+// only for users with the `newsletterDrafter` flag; everyone else gets the
+// regular triage dialog.
 
 import { useEffect, useRef, useState } from "react";
 import { Loader2, Mail } from "lucide-react";
@@ -11,6 +14,7 @@ import { useFeatureFlags } from "@/components/clip-editor/use-feature-flags";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { NewsletterEditorDialog } from "@/components/dashboard/newsletter-editor-dialog";
 import { refreshNewsletterDraftBadges } from "@/components/dashboard/newsletter-draft-badge";
+import { NewNewsletterDialog, type NewsletterSlot } from "@/components/dashboard/new-content-menu";
 
 /** Window event fired when the editor closes (detail: { itemId }), so the content page's email preview re-renders. */
 export const NEWSLETTER_EDITOR_CLOSED = "newsletter-editor-closed";
@@ -27,6 +31,8 @@ export function NewsletterItemEditor({
   onDone: () => void;
 }) {
   const [draftId, setDraftId] = useState<string | null>(null);
+  /** Undrafted: ask for the pillar + angle before the editor opens. Cleared once the draft starts. */
+  const [slot, setSlot] = useState<NewsletterSlot | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Hold the caller's refresh until the editor closes: creating the email
   // draft moves the item out of the queue (→ Ready To Publish), and refreshing
@@ -48,10 +54,25 @@ export function NewsletterItemEditor({
     let cancelled = false;
     fetch(`/api/newsletter-drafts/for-item/${itemId}`)
       .then(async (r) => {
-        const j = (await r.json().catch(() => ({}))) as { draftId?: string; error?: string };
+        const j = (await r.json().catch(() => ({}))) as {
+          draftId?: string;
+          edition?: Omit<NewsletterSlot, "draftId"> & { status: string; sourcePinned: boolean };
+          error?: string;
+        };
         if (cancelled) return;
-        if (r.ok && j.draftId) setDraftId(j.draftId);
-        else setError(j.error ?? "Couldn't open this newsletter.");
+        if (!r.ok || !j.draftId) return setError(j.error ?? "Couldn't open this newsletter.");
+        const e = j.edition;
+        if (e?.status === "idea")
+          setSlot({
+            draftId: j.draftId,
+            brand: e.brand,
+            formatId: e.formatId,
+            sendDate: e.sendDate,
+            // Only a video someone chose; never a sweep's suggestion.
+            sourceItemId: e.sourcePinned ? e.sourceItemId : null,
+            notes: e.notes,
+          });
+        setDraftId(j.draftId);
       })
       .catch(() => !cancelled && setError("Couldn't open this newsletter."));
     return () => {
@@ -60,6 +81,19 @@ export function NewsletterItemEditor({
   }, [open, itemId, draftId]);
 
   if (!open) return null;
+  if (slot)
+    return (
+      <NewNewsletterDialog
+        brands={[]}
+        initialBrand={slot.brand}
+        slot={slot}
+        onClose={() => close(false)}
+        onStarted={() => {
+          changed.current = true;
+          setSlot(null);
+        }}
+      />
+    );
   if (draftId)
     return (
       <NewsletterEditorDialog
