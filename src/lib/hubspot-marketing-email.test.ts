@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { assertAllowedHubspotCall, buildHtmlEmailContent, createDraftEmailFromTemplate } from "./hubspot-marketing-email";
+import { assertAllowedHubspotCall, buildHtmlEmailContent, createDraftEmailFromTemplate, emailRichTextHtml, HUBSPOT_EMAIL_HTML_MODULE_ID } from "./hubspot-marketing-email";
 
 describe("buildHtmlEmailContent", () => {
   // The shape of "[TEMPLATE] Sunday Breakfast – Hub & Spoke": masthead section, course sections (label + divider + rich text), footer section.
@@ -30,19 +30,29 @@ describe("buildHtmlEmailContent", () => {
     },
   };
 
-  it("keeps two sections — the first rich-text block holding the email, and the footer with its divider — and drops the rest", () => {
+  it("keeps two sections — the first rich-text block's slot holding the email, and the footer with its divider — and drops the rest", () => {
     const { flexAreas, widgets } = buildHtmlEmailContent(email, "<table>email</table>", "Starter Story Sunday Breakfast");
     expect(flexAreas.main?.sections?.map((s) => s.columns.map((c) => c.widgets))).toEqual([[["intro"]], [["divider2", "footer"]]]);
     expect(flexAreas.main?.boxed).toBe(false); // the layout's other settings stay
     expect(flexAreas.main?.sections?.[1].style).toEqual({ backgroundColor: "#fff" }); // and so does the footer section's style
     expect(Object.keys(widgets).sort()).toEqual(["divider2", "footer", "intro", "preview_text"]);
     expect(widgets.intro.body?.html).toBe("<table>email</table>");
-    expect(widgets.intro.body?.css_class).toBe("x");
     expect(widgets.footer).toEqual(email.content.widgets.footer);
     expect(widgets.preview_text.body?.value).toBe("Starter Story Sunday Breakfast");
   });
 
-  it("turns HubSpot's padding around the rich-text block off (the email carries its own)", () => {
+  // 2026-10-27: in a @hubspot/rich_text block, HubSpot's editor stripped every <table> and <img> the moment
+  // someone opened the email (drafts 225543005016, 225667625797) — the test send went out unstyled.
+  it("puts the email in the Hub & Spoke email module, never in a rich-text block the HubSpot editor rewrites", () => {
+    const { widgets } = buildHtmlEmailContent(email, "<table><tr><td><img src=x></td></tr></table>", null);
+    for (const w of Object.values(widgets)) expect(w.body?.path).not.toBe("@hubspot/rich_text");
+    expect(widgets.intro).toMatchObject({ type: "module", module_id: HUBSPOT_EMAIL_HTML_MODULE_ID, body: { module_id: HUBSPOT_EMAIL_HTML_MODULE_ID } });
+    expect(widgets.intro.body?.css_class).toBeUndefined(); // nothing of the rich-text block's settings carried over
+    // Link extraction for past issues still sees the module's HTML.
+    expect(emailRichTextHtml({ id: "1", content: { widgets } })).toContain("<img src=x>");
+  });
+
+  it("turns HubSpot's padding around the email block off (the email carries its own)", () => {
     const { widgets } = buildHtmlEmailContent(email, "<p>x</p>", null);
     expect(widgets.intro.body?.hs_enable_module_padding).toBe(false);
     expect(widgets.intro.body?.hs_wrapper_css).toEqual({ "padding-top": "0px", "padding-right": "0px", "padding-bottom": "0px", "padding-left": "0px" });
@@ -102,6 +112,44 @@ describe("createDraftEmailFromTemplate", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
+  });
+
+  const template = {
+    id: "9",
+    content: {
+      flexAreas: { main: { sections: [{ id: "s1", columns: [{ id: "c1", widgets: ["body"], width: 12 }] }, { id: "s2", columns: [{ id: "c2", widgets: ["footer"], width: 12 }] }] } },
+      widgets: { body: { body: { path: "@hubspot/rich_text", html: "<p>old</p>" } }, footer: { body: { path: "@hubspot/email_footer" } } },
+    },
+  };
+  /** A HubSpot that stores the PATCHed content, passing the stored module html through `mangle` (what HubSpot keeps). */
+  const fakeHubspot = (mangle: (html: string) => string) => {
+    let stored: unknown = template.content;
+    return vi.fn(async (url: string, init: { method: string; body?: string }) => {
+      const path = new URL(url).pathname;
+      if (init.method === "POST") return new Response(JSON.stringify({ id: "777" }), { status: 200 });
+      if (init.method === "PATCH") {
+        const c = JSON.parse(init.body!).content;
+        for (const w of Object.values(c.widgets) as { body?: { html?: string } }[]) if (w.body?.html) w.body.html = mangle(w.body.html);
+        stored = c;
+        return new Response("{}", { status: 200 });
+      }
+      return new Response(JSON.stringify({ id: path.split("/").pop(), content: stored }), { status: 200 });
+    });
+  };
+
+  it("reads the email back and succeeds when HubSpot kept the design byte for byte", async () => {
+    vi.stubEnv("HUBSPOT_PORTAL_53_ACCESS_TOKEN", "test");
+    vi.stubGlobal("fetch", fakeHubspot((h) => h));
+    const r = await createDraftEmailFromTemplate({ templateEmailId: "9", name: "n", subject: "s", previewText: null, html: "<table><tr><td>x</td></tr></table>" });
+    expect(r.id).toBe("777");
+  });
+
+  it("fails, naming the copy, when HubSpot didn't keep the design as sent", async () => {
+    vi.stubEnv("HUBSPOT_PORTAL_53_ACCESS_TOKEN", "test");
+    vi.stubGlobal("fetch", fakeHubspot((h) => h.replace(/<\/?(table|tr|td)>/g, "")));
+    const err = await createDraftEmailFromTemplate({ templateEmailId: "9", name: "n", subject: "s", previewText: null, html: "<table><tr><td>x</td></tr></table>" }).catch((e: Error) => e);
+    expect((err as Error).message).toMatch(/didn't keep the email's design/);
+    expect((err as Error).message).toContain("/edit/777/");
   });
 
   it("when filling the copy fails, the error names the half-made copy so it gets deleted, not duplicated by a retry", async () => {

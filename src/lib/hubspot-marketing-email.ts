@@ -6,8 +6,10 @@
 // Approach: copy the format's TEMPLATE EMAIL (a never-sent email in the
 // account, e.g. "[TEMPLATE] Sunday Breakfast – Hub & Spoke (do not send)" —
 // it carries the sender, the lists, the subscription type and the footer),
-// then replace the copy's drag-and-drop layout with ONE rich-text block
-// holding the whole email as Hub & Spoke renders it (renderEmailBody:
+// then replace the copy's drag-and-drop layout with ONE "Hub & Spoke email"
+// custom module (a plain-text field printed verbatim — never rich text, which
+// HubSpot's editor strips of tables and images on open) holding the whole
+// email as Hub & Spoke renders it (renderEmailBody:
 // masthead, headings, sections, images, buttons — table-based, inline CSS)
 // followed by the template's footer block, plus the subject and the preview
 // text. So the email is designed in Hub & Spoke end to end; HubSpot adds the
@@ -129,15 +131,26 @@ const DIVIDER = "@hubspot/email_divider";
 const RICH_TEXT = "@hubspot/rich_text";
 
 /**
- * The copy's new `content`: its layout cut down to two sections — the first
- * rich-text block, now holding `html` (the whole email as Hub & Spoke renders
- * it, with no padding of HubSpot's around it), and the template's footer
- * (with any divider that sits with it) — plus the preview text. Every other
- * widget (the template's masthead, labels, old rich text) is dropped with its
- * section, so nothing of the template email shows twice. Throws when the
- * template has no rich-text block or no footer (HubSpot needs the footer's
- * unsubscribe link), so a stale template fails loudly. Pure — exported for
- * tests.
+ * The custom module the email body goes in ("Hub & Spoke email", Design
+ * Manager → Hub and Spoke/, made by scripts/hubspot-email-module.mjs): one
+ * plain-text field `html`, printed verbatim. NOT @hubspot/rich_text — HubSpot's
+ * editor re-sanitizes rich text whenever someone opens the email and autosaves
+ * it, dropping every table and image (2026-10-27: drafts 225543005016 and
+ * 225667625797 lost the masthead and all layout). A text field is never
+ * rewritten.
+ */
+export const HUBSPOT_EMAIL_HTML_MODULE_ID = 225688073104;
+
+/**
+ * The copy's new `content`: its layout cut down to two sections — the
+ * template's first rich-text block's slot, now the Hub & Spoke email module
+ * holding `html` (the whole email as Hub & Spoke renders it, with no padding
+ * of HubSpot's around it), and the template's footer (with any divider that
+ * sits with it) — plus the preview text. Every other widget (the template's
+ * masthead, labels, old rich text) is dropped with its section, so nothing of
+ * the template email shows twice. Throws when the template has no rich-text
+ * block or no footer (HubSpot needs the footer's unsubscribe link), so a stale
+ * template fails loudly. Pure — exported for tests.
  */
 export function buildHtmlEmailContent(
   email: HubspotEmail,
@@ -160,11 +173,22 @@ export function buildHtmlEmailContent(
   if (!bodySec || !footSec) throw new HubspotEmailError(422, `template email ${email.id} has no drag-and-drop layout to fill`);
   const footerColumn = footSec.columns.find((c) => c.widgets.includes(footerId))!;
   const footerWidgets = footerColumn.widgets.filter((id) => id === footerId || path(id) === DIVIDER);
+  const { id, name, order } = widgets[richId] as { id?: string; name?: string; order?: number };
   const out: Record<string, Widget> = {
+    // The rich-text block's slot, swapped for our module (the widget shape HubSpot stores for a custom module).
     [richId]: {
-      ...widgets[richId],
+      id: id ?? richId,
+      name: name ?? richId,
+      order,
+      type: "module",
+      module_id: HUBSPOT_EMAIL_HTML_MODULE_ID,
+      label: null,
+      smart_type: null,
+      styles: {},
+      css: {},
+      child_css: {},
       body: {
-        ...widgets[richId].body,
+        module_id: HUBSPOT_EMAIL_HTML_MODULE_ID,
         html,
         // The email carries its own padding; HubSpot's module padding would double it.
         hs_enable_module_padding: false,
@@ -211,6 +235,11 @@ export async function createDraftEmailFromTemplate(args: {
       method: "PATCH",
       body: { name: args.name, subject: args.subject, content },
     });
+    // Read it back: the design must sit in our module byte for byte, or the email isn't what was reviewed.
+    const saved = await hubspotFetch<HubspotEmail>(`/marketing/v3/emails/${clone.id}`, { method: "GET" });
+    if (emailModuleHtml(saved) !== args.html) {
+      throw new HubspotEmailError(502, "HubSpot didn't keep the email's design as sent (the Hub & Spoke email block is missing or changed)");
+    }
   } catch (err) {
     // The copy exists but isn't filled: say where, so it's deleted rather than joined by a second one on retry.
     const status = err instanceof HubspotEmailError ? err.status : 500;
@@ -264,7 +293,13 @@ export async function* listEmailsCreatedAfter(createdAfterIso: string): AsyncGen
   }
 }
 
-/** All rich-text HTML in an email, concatenated (for link extraction). Pure. */
+/** The HTML in the email's Hub & Spoke email module, or null when it has none. Pure. */
+export function emailModuleHtml(email: HubspotEmail): string | null {
+  const w = Object.values(email.content?.widgets ?? {}).find((w) => w.module_id === HUBSPOT_EMAIL_HTML_MODULE_ID || w.body?.module_id === HUBSPOT_EMAIL_HTML_MODULE_ID);
+  return typeof w?.body?.html === "string" ? w.body.html : null;
+}
+
+/** All HTML in an email's blocks — rich text and the Hub & Spoke email module (its field is `html` too) — concatenated (for link extraction). Pure. */
 export function emailRichTextHtml(email: HubspotEmail): string {
   return Object.values(email.content?.widgets ?? {})
     .map((w) => (typeof w.body?.html === "string" ? w.body.html : ""))
