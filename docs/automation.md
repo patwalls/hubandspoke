@@ -16,7 +16,7 @@ If you're new to this codebase, read in this order:
 
 ```
 CRON ENTRIES (src/jobs/crontab.ts, UTC)
-  * * * * *  worker-heartbeat     → bumps worker_heartbeat.last_seen_at. Read by GET /api/health/worker to detect silent worker wedges.
+  * * * * *  worker-heartbeat     → (priority -10) bumps worker_heartbeat.last_seen_at. Read by GET /api/health/worker to detect silent worker wedges.
   *:00  performance-decay         → SC API. Writes views/likes/comments. Decay-tier-gated.
   *:15  threshold-monitor-sweep   → in-place scan. Auto-creates repurposed Idea items when views cross format thresholds.
   *:20  enrichment-sweep          → fan-out → enrich-item (per item) → maybe transcribe-whisper
@@ -2120,6 +2120,11 @@ Detection mechanism:
   records the current `DYNO` name. A wedged worker stops firing this, so
   staleness is the signal — by design, the worker can't lie about being
   alive.
+  It runs at `?priority=-10`, ahead of everything else: a burst of
+  ordinary jobs (the hourly `account-content-sync` fan-out) used to queue
+  in front of it while a long job held the other slot, and paged on a busy,
+  healthy worker (2026-10-27). It still waits for a free slot — two long
+  jobs holding both slots for > 3 min will read stale.
 - **Public endpoint:** `GET /api/health/worker` reads the row and returns
   503 when `NOW() - last_seen_at > 180s`, otherwise 200 with the age in
   seconds. Unauthenticated (middleware bypass on `/api/health/*`); body

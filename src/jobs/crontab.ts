@@ -28,8 +28,15 @@
 // worker slots for 30+ min (re-fetching the same items, ~10x the usual SC
 // calls), and starved `worker-heartbeat` until the health monitor paged.
 // Serialized, at most one slot is ever decay's.
+//
+// `worker-heartbeat` runs at priority -10 (graphile fetches `priority asc,
+// run_at asc`). On 2026-10-27 the :05 account-content-sync fan-out (~50
+// jobs) queued ahead of every heartbeat while diarize held the other slot;
+// the row went 8+ min stale and /api/health/worker paged on a busy, healthy
+// worker. Now the heartbeat takes the next free slot. Keep it the lowest
+// number here (crontab.test.ts enforces it).
 export const CRONTAB = `
-* * * * * worker-heartbeat
+* * * * * worker-heartbeat ?priority=-10
 0 * * * * performance-decay ?queue=performance-decay
 15 * * * * threshold-monitor-sweep
 30 * * * * notion-sync
