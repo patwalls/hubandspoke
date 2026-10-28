@@ -1,0 +1,2 @@
+ALTER TABLE "content_comments" ADD COLUMN "resolved_by_render_id" uuid;--> statement-breakpoint
+ALTER TABLE "content_comments" ADD CONSTRAINT "content_comments_resolved_by_render_id_clip_renders_id_fk" FOREIGN KEY ("resolved_by_render_id") REFERENCES "public"."clip_renders"("id") ON DELETE set null ON UPDATE no action;

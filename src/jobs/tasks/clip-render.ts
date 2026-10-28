@@ -14,6 +14,7 @@ import {
 import { bucketName, buildKey, getPresignedGetUrl, keyPrefix, putObjectFromFile } from "@/lib/s3";
 import { recordToolAction } from "@/lib/services/content-events";
 import { installRenderedClipMedia } from "@/lib/services/clip-editor/install-rendered-media";
+import { closeNotesSettledByRender } from "@/lib/services/clip-editor/review-notes";
 import { parseDoc } from "@/lib/clip-editor/doc";
 import { compileRenderPlan } from "@/lib/clip-editor/plan";
 import { resolveScene } from "@/lib/clip-editor/scene";
@@ -233,14 +234,23 @@ export const clipRenderTask: Task = async (rawPayload, helpers) => {
       })
       .where(eq(clipRenders.id, render.id));
 
+    // The new cut is the post's video now: review notes left on the old one
+    // are settled (review-notes M4). Reopenable from the content page.
+    const closedNotes = await closeNotesSettledByRender(render.id);
+    if (closedNotes > 0) {
+      helpers.logger.info(`clip-render: closed ${closedNotes} review note(s) render=${render.id}`);
+    }
+
     await recordToolAction({
       contentItemId: render.productionItemId,
       userId: render.requestedByUserId,
       tool: "clip-editor",
       action: "clip_rendered",
       status: "success",
-      label: `Clip rendered (${Math.round(plan.durationSec)}s) — ready to review.`,
-      meta: { renderId: render.id, renderSeconds: Math.round(renderSeconds) },
+      label:
+        `Clip rendered (${Math.round(plan.durationSec)}s) — ready to review.` +
+        (closedNotes > 0 ? ` Marked ${closedNotes} review note${closedNotes === 1 ? "" : "s"} done.` : ""),
+      meta: { renderId: render.id, renderSeconds: Math.round(renderSeconds), closedNotes },
     });
     helpers.logger.info(
       `clip-render ok render=${render.id} s3=${s3Key} (${size}B) in ${renderSeconds.toFixed(1)}s`,

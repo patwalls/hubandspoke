@@ -34,8 +34,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
       .update(contentComments)
       .set(
         body.resolved
-          ? { resolvedAt: new Date(), resolvedByUserId: session.user.id }
-          : { resolvedAt: null, resolvedByUserId: null },
+          ? { resolvedAt: new Date(), resolvedByUserId: session.user.id, resolvedByRenderId: null }
+          : { resolvedAt: null, resolvedByUserId: null, resolvedByRenderId: null },
       )
       .where(eq(contentComments.id, id))
       .returning({

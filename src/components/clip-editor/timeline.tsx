@@ -16,6 +16,9 @@
  * Zoom with − / +, or ⌘/Ctrl + scroll. A plain scroll pans.
  * "Add clip" (or dropping a video file on the track) uploads a clip that
  * isn't in the source — an intro recorded separately — as its own scene.
+ * Open review notes from the content page sit on the ruler as pins (see
+ * lib review-notes.ts for how their times follow the edits); a pin jumps
+ * the playhead there and shows the note, with Mark done.
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from "react";
 import {
@@ -24,6 +27,7 @@ import {
   ChevronsLeftIcon,
   ChevronsRightIcon,
   HandIcon,
+  MapPinIcon,
   MinusIcon,
   MousePointer2Icon,
   PauseIcon,
@@ -32,6 +36,7 @@ import {
   SliceIcon,
   SquareSplitHorizontalIcon,
   UploadIcon,
+  XIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -52,6 +57,17 @@ import { usePlayingSectionId } from "./framing";
 import type { EditorWord } from "@/lib/clip-editor/words";
 import type { EngineSnapshot, PlaybackEngine } from "./playback-engine";
 import { commands, useEditor } from "./store";
+import { formatTimecode } from "@/lib/comments/timecode";
+
+/** A review note placed on the draft's timeline (null = its moment was cut). */
+export interface TimelineNote {
+  id: string;
+  /** Where it was left on the rendered video, as people saw it. */
+  atSeconds: number;
+  outSec: number | null;
+  body: string;
+  authorName: string | null;
+}
 
 type Tool = "select" | "hand" | "blade";
 
@@ -87,6 +103,8 @@ export function Timeline({
   words,
   uploadItemId,
   readOnly,
+  notes = [],
+  onResolveNote,
 }: {
   plan: RenderPlan;
   engine: PlaybackEngine;
@@ -95,6 +113,8 @@ export function Timeline({
   words: EditorWord[];
   uploadItemId: string;
   readOnly: boolean;
+  notes?: TimelineNote[];
+  onResolveNote?: (id: string) => void;
 }) {
   const apply = useEditor((s) => s.apply);
   const setWordSelection = useEditor((s) => s.setWordSelection);
@@ -110,6 +130,21 @@ export function Timeline({
   const selectedId = useEditor((s) => s.sceneSelection);
   const setSelectedId = useEditor((s) => s.setSceneSelection);
   const [hoverSec, setHoverSec] = useState<number | null>(null);
+  const [openNoteId, setOpenNoteId] = useState<string | null>(null);
+  const openNote = notes.find((n) => n.id === openNoteId) ?? null;
+  const placedNotes = notes.filter((n) => n.outSec !== null);
+  const showNote = (n: TimelineNote) => {
+    setOpenNoteId(n.id);
+    if (n.outSec === null) return;
+    if (previewing) engine.exitPreview();
+    engine.seek(n.outSec);
+  };
+  /** The notes pill: the next note after the playhead, wrapping around. */
+  const nextNote = () => {
+    const after = placedNotes.find((n) => n.outSec! > snap.outSec + 0.05 && n.id !== openNoteId);
+    const n = after ?? placedNotes[0] ?? notes[0];
+    if (n) showNote(n);
+  };
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [viewW, setViewW] = useState(800);
   const [scrollX, setScrollX] = useState(0);
@@ -476,6 +511,18 @@ export function Timeline({
               Back to clip
             </button>
           )}
+          {notes.length > 0 && (
+            <button
+              type="button"
+              data-testid="timeline-notes"
+              onClick={nextNote}
+              title="Review notes left on the content page — click for the next one"
+              className="ml-2 inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-900 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200"
+            >
+              <MapPinIcon className="size-3" />
+              {notes.length} {notes.length === 1 ? "note" : "notes"}
+            </button>
+          )}
         </div>
 
         <div className="flex items-center gap-3">
@@ -573,6 +620,38 @@ export function Timeline({
         </div>
       </div>
 
+      {openNote && (
+        <div
+          data-testid="timeline-note"
+          className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50/70 px-2.5 py-1.5 text-[13px] dark:border-amber-800 dark:bg-amber-950/40"
+        >
+          <MapPinIcon className="mt-0.5 size-3.5 shrink-0 text-amber-600" />
+          <div className="min-w-0 flex-1">
+            <span className="font-medium">{openNote.authorName?.split(" ")[0] ?? "Someone"}</span>
+            <span className="text-muted-foreground"> at {formatTimecode(openNote.atSeconds)}</span>
+            {openNote.outSec === null && (
+              <span className="text-muted-foreground"> · that moment is cut from this draft</span>
+            )}
+            <p className="whitespace-pre-wrap break-words">{openNote.body}</p>
+          </div>
+          {onResolveNote && (
+            <button
+              type="button"
+              onClick={() => {
+                onResolveNote(openNote.id);
+                setOpenNoteId(null);
+              }}
+              className="flex shrink-0 items-center gap-1 rounded-md px-2 py-0.5 text-[12px] font-medium text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950"
+            >
+              <CheckIcon className="size-3.5" /> Mark done
+            </button>
+          )}
+          <button type="button" aria-label="Hide note" onClick={() => setOpenNoteId(null)} className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted">
+            <XIcon className="size-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Ruler + track */}
       <div
         ref={scrollRef}
@@ -610,6 +689,23 @@ export function Timeline({
                   <span key={i} className="absolute bottom-1 size-0.5 rounded-full bg-muted-foreground/40" style={{ left: (step * pxPerSec * i) / 5 }} />
                 ))}
               </div>
+            ))}
+            {placedNotes.map((n) => (
+              <button
+                key={n.id}
+                type="button"
+                data-testid="timeline-note-pin"
+                title={`${n.authorName?.split(" ")[0] ?? "Note"}: ${n.body}`}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={() => showNote(n)}
+                className={cn(
+                  "absolute bottom-0 z-20 flex -translate-x-1/2 flex-col items-center",
+                  n.id === openNoteId ? "text-amber-700" : "text-amber-500 hover:text-amber-700",
+                )}
+                style={{ left: xOf(n.outSec!) }}
+              >
+                <MapPinIcon className="size-3.5 fill-amber-100 dark:fill-amber-950" />
+              </button>
             ))}
           </div>
 

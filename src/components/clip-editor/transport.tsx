@@ -16,7 +16,7 @@ import type { RenderPlan } from "@/lib/clip-editor/plan";
 import type { EditorWord } from "@/lib/clip-editor/words";
 import type { EngineSnapshot, PlaybackEngine } from "./playback-engine";
 import { commands, useEditor } from "./store";
-import { Timeline } from "./timeline";
+import { Timeline, type TimelineNote } from "./timeline";
 
 function fmt(sec: number): string {
   const t = Math.max(0, sec);
@@ -45,6 +45,8 @@ export function Transport({
   videoUrl,
   uploadItemId,
   readOnly,
+  notes,
+  onResolveNote,
 }: {
   plan: RenderPlan;
   engine: PlaybackEngine;
@@ -54,6 +56,8 @@ export function Transport({
   /** Where uploaded clips are filed in S3. */
   uploadItemId: string;
   readOnly: boolean;
+  notes?: TimelineNote[];
+  onResolveNote?: (id: string) => void;
 }) {
   const [snap, setSnap] = useState<EngineSnapshot>(() => engine.snapshot());
   useEffect(() => engine.subscribe(setSnap), [engine]);
@@ -81,7 +85,7 @@ export function Transport({
 
   return (
     <div className="flex shrink-0 flex-col gap-2 border-t border-border pt-3">
-      <Timeline plan={plan} engine={engine} snap={snap} videoUrl={videoUrl} words={words} uploadItemId={uploadItemId} readOnly={readOnly} />
+      <Timeline plan={plan} engine={engine} snap={snap} videoUrl={videoUrl} words={words} uploadItemId={uploadItemId} readOnly={readOnly} notes={notes} onResolveNote={onResolveNote} />
 
       {focus && (
         <TrimStrip

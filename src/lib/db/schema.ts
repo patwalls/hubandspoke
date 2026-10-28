@@ -1954,6 +1954,12 @@ export const contentComments = pgTable(
     resolvedByUserId: uuid("resolved_by_user_id").references(() => users.id, {
       onDelete: "set null",
     }),
+    // Set when a clip editor re-render closed the note (review-notes M4):
+    // the new cut is a new video, so notes on the old one are settled.
+    resolvedByRenderId: uuid("resolved_by_render_id").references(
+      (): AnyPgColumn => clipRenders.id,
+      { onDelete: "set null" },
+    ),
   },
   (table) => [
     index("idx_content_comments_item_created").on(

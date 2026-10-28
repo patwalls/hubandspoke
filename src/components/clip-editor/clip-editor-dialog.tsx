@@ -48,6 +48,7 @@ import { cn } from "@/lib/utils";
 import { KillIdeaDialog } from "@/components/dashboard/kill-idea-dialog";
 import { aspectOfCanvas, isSourceSection, lookFromDoc, type AspectRatio, type ClipEditDoc } from "@/lib/clip-editor/doc";
 import { compileRenderPlan } from "@/lib/clip-editor/plan";
+import { placeNoteOnDraft } from "@/lib/clip-editor/review-notes";
 import { resolveScene } from "@/lib/clip-editor/scene";
 import { buildTranscriptView } from "@/lib/clip-editor/transcript-view";
 import { findSilences, mediaEditorWords, rangeForWordRun } from "@/lib/clip-editor/words";
@@ -68,6 +69,7 @@ import { framingFor, useFraming } from "./framing";
 import { TranscriptEditor, type SpeakerLabels } from "./transcript-editor";
 import { speakerColor, speakerLabel } from "@/components/dashboard/transcript-speakers";
 import { Transport } from "./transport";
+import type { TimelineNote } from "./timeline";
 import { trackUsage } from "@/lib/usage/track";
 import type { IdeaNav } from "@/components/dashboard/idea-nav";
 
@@ -221,6 +223,33 @@ function EditorWorkspace({
   const [postDrafting, setPostDrafting] = useState(session.post?.state === "drafting");
 
   const plan = useMemo(() => compileRenderPlan(doc, session.words), [doc, session.words]);
+  // Review notes from the content page (M3), carried from the render they
+  // were left on onto this draft's timeline.
+  const [noteList, setNoteList] = useState(session.reviewNotes?.notes ?? []);
+  const renderedPlan = useMemo(() => {
+    const d = session.reviewNotes?.renderedDoc;
+    return d ? compileRenderPlan(d, session.words) : null;
+  }, [session.reviewNotes, session.words]);
+  const notes = useMemo<TimelineNote[]>(
+    () => noteList.map((n) => ({ ...n, outSec: placeNoteOnDraft(renderedPlan, plan, n.atSeconds) })),
+    [noteList, renderedPlan, plan],
+  );
+  const resolveNote = async (id: string) => {
+    const prev = noteList;
+    setNoteList((ns) => ns.filter((n) => n.id !== id));
+    try {
+      const res = await fetch(`/api/comments/${id}/resolve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resolved: true }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      trackUsage("comments:resolve", brand);
+    } catch {
+      setNoteList(prev);
+      toast.error("Couldn't mark that note done");
+    }
+  };
   const framing = useFraming(engine, plan, doc);
   const scene = useMemo(() => resolveScene(plan), [plan]);
   const view = useMemo(() => buildTranscriptView(doc, session.words), [doc, session.words]);
@@ -780,6 +809,8 @@ function EditorWorkspace({
           videoUrl={session.source.videoUrl}
           uploadItemId={session.source.productionItemId}
           readOnly={locked}
+          notes={notes}
+          onResolveNote={(id) => void resolveNote(id)}
         />
       </div>
 
@@ -803,6 +834,11 @@ function EditorWorkspace({
           </button>
         )}
         <div className="flex items-center gap-2">
+          {isReExport && notes.length > 0 && (
+            <span data-testid="export-closes-notes" className="text-xs text-muted-foreground">
+              Re-exporting marks {notes.length} open {notes.length === 1 ? "note" : "notes"} done
+            </span>
+          )}
           <Button
             type="button"
             variant="outline"

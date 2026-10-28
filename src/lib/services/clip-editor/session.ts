@@ -21,6 +21,7 @@ import type { TranscriptSpeaker } from "@/lib/diarization/types";
 import { toRenderStatus, type ClipRenderStatus } from "./render-status";
 import { ensureClipPostDraft, type ClipPost } from "./post-draft";
 import { previewUrlFor } from "@/lib/services/design-editor/assets";
+import { loadEditorReviewNotes, type EditorReviewNotes } from "./review-notes";
 
 export class ClipEditorIdeaNotFoundError extends Error {
   constructor() {
@@ -91,6 +92,9 @@ export interface ClipEditorSession {
    *  its copy is written yet. Opening the editor starts the draft — see
    *  post-draft.ts. Null for legacy ideas without an item. */
   post: ClipPost | null;
+  /** Open review notes on the clip's post, for the timeline (M3). Null
+   *  before the idea has a post. */
+  reviewNotes: EditorReviewNotes | null;
 }
 
 export async function loadClipEditorSession(args: {
@@ -220,6 +224,9 @@ export async function loadClipEditorSession(args: {
     speakers: transcript.speakers ?? null,
     wordsSynthetic: synthetic,
     latestRender: render ? toRenderStatus(render) : null,
+    reviewNotes: row.acceptedProductionItemId
+      ? await loadEditorReviewNotes(row.acceptedProductionItemId)
+      : null,
   };
 }
 

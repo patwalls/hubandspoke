@@ -29,6 +29,17 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-10-28-editor-review-notes",
+    shippedAt: "2026-10-28T19:00:00Z",
+    kind: "feature",
+    title: "Review notes show up in the clip editor",
+    body:
+      "Notes pinned to a moment of a clip now sit as pins on the clip editor's timeline, at the right spot even after you've trimmed. Click one to jump there and mark it done. " +
+      "Re-exporting the clip marks the notes left on the old cut done; anyone can reopen one from the post's Activity.",
+    screen: "modal:clip-editor",
+    audience: { flag: "clipEditor" },
+  },
+  {
     id: "2026-10-28-resolve-notes",
     shippedAt: "2026-10-28T17:00:00Z",
     kind: "feature",
