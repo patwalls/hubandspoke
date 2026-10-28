@@ -3636,6 +3636,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
 
         <TabsContent value="details" className="pt-5 space-y-6">
       <div
+        data-review-player
         className={
           showLeftPane
             ? "grid grid-cols-1 lg:grid-cols-2 gap-6 items-start"

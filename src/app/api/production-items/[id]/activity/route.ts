@@ -42,6 +42,7 @@ function shapeComment(
     user: shapeUser(user),
     authorName: comment.authorName,
     authorAvatarUrl: comment.authorAvatarUrl,
+    atSeconds: comment.atSeconds,
     isMine: !!currentUserId && comment.userId === currentUserId,
   };
 }
