@@ -20,16 +20,14 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * (when that flips, the page offers the next one). Siblings of the current
  * post (same post cross-posted, same video clipped) come first, and
  * `sameSource` says so; `siblings` lists all of them still waiting (with
- * their post type, since cross-posts share one title). `toReview` / `yourTurn`
- * are the two queues' sizes (the brand dashboard's Waiting on you strip calls
- * this without `current`). Fetched when the page's status or editor changes,
- * never on a timer.
+ * their post type, since cross-posts share one title). Fetched when the
+ * page's status or editor changes, never on a timer.
  */
 export async function GET(req: NextRequest) {
   const guard = await requireSession();
   if (guard.response) return guard.response;
   const userId = guard.session.user.id;
-  if (!userId) return NextResponse.json({ next: null, remaining: 0, currentWaiting: false, toReview: 0, yourTurn: 0 });
+  if (!userId) return NextResponse.json({ next: null, remaining: 0, currentWaiting: false });
   const raw = req.nextUrl.searchParams.get("current");
   const current = raw && UUID_RE.test(raw) ? raw : null;
   const [split, links] = await Promise.all([
@@ -60,7 +58,5 @@ export async function GET(req: NextRequest) {
     currentWaiting,
     sameSource,
     siblings: siblings.slice(0, MAX_SIBLINGS).map(brief),
-    toReview: split.toReview.length,
-    yourTurn: split.yourTurn.length,
   });
 }
