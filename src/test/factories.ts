@@ -46,6 +46,7 @@ import {
   clipIdeas,
   clipRenders,
   clipSections,
+  contentComments,
   contentDrafts,
   descriptLayoutPacks,
   designDocs,
@@ -673,6 +674,8 @@ export interface CreateTestClipRenderOptions {
   outputS3Bucket?: string | null;
   outputS3Key?: string | null;
   durationSec?: string | null;
+  requestedByUserId?: string | null;
+  createdAt?: Date;
 }
 
 /**
@@ -696,7 +699,38 @@ export async function createTestClipRender(
       outputS3Bucket: opts.outputS3Bucket ?? "vitest-bucket",
       outputS3Key: opts.outputS3Key ?? `vitest/${randomSuffix()}.mp4`,
       durationSec: opts.durationSec ?? "30",
+      requestedByUserId: opts.requestedByUserId ?? null,
       finishedAt: new Date(),
+      ...(opts.createdAt ? { createdAt: opts.createdAt } : {}),
+    })
+    .returning();
+  return row;
+}
+
+export interface CreateTestCommentOptions {
+  contentItemId: string;
+  body?: string;
+  userId?: string | null;
+  atSeconds?: number | null;
+  createdAt?: Date;
+}
+
+/**
+ * Insert a `content_comments` row (a comment, or a review note when
+ * `atSeconds` is set). Not tracked for cleanup on its own — it cascades from
+ * its production item.
+ */
+export async function createTestComment(
+  opts: CreateTestCommentOptions,
+): Promise<typeof contentComments.$inferSelect> {
+  const [row] = await db
+    .insert(contentComments)
+    .values({
+      contentItemId: opts.contentItemId,
+      body: opts.body ?? "vitest note",
+      userId: opts.userId ?? null,
+      atSeconds: opts.atSeconds ?? null,
+      ...(opts.createdAt ? { createdAt: opts.createdAt } : {}),
     })
     .returning();
   return row;

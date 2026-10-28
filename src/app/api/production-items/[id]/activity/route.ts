@@ -49,6 +49,8 @@ function shapeComment(
     atSeconds: comment.atSeconds,
     resolvedAt: comment.resolvedAt ? comment.resolvedAt.toISOString() : null,
     resolvedByName,
+    // Closed by a clip editor re-render rather than by hand (review-notes M4).
+    resolvedByRender: !!comment.resolvedByRenderId,
     isMine: !!currentUserId && comment.userId === currentUserId,
   };
 }

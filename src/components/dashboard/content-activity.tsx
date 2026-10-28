@@ -139,6 +139,8 @@ interface CommentItem {
   /** Marked done (review-notes M2); absent on a just-posted comment. */
   resolvedAt?: string | null;
   resolvedByName?: string | null;
+  /** Closed by a clip editor re-render, not by hand. */
+  resolvedByRender?: boolean;
   isMine: boolean;
 }
 
@@ -862,10 +864,10 @@ export function ContentActivity({ contentId, brand, refreshKey = 0, statusPalett
   };
 
   const setResolved = async (c: CommentItem, resolved: boolean) => {
-    const patch = (cs: ActivityItem[], at: string | null, by: string | null) =>
+    const patch = (cs: ActivityItem[], at: string | null, by: string | null, byRender = false) =>
       cs.map((x) =>
         x.kind === "comment" && x.id === c.id
-          ? { ...x, resolvedAt: at, resolvedByName: by }
+          ? { ...x, resolvedAt: at, resolvedByName: by, resolvedByRender: byRender }
           : x,
       );
     setItems((cs) => patch(cs, resolved ? new Date().toISOString() : null, null));
@@ -883,7 +885,7 @@ export function ContentActivity({ contentId, brand, refreshKey = 0, statusPalett
       setItems((cs) => patch(cs, data.resolvedAt, data.resolvedByName));
       if (resolved) trackUsage("comments:resolve", brand);
     } catch (e) {
-      setItems((cs) => patch(cs, c.resolvedAt ?? null, c.resolvedByName ?? null));
+      setItems((cs) => patch(cs, c.resolvedAt ?? null, c.resolvedByName ?? null, c.resolvedByRender));
       setError(e instanceof Error ? e.message : "Failed to update comment");
     }
   };
@@ -1169,7 +1171,8 @@ function CommentRow({
               className="inline-flex items-center gap-1 text-xs text-emerald-700"
             >
               <CheckIcon className="size-3" />
-              Done{c.resolvedByName ? ` · ${c.resolvedByName.split(" ")[0]}` : ""}
+              {c.resolvedByRender ? "Done in the re-render" : "Done"}
+              {c.resolvedByName ? ` · ${c.resolvedByName.split(" ")[0]}` : ""}
             </span>
           )}
           {editingId !== c.id && saved && (

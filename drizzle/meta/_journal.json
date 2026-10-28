@@ -981,6 +981,13 @@
       "when": 1793204881495,
       "tag": "0139_comment_resolved",
       "breakpoints": true
+    },
+    {
+      "idx": 140,
+      "version": "7",
+      "when": 1793206904250,
+      "tag": "0140_comment_resolved_by_render",
+      "breakpoints": true
     }
   ]
 }
