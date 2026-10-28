@@ -66,7 +66,8 @@ conversation.
 
 6. **Sanity-check the build before shipping** (a push to `main` deploys immediately). If
    you changed TypeScript/TSX, at minimum it should typecheck — a broken build fails the
-   deploy. If unsure, run `npm run build` (or the relevant `npm run test`) first.
+   deploy. The pre-push hook (`.githooks/pre-push`) refuses a push to `main` that doesn't
+   typecheck; if it does, fix the error — don't `--no-verify` past it. If unsure, run `npm run build` (or the relevant `npm run test`) first.
 
 7. **Sync with main before pushing** (ahead/behind count is in the context above).
    - If `origin/main` is AHEAD of you (right number > 0): `git pull --rebase origin main`.

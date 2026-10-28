@@ -352,6 +352,19 @@ It needs no secrets (Sentry source-map upload skips itself without
   write collaborators are bypass actors, so direct pushes to `main` still land
   (and deploy) unchecked — the push run is a signal, not a gate. Renaming the
   job renames the check: update the ruleset in the same change.
+- **Direct pushes to `main` are typechecked locally first** (`.githooks/pre-push`,
+  2026-10-28). `next build` typechecks every `.ts` file, tests included, so a
+  bad cast in a test failed two Heroku deploys (builds e2ac24f1 2026-10-21,
+  9506006f 2026-10-26). The hook exports the exact commit being pushed to a
+  temp dir and runs CI's `tsc --noEmit` on it (~20s), so other sessions'
+  uncommitted edits in the shared checkout can't fail or rescue it. Pushes to
+  other branches are untouched. `npm install` installs it (`prepare` →
+  `scripts/install-git-hooks.mjs` sets `core.hooksPath=.githooks`);
+  `git push --no-verify` skips it. Test: `src/app/pre-push-hook.test.ts`.
+- **A network blip in the buildpack is not a code bug.** Build 68ffa031
+  (2026-10-28) died downloading Node from nodejs.org. Main is linear, so the
+  next push redeploys it all; the ops lap CRITs a failed *latest* build, which
+  is the case where nothing else will.
 - **Unit tests must not touch the DB.** CI has no Postgres. A test that
   imports `@/test/factories` or `db` belongs in `*.integration.test.ts`; a
   DB-backed test in the unit project fails CI with a connection error.

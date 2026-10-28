@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# Typecheck what is about to land on main, before Heroku builds it.
+#
+# A push to main deploys straight away (Heroku's GitHub integration), and
+# direct pushes bypass the required `build` check — CI's push run is a signal,
+# not a gate. `next build` typechecks every .ts file, test files included, so
+# one bad cast in a test fails the deploy: builds e2ac24f1 (2026-10-21,
+# beehiiv-draft.test.ts) and 9506006f (2026-10-26, newsletter-layout.test.ts).
+#
+# Checks the exact commit being pushed, exported to a temp dir, not the
+# working tree: other sessions share this checkout and their uncommitted edits
+# must neither fail nor rescue the check. Same command as CI's Typecheck step.
+# Pushes to any other branch are untouched (loops ship through PRs, CI gates
+# those). Skip in an emergency with `git push --no-verify`.
+#
+# Installed by `npm install` (scripts/install-git-hooks.mjs sets
+# core.hooksPath=.githooks). HS_PREPUSH_TYPECHECK overrides the command (tests).
+set -uo pipefail
+
+ZERO=0000000000000000000000000000000000000000
+targets=()
+while read -r _local_ref local_sha remote_ref _remote_sha; do
+  [ "$remote_ref" = "refs/heads/main" ] || continue
+  [ "$local_sha" = "$ZERO" ] && continue  # deleting main: nothing to check
+  targets+=("$local_sha")
+done
+[ "${#targets[@]}" -eq 0 ] && exit 0
+
+top="$(git rev-parse --show-toplevel)"
+if [ -z "${HS_PREPUSH_TYPECHECK:-}" ] && [ ! -x "$top/node_modules/.bin/tsc" ]; then
+  echo "pre-push: no node_modules in $top — cannot typecheck the push to main." >&2
+  echo "pre-push: run npm install, or push with --no-verify if you accept a possibly red deploy." >&2
+  exit 1
+fi
+
+for sha in "${targets[@]}"; do
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/hs-prepush.XXXXXX")"
+  trap 'rm -rf "$tmp"' EXIT
+  git archive "$sha" | tar -x -C "$tmp" || { echo "pre-push: could not export $sha" >&2; exit 1; }
+  ln -s "$top/node_modules" "$tmp/node_modules"
+  echo "pre-push: typechecking ${sha:0:8} before it deploys (~20s)…" >&2
+  if ! (cd "$tmp" && eval "${HS_PREPUSH_TYPECHECK:-./node_modules/.bin/tsc --noEmit}"); then
+    echo "pre-push: ${sha:0:8} does not typecheck — Heroku's build would fail. Push refused." >&2
+    exit 1
+  fi
+  rm -rf "$tmp"; trap - EXIT
+done
+exit 0
