@@ -41,7 +41,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           .from(users)
           .where(sql`lower(${users.email}) = ${email}`)
           .limit(1);
-        if (!user || !user.passwordHash) return null;
+        if (!user || !user.passwordHash || user.deactivatedAt) return null;
         const ok = await bcrypt.compare(password, user.passwordHash);
         if (!ok) return null;
         return {

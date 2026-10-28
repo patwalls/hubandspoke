@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, ne, sql } from "drizzle-orm";
+import { and, eq, isNull, ne, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { requireAdmin } from "@/lib/auth-guards";
@@ -9,7 +9,7 @@ async function countOtherAdmins(excludeId: string): Promise<number> {
   const [row] = await db
     .select({ n: sql<number>`count(*)::int` })
     .from(users)
-    .where(and(eq(users.role, "admin"), ne(users.id, excludeId)));
+    .where(and(eq(users.role, "admin"), ne(users.id, excludeId), isNull(users.deactivatedAt)));
   return row?.n ?? 0;
 }
 
@@ -28,6 +28,7 @@ export async function PATCH(
     dailyScorecardEmailEnabled?: unknown;
     brandIds?: unknown;
     contentRole?: unknown;
+    deactivated?: unknown;
   };
   try {
     body = await request.json();
@@ -46,6 +47,13 @@ export async function PATCH(
     }
     nextRole = body.role;
     update.role = nextRole;
+  }
+  // Deactivate / reactivate. Sends nothing — no email to the person.
+  if (body.deactivated !== undefined) {
+    if (typeof body.deactivated !== "boolean") {
+      return NextResponse.json({ error: "deactivated must be a boolean" }, { status: 400 });
+    }
+    update.deactivatedAt = body.deactivated ? new Date() : null;
   }
   if (body.dailyScorecardEmailEnabled !== undefined) {
     if (typeof body.dailyScorecardEmailEnabled !== "boolean") {
@@ -84,13 +92,30 @@ export async function PATCH(
 
   try {
     const [target] = await db
-      .select({ id: users.id, role: users.role })
+      .select({ id: users.id, role: users.role, deactivatedAt: users.deactivatedAt })
       .from(users)
       .where(eq(users.id, id))
       .limit(1);
 
     if (!target) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+
+    if (body.deactivated === true) {
+      if (target.id === session.user.id) {
+        return NextResponse.json(
+          { error: "You can't deactivate yourself" },
+          { status: 409 }
+        );
+      }
+      if (target.deactivatedAt) {
+        delete update.deactivatedAt; // already deactivated — keep the original date
+      } else if (target.role === "admin" && (await countOtherAdmins(target.id)) === 0) {
+        return NextResponse.json(
+          { error: "At least one admin is required" },
+          { status: 409 }
+        );
+      }
     }
 
     if (nextRole !== undefined) {

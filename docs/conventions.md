@@ -272,6 +272,8 @@ exports, uploads, enqueuing paid work (Descript, LLM drafts, renders).
    libraries, global syncs) use `requireAdmin()`.
 3. **Personal-only actions** (my notifications, what's-new seen, my email
    prefs, usage telemetry) need no gate.
+   **Deactivated users** (`users.deactivated_at`) get nothing: any new
+   email/notification send or assignee default must skip them.
    **Comments** are also open to every signed-in user, on any brand (post,
    edit/delete own, mark done) — they're collaboration, not edits.
 4. GET handlers are not gated — creators can view everything.

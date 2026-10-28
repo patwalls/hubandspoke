@@ -31,8 +31,8 @@ export async function POST(request: NextRequest) {
     .limit(1);
 
   // Always respond OK to avoid email enumeration. Only send the email if the
-  // user actually exists.
-  if (user) {
+  // user actually exists and isn't deactivated.
+  if (user && !user.deactivatedAt) {
     const rawToken = crypto.randomBytes(32).toString("base64url");
     const tokenHash = hashToken(rawToken);
     const expiresAt = new Date(Date.now() + TOKEN_TTL_MS);

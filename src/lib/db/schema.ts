@@ -1835,6 +1835,11 @@ export const users = pgTable(
     // src/lib/whats-new/entries.ts shipped after this (or after createdAt when
     // null) pop up on their next page load. See docs/features.md → What's new.
     whatsNewSeenAt: timestamp("whats_new_seen_at", { withTimezone: true }),
+    // Set when an admin deactivates the account (Settings → Users). The row
+    // stays so their posts/comments keep their author; they can't sign in,
+    // existing sessions are signed out silently on the next page load, and
+    // they get no emails. Null = active. Never emails anyone on its own.
+    deactivatedAt: timestamp("deactivated_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

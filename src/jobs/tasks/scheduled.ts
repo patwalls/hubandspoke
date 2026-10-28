@@ -369,7 +369,7 @@ export const dailyScorecardEmailTask: Task = async (_payload, helpers) => {
   const recipients = await db
     .select({ id: users.id, email: users.email })
     .from(users)
-    .where(eq(users.dailyScorecardEmailEnabled, true));
+    .where(and(eq(users.dailyScorecardEmailEnabled, true), isNull(users.deactivatedAt)));
   if (recipients.length === 0) {
     helpers.logger.info(
       `daily-scorecard-email no recipients (${Date.now() - start}ms)`
@@ -411,7 +411,7 @@ export const myWorkDigestTask: Task = async (_payload, helpers) => {
     await db
       .select({ id: users.id, email: users.email, name: users.name })
       .from(users)
-      .where(eq(users.myWorkDigestEnabled, true))
+      .where(and(eq(users.myWorkDigestEnabled, true), isNull(users.deactivatedAt)))
   ).filter((u) => isFeatureEnabled("myWorkDigest", u));
   let sent = 0;
   let empty = 0;

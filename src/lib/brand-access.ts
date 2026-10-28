@@ -37,9 +37,9 @@ import {
  */
 export async function currentRoleAndBrands(
   userId: string
-): Promise<{ role: "admin" | "creator"; brandIds: string[] } | null> {
+): Promise<{ role: "admin" | "creator"; brandIds: string[]; deactivatedAt: Date | null } | null> {
   const [row] = await db
-    .select({ role: users.role, brandIds: users.brandIds })
+    .select({ role: users.role, brandIds: users.brandIds, deactivatedAt: users.deactivatedAt })
     .from(users)
     .where(eq(users.id, userId))
     .limit(1);
@@ -49,7 +49,8 @@ export async function currentRoleAndBrands(
 /** Is this user an admin right now (DB role, not the sign-in JWT)? */
 export async function isAdminNow(session: Session | null | undefined): Promise<boolean> {
   if (!session?.user?.id) return false;
-  return (await currentRoleAndBrands(session.user.id))?.role === "admin";
+  const row = await currentRoleAndBrands(session.user.id);
+  return row?.role === "admin" && !row.deactivatedAt;
 }
 
 /** Brand slugs this user may change. Admins get `"all"`. */
@@ -58,7 +59,8 @@ export async function editableBrandSlugs(
 ): Promise<"all" | Set<string>> {
   if (!session?.user?.id) return new Set();
   const row = await currentRoleAndBrands(session.user.id);
-  if (row?.role === "admin") return "all";
+  if (!row || row.deactivatedAt) return new Set();
+  if (row.role === "admin") return "all";
   const ids = new Set(row?.brandIds ?? []);
   if (!ids.size) return new Set();
   const all = await db.select({ id: brands.id, slug: brands.slug }).from(brands);

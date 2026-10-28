@@ -196,6 +196,8 @@ export interface CreateTestUserOptions {
   role?: "admin" | "creator";
   /** Brand slugs (resolved to `brand_ids` UUIDs) this user can edit. */
   brands?: string[];
+  /** Create the user already deactivated. */
+  deactivated?: boolean;
 }
 
 /**
@@ -220,6 +222,7 @@ export async function createTestUser(
       email: `test-${randomSuffix()}@local.test`,
       role: opts.role ?? "creator",
       brandIds,
+      deactivatedAt: opts.deactivated ? new Date() : null,
     })
     .returning();
   trackCleanup("users", row.id);

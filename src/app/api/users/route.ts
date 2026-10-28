@@ -21,6 +21,7 @@ export async function GET() {
         dailyScorecardEmailEnabled: users.dailyScorecardEmailEnabled,
         brandIds: users.brandIds,
         contentRole: users.contentRole,
+        deactivatedAt: users.deactivatedAt,
       })
       .from(users)
       .orderBy(desc(users.createdAt));

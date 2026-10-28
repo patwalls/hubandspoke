@@ -896,7 +896,8 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
   (`sendMyWorkDigestEmail`).
 - **Inputs:** the same reads as `/my-work` (`getMyWork` + `getRowNews`).
   Recipients = users with the `myWorkDigest` flag AND
-  `users.my_work_digest_enabled = true` (opt-out, default true). The flag is
+  `users.my_work_digest_enabled = true` (opt-out, default true) AND not
+  deactivated (`users.deactivated_at IS NULL`, 2026-10-28). The flag is
   `everyone: true` since 2026-10-26 (Pat-only 10-23 → 10-26), so in practice
   every account that hasn't opted out; ~12–15 have something waiting on a
   given weekday.
@@ -923,6 +924,8 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
   `src/lib/services/scorecard.ts` (data),
   `src/lib/email-templates/daily-scorecard.ts` (rendering),
   `src/lib/email.ts` (`sendDailyScorecardEmail`)
+- **Recipients:** `daily_scorecard_email_enabled = true` and not deactivated
+  (`deactivated_at IS NULL`, 2026-10-28).
 - **Inputs:** rolling 7-day publish counts (`publishedDate` in [today−7, today)
   vs [today−14, today−7)). Recipients = users with
   `daily_scorecard_email_enabled = true`.
@@ -1822,6 +1825,11 @@ Regression guard: `src/lib/services/underlord-auto-fire.regression.test.ts` grep
 - **Rules:**
   - Skips self-notifications (actor == recipient)
   - Skips uninvited contractors (no `passwordHash`)
+  - Skips deactivated users (`users.deactivated_at` set) — both when the
+    notification is created and again at send time (2026-10-28)
+  - `resolveEditor()` (`src/lib/services/assignees.ts`) never assigns new
+    work to a deactivated user; a stale format/brand default falls back to
+    unassigned
   - Idempotent on `emailedAt`
 
 ### `typefully-create-draft` — auto-create Typefully draft for new X/LinkedIn items

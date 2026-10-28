@@ -16,6 +16,14 @@ export async function requireSession(): Promise<GuardResult> {
       response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
     };
   }
+  // A deactivated account's JWT stays valid until it expires — refuse it
+  // here (checked against the DB) so deactivation cuts access immediately.
+  const current = session.user.id ? await currentRoleAndBrands(session.user.id) : null;
+  if (!current || current.deactivatedAt) {
+    return {
+      response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
+    };
+  }
   setSentrySessionUser(session);
   return { session };
 }
@@ -29,7 +37,12 @@ export async function requireAdmin(): Promise<GuardResult> {
   }
   // DB role, not the JWT's — a demotion must apply without a re-login.
   const current = await currentRoleAndBrands(session.user.id);
-  if (current?.role !== "admin") {
+  if (!current || current.deactivatedAt) {
+    return {
+      response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
+    };
+  }
+  if (current.role !== "admin") {
     return {
       response: NextResponse.json({ error: "Forbidden" }, { status: 403 }),
     };

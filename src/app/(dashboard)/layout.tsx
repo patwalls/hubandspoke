@@ -35,6 +35,7 @@ export default async function DashboardLayout({
           name: users.name,
           avatarUrl: users.avatarUrl,
           role: users.role,
+          deactivatedAt: users.deactivatedAt,
           whatsNewSeenAt: users.whatsNewSeenAt,
           createdAt: users.createdAt,
         })
@@ -46,6 +47,13 @@ export default async function DashboardLayout({
   // Brands are DB-driven — fetch once per request at the layout and thread
   // through the nav + section-tabs. `avatar` maps the DB's `avatar_url`
   // column to the nav's existing prop shape.
+  // Deactivated (Settings → Users) or deleted: their JWT is still valid until
+  // it expires, so sign them out silently — no "deactivated" message. The API
+  // refuses them too (requireSession).
+  if (!userRow || userRow.deactivatedAt) {
+    redirect("/api/auth/end-session");
+  }
+
   // Which brands this user can change — drives disabled edit controls across
   // the UI (src/components/brand-access.tsx). The API enforces it regardless.
   const editableSlugs = await editableBrandSlugs(session);

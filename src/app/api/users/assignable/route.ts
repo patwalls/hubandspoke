@@ -39,6 +39,7 @@ export async function GET() {
         isNull(productionItems.deletedAt),
       ),
     )
+    .where(isNull(users.deactivatedAt))
     .groupBy(users.id, users.email, users.name, users.avatarUrl)
     .orderBy(desc(assignmentCount), asc(users.name), asc(users.email));
 

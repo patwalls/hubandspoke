@@ -41,11 +41,12 @@ export async function enqueueNotification(input: EnqueueInput): Promise<void> {
   if (input.actorUserId && input.actorUserId === input.userId) return;
 
   const [recipient] = await db
-    .select({ passwordHash: users.passwordHash })
+    .select({ passwordHash: users.passwordHash, deactivatedAt: users.deactivatedAt })
     .from(users)
     .where(eq(users.id, input.userId))
     .limit(1);
-  if (!recipient) return;
+  // Deactivated accounts get no notifications (in-app or email).
+  if (!recipient || recipient.deactivatedAt) return;
 
   const [inserted] = await db
     .insert(notifications)
@@ -90,11 +91,12 @@ export async function sendEmailForNotification(
   if (!row || row.emailedAt) return;
 
   const [recipient] = await db
-    .select({ email: users.email, name: users.name })
+    .select({ email: users.email, name: users.name, deactivatedAt: users.deactivatedAt })
     .from(users)
     .where(eq(users.id, row.userId))
     .limit(1);
-  if (!recipient) return;
+  // Deactivated after the notification was queued → drop it, don't email.
+  if (!recipient || recipient.deactivatedAt) return;
 
   let brand = "starter-story";
   if (row.contentItemId) {

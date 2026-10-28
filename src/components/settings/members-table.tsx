@@ -50,6 +50,8 @@ export type Member = {
   dailyScorecardEmailEnabled: boolean;
   brandIds: string[];
   contentRole: ContentRole | null;
+  /** Set when deactivated — can't sign in, gets no email; history kept. */
+  deactivatedAt: string | null;
 };
 
 interface Props {
@@ -244,7 +246,8 @@ export function MembersTable({
   onChanged,
   onError,
 }: Props) {
-  const [removeTarget, setRemoveTarget] = useState<Member | null>(null);
+  const [deactivateTarget, setDeactivateTarget] = useState<Member | null>(null);
+  const [deactivateError, setDeactivateError] = useState<string | null>(null);
   const [editTarget, setEditTarget] = useState<Member | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -292,18 +295,29 @@ export function MembersTable({
     }
   }
 
-  async function removeMember(member: Member) {
+  // Deactivate / reactivate. Never deletes the row (their posts keep their
+  // editor) and never emails the person.
+  async function setDeactivated(member: Member, deactivated: boolean) {
     setBusy(true);
+    setDeactivateError(null);
     try {
-      const res = await fetch(`/api/users/${member.id}`, { method: "DELETE" });
+      const res = await fetch(`/api/users/${member.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deactivated }),
+      });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || "Failed to remove user");
+        throw new Error(body.error || "Failed to update user");
       }
-      setRemoveTarget(null);
+      setDeactivateTarget(null);
       onChanged();
     } catch (err) {
-      onError(err instanceof Error ? err.message : "Failed to remove user");
+      const message = err instanceof Error ? err.message : "Failed to update user";
+      // Shown inside the dialog when it's open — the page-level error sits
+      // behind the overlay where nobody sees it.
+      if (deactivated) setDeactivateError(message);
+      else onError(message);
     } finally {
       setBusy(false);
     }
@@ -339,16 +353,23 @@ export function MembersTable({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {members.map((m) => {
+            {[...members]
+              .sort((a, b) => Number(!!a.deactivatedAt) - Number(!!b.deactivatedAt))
+              .map((m) => {
               const isSelf = m.id === currentUserId;
               return (
-                <TableRow key={m.id}>
+                <TableRow key={m.id} className={m.deactivatedAt ? "opacity-60" : undefined}>
                   <TableCell className="text-foreground">
                     {m.name || "—"}
                     {isSelf && (
                       <span className="ml-2 text-xs text-muted-foreground">
                         (you)
                       </span>
+                    )}
+                    {m.deactivatedAt && (
+                      <Badge variant="outline" className="ml-2">
+                        Deactivated
+                      </Badge>
                     )}
                   </TableCell>
                   <TableCell className="text-muted-foreground">
@@ -393,13 +414,22 @@ export function MembersTable({
                           Update permissions
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          variant="destructive"
-                          onClick={() => setRemoveTarget(m)}
-                          disabled={isSelf}
-                        >
-                          Remove
-                        </DropdownMenuItem>
+                        {m.deactivatedAt ? (
+                          <DropdownMenuItem onClick={() => setDeactivated(m, false)} disabled={busy}>
+                            Reactivate
+                          </DropdownMenuItem>
+                        ) : (
+                          <DropdownMenuItem
+                            variant="destructive"
+                            onClick={() => {
+                              setDeactivateError(null);
+                              setDeactivateTarget(m);
+                            }}
+                            disabled={isSelf}
+                          >
+                            Deactivate
+                          </DropdownMenuItem>
+                        )}
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </TableCell>
@@ -431,34 +461,39 @@ export function MembersTable({
       )}
 
       <Dialog
-        open={removeTarget !== null}
+        open={deactivateTarget !== null}
         onOpenChange={(open) => {
-          if (!open) setRemoveTarget(null);
+          if (!open) setDeactivateTarget(null);
         }}
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Remove user?</DialogTitle>
+            <DialogTitle>
+              Deactivate {deactivateTarget?.name || deactivateTarget?.email}?
+            </DialogTitle>
             <DialogDescription>
-              {removeTarget
-                ? `${removeTarget.email} will lose access immediately.`
-                : null}
+              They won&apos;t be able to sign in, and if they&apos;re signed in now they&apos;ll lose
+              access on their next page load. Their posts, comments and history stay as they are.
+              They won&apos;t be notified, and you can reactivate them any time.
             </DialogDescription>
           </DialogHeader>
+          {deactivateError && (
+            <p className="text-sm text-destructive">{deactivateError}</p>
+          )}
           <DialogFooter>
             <Button
               variant="outline"
-              onClick={() => setRemoveTarget(null)}
+              onClick={() => setDeactivateTarget(null)}
               disabled={busy}
             >
               Cancel
             </Button>
             <Button
               variant="destructive"
-              onClick={() => removeTarget && removeMember(removeTarget)}
+              onClick={() => deactivateTarget && setDeactivated(deactivateTarget, true)}
               disabled={busy}
             >
-              {busy ? "Removing…" : "Remove"}
+              {busy ? "Deactivating…" : "Deactivate"}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -61,5 +61,16 @@ export async function resolveEditor(
     if (bs?.defaultEditorUserId) editorUserId = bs.defaultEditorUserId;
   }
 
+  // Never hand new work to a deactivated account (a stale format/brand
+  // default can still point at one).
+  if (editorUserId) {
+    const [u] = await db
+      .select({ deactivatedAt: users.deactivatedAt })
+      .from(users)
+      .where(eq(users.id, editorUserId))
+      .limit(1);
+    if (!u || u.deactivatedAt) editorUserId = null;
+  }
+
   return editorUserId;
 }

@@ -4,7 +4,9 @@ import {
   brandOfClipIdea,
   canEditBrand,
   editableBrandSlugs,
+  isAdminNow,
 } from "@/lib/brand-access";
+import { resolveEditor } from "@/lib/services/assignees";
 import {
   createTestClipIdea,
   createTestProductionItem,
@@ -52,5 +54,21 @@ describe("brand access", () => {
     const item = await createTestProductionItem({ brand: "starter-story" });
     const idea = await createTestClipIdea({ sourceProductionItemId: item.id });
     expect(await brandOfClipIdea(idea.id)).toBe("starter-story");
+  });
+
+  it("a deactivated admin loses every brand and admin access", async () => {
+    const gone = await createTestUser({ role: "admin", deactivated: true });
+    expect(await isAdminNow(sessionFor(gone))).toBe(false);
+    expect(await canEditBrand(sessionFor(gone), "starter-story")).toBe(false);
+  });
+
+  it("never hands new work to a deactivated editor", async () => {
+    const gone = await createTestUser({ deactivated: true });
+    const source = await createTestProductionItem({ editorUserId: gone.id });
+    expect(await resolveEditor({ brand: "starter-story", sourceItemId: source.id })).toBeNull();
+
+    const active = await createTestUser();
+    const source2 = await createTestProductionItem({ editorUserId: active.id });
+    expect(await resolveEditor({ brand: "starter-story", sourceItemId: source2.id })).toBe(active.id);
   });
 });
