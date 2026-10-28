@@ -40,17 +40,6 @@ export const WHATS_NEW: WhatsNewEntry[] = [
     audience: { flag: "clipEditor" },
   },
   {
-    id: "2026-10-27-home-waiting",
-    shippedAt: "2026-10-27T12:15:00Z",
-    kind: "feature",
-    title: "What's waiting on you, on the dashboard",
-    body:
-      "When posts are waiting on you, the dashboard now opens with a Waiting on you bar: how many are yours to review or work on, " +
-      "and the next one with an Open button. It's hidden when nothing is waiting.",
-    href: "/[brand]",
-    screen: "home:waiting",
-  },
-  {
     id: "2026-10-27-production-next-rows",
     shippedAt: "2026-10-27T08:00:00Z",
     kind: "feature",
