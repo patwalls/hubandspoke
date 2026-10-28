@@ -24,7 +24,6 @@ import {
   accounts,
   brands,
   clipIdeas,
-  contentComments,
   formats,
   newsletterDrafts,
   productionItems,
@@ -109,16 +108,6 @@ export async function brandOfNewsletterDraft(id: string): Promise<string | null>
     .select({ brand: newsletterDrafts.brand })
     .from(newsletterDrafts)
     .where(eq(newsletterDrafts.id, id))
-    .limit(1);
-  return row?.brand ?? null;
-}
-
-export async function brandOfComment(id: string): Promise<string | null> {
-  const [row] = await db
-    .select({ brand: productionItems.brand })
-    .from(contentComments)
-    .innerJoin(productionItems, eq(productionItems.id, contentComments.contentItemId))
-    .where(eq(contentComments.id, id))
     .limit(1);
   return row?.brand ?? null;
 }

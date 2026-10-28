@@ -100,7 +100,7 @@ export async function PATCH(
       } else {
         if (target.id === session.user.id && nextRole !== "admin") {
           return NextResponse.json(
-            { error: "You cannot demote yourself" },
+            { error: "You can't change your own permission" },
             { status: 409 }
           );
         }

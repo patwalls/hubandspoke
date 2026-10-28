@@ -109,14 +109,18 @@ function ChannelBadges({
 function EditMemberDialog({
   member,
   brands,
+  isSelf,
   onSave,
   onClose,
 }: {
   member: Member;
   brands: BrandOption[];
-  onSave: (data: { brandIds: string[]; contentRole: ContentRole | null }) => Promise<void>;
+  /** You can't change your own permission level (the API refuses it too). */
+  isSelf: boolean;
+  onSave: (data: { role: Role; brandIds: string[]; contentRole: ContentRole | null }) => Promise<void>;
   onClose: () => void;
 }) {
+  const [role, setRole] = useState<Role>(member.role);
   const [selected, setSelected] = useState<Set<string>>(new Set(member.brandIds));
   const [contentRole, setContentRole] = useState<ContentRole | "">(
     member.contentRole ?? ""
@@ -135,6 +139,7 @@ function EditMemberDialog({
   async function handleSave() {
     setSaving(true);
     await onSave({
+      role,
       brandIds: [...selected],
       contentRole: contentRole || null,
     });
@@ -145,13 +150,35 @@ function EditMemberDialog({
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Edit member</DialogTitle>
+          <DialogTitle>Update permissions</DialogTitle>
           <DialogDescription>
-            Update settings for {member.name || member.email}.
+            What {member.name || member.email} can change in Hub &amp; Spoke.
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
+          <div className="space-y-2">
+            <Label>Permission</Label>
+            <Select
+              value={role}
+              onValueChange={(v) => setRole(v as Role)}
+              disabled={isSelf}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue>{role === "admin" ? "Admin" : "Creator"}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="admin">Admin — can edit every brand</SelectItem>
+                <SelectItem value="creator">Creator — can edit only the brands below</SelectItem>
+              </SelectContent>
+            </Select>
+            {isSelf && (
+              <p className="text-xs text-muted-foreground">
+                You can&apos;t change your own permission.
+              </p>
+            )}
+          </div>
+
           <div className="space-y-2">
             <Label>Role</Label>
             <Select
@@ -169,7 +196,7 @@ function EditMemberDialog({
             </Select>
           </div>
 
-          <div className="space-y-2">
+          <div className={role === "admin" ? "space-y-2 opacity-60" : "space-y-2"}>
             <Label>Brands they can edit</Label>
             <p className="text-xs text-muted-foreground">
               Everyone can view every brand. Creators can only make changes on
@@ -221,23 +248,6 @@ export function MembersTable({
   const [editTarget, setEditTarget] = useState<Member | null>(null);
   const [busy, setBusy] = useState(false);
 
-  async function changePermission(member: Member, role: Role) {
-    try {
-      const res = await fetch(`/api/users/${member.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || "Failed to update permissions");
-      }
-      onChanged();
-    } catch (err) {
-      onError(err instanceof Error ? err.message : "Failed to update permissions");
-    }
-  }
-
   async function setScorecardEnabled(member: Member, enabled: boolean) {
     try {
       const res = await fetch(`/api/users/${member.id}`, {
@@ -259,13 +269,17 @@ export function MembersTable({
 
   async function saveMember(
     member: Member,
-    data: { brandIds: string[]; contentRole: ContentRole | null }
+    data: { role: Role; brandIds: string[]; contentRole: ContentRole | null }
   ) {
     try {
       const res = await fetch(`/api/users/${member.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ brandIds: data.brandIds, contentRole: data.contentRole }),
+        body: JSON.stringify({
+          role: data.role,
+          brandIds: data.brandIds,
+          contentRole: data.contentRole,
+        }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -376,24 +390,8 @@ export function MembersTable({
                       />
                       <DropdownMenuContent align="end">
                         <DropdownMenuItem onClick={() => setEditTarget(m)}>
-                          Edit
+                          Update permissions
                         </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        {m.role === "creator" ? (
-                          <DropdownMenuItem
-                            onClick={() => changePermission(m, "admin")}
-                            disabled={isSelf}
-                          >
-                            Make admin
-                          </DropdownMenuItem>
-                        ) : (
-                          <DropdownMenuItem
-                            onClick={() => changePermission(m, "creator")}
-                            disabled={isSelf}
-                          >
-                            Demote to creator
-                          </DropdownMenuItem>
-                        )}
                         <DropdownMenuSeparator />
                         <DropdownMenuItem
                           variant="destructive"
@@ -426,6 +424,7 @@ export function MembersTable({
         <EditMemberDialog
           member={editTarget}
           brands={brands}
+          isSelf={editTarget.id === currentUserId}
           onSave={(data) => saveMember(editTarget, data)}
           onClose={() => setEditTarget(null)}
         />

@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { contentComments, users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { requireBrandEdit } from "@/lib/auth-guards";
-import { brandOfComment } from "@/lib/brand-access";
+import { requireSession } from "@/lib/auth-guards";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -19,7 +18,8 @@ interface RouteContext {
 export async function POST(request: NextRequest, context: RouteContext) {
   try {
     const { id } = await context.params;
-    const guard = await requireBrandEdit(await brandOfComment(id));
+    // Comments are open to every signed-in user, view-only or not.
+    const guard = await requireSession();
     if (guard.response) return guard.response;
     const session = guard.session;
     const body = await request.json().catch(() => null);

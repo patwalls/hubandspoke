@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { contentComments, productionItems, users } from "@/lib/db/schema";
 import { and, eq } from "drizzle-orm";
-import { requireBrandEdit } from "@/lib/auth-guards";
-import { brandOfComment } from "@/lib/brand-access";
+import { requireSession } from "@/lib/auth-guards";
 import { htmlToPlainText, sanitizeCommentHtml } from "@/lib/comments/sanitize";
 import { extractMentionUserIds } from "@/lib/comments/extract-mentions";
 import { enqueueNotification } from "@/lib/services/notifications";
@@ -18,7 +17,8 @@ const MAX_BODY = 5000;
 export async function PATCH(request: NextRequest, context: RouteContext) {
   try {
     const { id } = await context.params;
-    const guard = await requireBrandEdit(await brandOfComment(id));
+    // Comments are open to every signed-in user, view-only or not.
+    const guard = await requireSession();
     if (guard.response) return guard.response;
     const session = guard.session;
     if (!session.user?.id) {
@@ -140,7 +140,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 export async function DELETE(_request: NextRequest, context: RouteContext) {
   try {
     const { id } = await context.params;
-    const guard = await requireBrandEdit(await brandOfComment(id));
+    const guard = await requireSession();
     if (guard.response) return guard.response;
     const session = guard.session;
     if (!session.user?.id) {

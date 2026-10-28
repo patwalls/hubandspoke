@@ -272,6 +272,8 @@ exports, uploads, enqueuing paid work (Descript, LLM drafts, renders).
    libraries, global syncs) use `requireAdmin()`.
 3. **Personal-only actions** (my notifications, what's-new seen, my email
    prefs, usage telemetry) need no gate.
+   **Comments** are also open to every signed-in user, on any brand (post,
+   edit/delete own, mark done) — they're collaboration, not edits.
 4. GET handlers are not gated — creators can view everything.
 5. Hiding a button is not the gate; the 403 is. But the UI must match: any
    new edit control calls `useCanEditBrand()` (or sits inside `<EditGate>`)

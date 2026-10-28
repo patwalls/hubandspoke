@@ -3,8 +3,7 @@ import { db } from "@/lib/db";
 import { contentComments, productionItems, users } from "@/lib/db/schema";
 import { and, asc, eq, isNotNull, sql } from "drizzle-orm";
 import { auth } from "@/lib/auth";
-import { requireBrandEdit } from "@/lib/auth-guards";
-import { brandOfProductionItem } from "@/lib/brand-access";
+import { requireSession } from "@/lib/auth-guards";
 import { enqueueNotification } from "@/lib/services/notifications";
 import { htmlToPlainText, sanitizeCommentHtml } from "@/lib/comments/sanitize";
 import { extractMentionUserIds } from "@/lib/comments/extract-mentions";
@@ -80,7 +79,8 @@ export async function GET(_request: NextRequest, context: RouteContext) {
 export async function POST(request: NextRequest, context: RouteContext) {
   try {
     const { id } = await context.params;
-    const guard = await requireBrandEdit(await brandOfProductionItem(id));
+    // Comments are open to every signed-in user, view-only or not.
+    const guard = await requireSession();
     if (guard.response) return guard.response;
     const session = guard.session;
     if (!session.user.id) {
