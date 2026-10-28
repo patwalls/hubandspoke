@@ -1,0 +1,3 @@
+ALTER TABLE "content_comments" ADD COLUMN "resolved_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "content_comments" ADD COLUMN "resolved_by_user_id" uuid;--> statement-breakpoint
+ALTER TABLE "content_comments" ADD CONSTRAINT "content_comments_resolved_by_user_id_users_id_fk" FOREIGN KEY ("resolved_by_user_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;

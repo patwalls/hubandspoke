@@ -8,6 +8,7 @@ import {
   type ContentEventPayload,
 } from "@/lib/db/schema";
 import { asc, eq } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { auth } from "@/lib/auth";
 
 interface RouteContext {
@@ -17,6 +18,8 @@ interface RouteContext {
 type CommentRow = typeof contentComments.$inferSelect;
 type EventRow = typeof contentEvents.$inferSelect;
 type UserRow = typeof users.$inferSelect;
+
+const resolvers = alias(users, "resolvers");
 
 function shapeUser(user: UserRow | null) {
   if (!user) return null;
@@ -32,6 +35,7 @@ function shapeComment(
   comment: CommentRow,
   user: UserRow | null,
   currentUserId: string | null,
+  resolvedByName: string | null,
 ) {
   return {
     kind: "comment" as const,
@@ -43,6 +47,8 @@ function shapeComment(
     authorName: comment.authorName,
     authorAvatarUrl: comment.authorAvatarUrl,
     atSeconds: comment.atSeconds,
+    resolvedAt: comment.resolvedAt ? comment.resolvedAt.toISOString() : null,
+    resolvedByName,
     isMine: !!currentUserId && comment.userId === currentUserId,
   };
 }
@@ -79,9 +85,14 @@ export async function GET(_request: NextRequest, context: RouteContext) {
 
     const [commentRows, eventRows] = await Promise.all([
       db
-        .select({ comment: contentComments, user: users })
+        .select({
+          comment: contentComments,
+          user: users,
+          resolvedByName: resolvers.name,
+        })
         .from(contentComments)
         .leftJoin(users, eq(users.id, contentComments.userId))
+        .leftJoin(resolvers, eq(resolvers.id, contentComments.resolvedByUserId))
         .where(eq(contentComments.contentItemId, id))
         .orderBy(asc(contentComments.createdAt)),
       db
@@ -93,7 +104,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     ]);
 
     const items = [
-      ...commentRows.map((r) => shapeComment(r.comment, r.user, currentUserId)),
+      ...commentRows.map((r) => shapeComment(r.comment, r.user, currentUserId, r.resolvedByName)),
       ...eventRows.map((r) => shapeEvent(r.event, r.user)),
     ].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 
