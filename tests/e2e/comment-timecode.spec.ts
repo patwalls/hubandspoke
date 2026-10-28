@@ -64,7 +64,15 @@ test("a comment pinned to the playhead seeks the player back there", async ({ pa
   const box = page.locator(".ProseMirror").last();
   await box.click();
   await page.keyboard.type("Cut the pause before he says the number");
+  // Wait for the real POST: the chip shows optimistically, and a reload
+  // before the (first-compile, slow in dev) route answers would abort it.
+  const posted = page.waitForResponse(
+    (r) => r.url().endsWith(`/api/production-items/${id}/comments`) && r.request().method() === "POST",
+  );
   await page.getByRole("button", { name: "Post comment" }).click();
+  const postRes = await posted;
+  expect(postRes.status()).toBe(201);
+  expect((await postRes.json()).comment.atSeconds).toBeCloseTo(12.4, 1);
 
   const chip = page.getByTestId("comment-timecode-chip");
   await expect(chip).toHaveText("0:12");
