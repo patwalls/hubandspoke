@@ -53,7 +53,9 @@ Optional focus: **$ARGUMENTS** (if set: that section + heartbeat only).
    spikes matter.
 3. **Heroku (2 calls)** — `hk ps hubandspoke` (web+worker `up`) + `hk builds hubandspoke`
    (latest build `status` ≠ `succeeded`, or a dyno that never came back after a build =
-   broken deploy pipeline, CRIT). **Every Heroku call in this lap is `hk …`**
+   broken deploy pipeline, CRIT; `hk build-log hubandspoke --failed --grep '^ !'` says why —
+   a buildpack download that broke (`curl: (92)`, "Unable to download Node.js") is transient,
+   anything else is the code's to fix). **Every Heroku call in this lap is `hk …`**
    (`~/.local/bin/hk`, the heroku broker, security S-042 2026-10-12): this lap holds NO
    Heroku credential — `~/.netrc` is unreadable here by design and `heroku …` itself
    fails; that is correct. Verbs: ps, builds, logs, restart, psql (read-only role),
