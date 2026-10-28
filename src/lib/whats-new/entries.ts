@@ -29,6 +29,16 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-10-28-resolve-notes",
+    shippedAt: "2026-10-28T17:00:00Z",
+    kind: "feature",
+    title: "Check off review notes when they're handled",
+    body:
+      "Every comment on a post now has Mark done. Notes pinned to a moment in the video show as \"2 open notes\" next to Activity until someone checks them off, " +
+      "so the editor can see what's left to fix and the reviewer can see what's been handled.",
+    screen: "comments:resolve",
+  },
+  {
     id: "2026-10-28-comment-at-playhead",
     shippedAt: "2026-10-28T12:45:00Z",
     kind: "feature",

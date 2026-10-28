@@ -41,6 +41,7 @@ import dynamic from "next/dynamic";
 import { isEditorEmpty } from "@/lib/comments/editor-empty";
 import { trackUsage } from "@/lib/usage/track";
 import { TimecodeChip, TimecodePin } from "./comment-timecode";
+import { isOpenNote, openNotesLabel } from "@/lib/comments/notes";
 
 // Dynamic: the editor drags the whole TipTap/ProseMirror bundle (~900 KB
 // chunk) — loading it lazily takes it off the detail page's critical path.
@@ -135,6 +136,9 @@ interface CommentItem {
   authorAvatarUrl: string | null;
   /** Review note pinned to this second of the video; null = plain comment. */
   atSeconds: number | null;
+  /** Marked done (review-notes M2); absent on a just-posted comment. */
+  resolvedAt?: string | null;
+  resolvedByName?: string | null;
   isMine: boolean;
 }
 
@@ -842,13 +846,45 @@ export function ContentActivity({ contentId, brand, refreshKey = 0, statusPalett
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = (await res.json()) as { comment: Omit<CommentItem, "kind"> };
-      const real: CommentItem = { kind: "comment", ...data.comment };
-      setItems((prev) => prev.map((c) => (c.id === editingId ? real : c)));
+      setItems((prev) =>
+        prev.map((c) =>
+          c.id === editingId && c.kind === "comment"
+            ? { ...c, ...data.comment, kind: "comment" }
+            : c,
+        ),
+      );
       cancelEdit();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to update comment");
     } finally {
       setSavingEdit(false);
+    }
+  };
+
+  const setResolved = async (c: CommentItem, resolved: boolean) => {
+    const patch = (cs: ActivityItem[], at: string | null, by: string | null) =>
+      cs.map((x) =>
+        x.kind === "comment" && x.id === c.id
+          ? { ...x, resolvedAt: at, resolvedByName: by }
+          : x,
+      );
+    setItems((cs) => patch(cs, resolved ? new Date().toISOString() : null, null));
+    try {
+      const res = await fetch(`/api/comments/${c.id}/resolve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resolved }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = (await res.json()) as {
+        resolvedAt: string | null;
+        resolvedByName: string | null;
+      };
+      setItems((cs) => patch(cs, data.resolvedAt, data.resolvedByName));
+      if (resolved) trackUsage("comments:resolve", brand);
+    } catch (e) {
+      setItems((cs) => patch(cs, c.resolvedAt ?? null, c.resolvedByName ?? null));
+      setError(e instanceof Error ? e.message : "Failed to update comment");
     }
   };
 
@@ -930,11 +966,32 @@ export function ContentActivity({ contentId, brand, refreshKey = 0, statusPalett
           item.payload.source.kind === "user",
       );
 
+  const openLabel = openNotesLabel(
+    items.filter((i): i is CommentItem => i.kind === "comment"),
+  );
+
   return (
     <div className="rounded-lg border border-border bg-card p-5 space-y-5">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold text-foreground">Activity</h2>
+          <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
+            Activity
+            {openLabel && (
+              <button
+                type="button"
+                data-testid="open-notes-count"
+                onClick={() =>
+                  document
+                    .querySelector("[data-open-note]")
+                    ?.scrollIntoView({ behavior: "smooth", block: "center" })
+                }
+                className="rounded-full bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 text-xs font-medium hover:bg-amber-100"
+                title="Notes pinned to a moment that nobody has marked done"
+              >
+                {openLabel}
+              </button>
+            )}
+          </h2>
           <p className="text-xs text-muted-foreground mt-0.5">
             Comments, content edits, and tool integrations as this post moves through review.
           </p>
@@ -992,6 +1049,7 @@ export function ContentActivity({ contentId, brand, refreshKey = 0, statusPalett
                   onCancelEdit={cancelEdit}
                   onSaveEdit={saveEdit}
                   onRemove={remove}
+                  onResolve={setResolved}
                 />
               );
             }
@@ -1059,6 +1117,7 @@ interface CommentRowProps {
   onCancelEdit: () => void;
   onSaveEdit: () => void;
   onRemove: (id: string) => void;
+  onResolve: (c: CommentItem, resolved: boolean) => void;
 }
 
 function CommentRow({
@@ -1072,11 +1131,19 @@ function CommentRow({
   onCancelEdit,
   onSaveEdit,
   onRemove,
+  onResolve,
 }: CommentRowProps) {
   const avatarUrl = c.user?.avatarUrl ?? c.authorAvatarUrl;
   const name = commentDisplayName(c);
+  const resolved = !!c.resolvedAt;
+  const open = isOpenNote(c);
+  const saved = !c.id.startsWith("temp-");
   return (
-    <div className="group flex gap-3">
+    <div
+      className="group flex gap-3"
+      data-testid="comment-row"
+      data-open-note={open ? "" : undefined}
+    >
       {avatarUrl ? (
         /* eslint-disable-next-line @next/next/no-img-element */
         <img
@@ -1096,21 +1163,55 @@ function CommentRow({
           {c.editedAt && (
             <span className="text-xs text-muted-foreground italic">(edited)</span>
           )}
-          {c.isMine && editingId !== c.id && (
-            <span className="ml-auto flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+          {resolved && (
+            <span
+              data-testid="comment-resolved"
+              className="inline-flex items-center gap-1 text-xs text-emerald-700"
+            >
+              <CheckIcon className="size-3" />
+              Done{c.resolvedByName ? ` · ${c.resolvedByName.split(" ")[0]}` : ""}
+            </span>
+          )}
+          {editingId !== c.id && saved && (
+            <span className="ml-auto flex items-center gap-2">
+              {c.isMine && (
+                <span className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button
+                    type="button"
+                    onClick={() => onStartEdit(c)}
+                    className="text-xs text-muted-foreground hover:text-foreground"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onRemove(c.id)}
+                    className="text-xs text-red-600 hover:text-red-700"
+                  >
+                    Delete
+                  </button>
+                </span>
+              )}
+              {/* An open pinned note shows its check all the time — it's a
+                  to-do. Plain comments and done notes offer it on hover. */}
               <button
                 type="button"
-                onClick={() => onStartEdit(c)}
-                className="text-xs text-muted-foreground hover:text-foreground"
+                onClick={() => onResolve(c, !resolved)}
+                className={cn(
+                  "inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-opacity",
+                  open
+                    ? "rounded-full border border-border px-2 py-0.5 hover:bg-accent"
+                    : "opacity-0 group-hover:opacity-100",
+                )}
               >
-                Edit
-              </button>
-              <button
-                type="button"
-                onClick={() => onRemove(c.id)}
-                className="text-xs text-red-600 hover:text-red-700"
-              >
-                Delete
+                {resolved ? (
+                  "Reopen"
+                ) : (
+                  <>
+                    <CheckIcon className="size-3" />
+                    Mark done
+                  </>
+                )}
               </button>
             </span>
           )}
@@ -1145,7 +1246,7 @@ function CommentRow({
             </div>
           </div>
         ) : c.atSeconds !== null && c.atSeconds !== undefined ? (
-          <div className="flex items-start">
+          <div className={cn("flex items-start", resolved && "opacity-60")}>
             <span className="pt-1 shrink-0">
               <TimecodeChip atSeconds={c.atSeconds} brand={brand} />
             </span>
@@ -1154,7 +1255,9 @@ function CommentRow({
             </div>
           </div>
         ) : (
-          <CommentBody body={c.body} />
+          <div className={cn(resolved && "opacity-60")}>
+            <CommentBody body={c.body} />
+          </div>
         )}
       </div>
     </div>

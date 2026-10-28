@@ -1948,6 +1948,12 @@ export const contentComments = pgTable(
     // Review note pinned to a moment of the item's video (seconds from the
     // start). Null = a plain comment. Set from the content page's player.
     atSeconds: real("at_seconds"),
+    // Marked done (review-notes M2): anyone on the post can check a note
+    // off once it's handled; null = still open.
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    resolvedByUserId: uuid("resolved_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
   },
   (table) => [
     index("idx_content_comments_item_created").on(
