@@ -70,4 +70,30 @@ describe("buildMyWorkDigest", () => {
     expect(d.html).toContain("&lt;b&gt;Hi&lt;/b&gt; &amp; bye");
     expect(d.subject).toBe("1 thing waiting on you — 1 on your turn");
   });
+  it("gives To review lines their wait and the three answers, and names the oldest", () => {
+    const now = new Date("2026-10-28T12:00:00Z");
+    const reviewSince = new Map([
+      ["old", new Date("2026-10-19T12:00:00Z")],
+      ["new", new Date("2026-10-28T09:00:00Z")],
+    ]);
+    const d = buildMyWorkDigest({
+      ...base,
+      now,
+      reviewSince,
+      yourTurn: [row("t1")],
+      toReview: [row("old", "Review"), row("new", "Review")],
+    })!;
+    expect(d.subject).toBe("3 things waiting on you — 1 on your turn, 2 to review (oldest 9 days)");
+    expect(d.top.map((t) => [t.row.id, t.why, t.answerable])).toEqual([
+      ["old", "To review, waiting 9 days", true],
+      ["new", "To review", true],
+      ["t1", "Assigned", false],
+    ]);
+    for (const a of ["approve", "posted", "pass"]) {
+      expect(d.html).toContain(`https://hs.test/my-work/answer/old?a=${a}`);
+      expect(d.text).toContain(`https://hs.test/my-work/answer/old?a=${a}`);
+    }
+    // Your-turn lines don't get answer links.
+    expect(d.html).not.toContain("/my-work/answer/t1");
+  });
 });

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { signIn } from "next-auth/react";
 import Link from "next/link";
+import { safeNext } from "@/lib/safe-next";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -24,7 +25,7 @@ export default function LoginPage() {
       setError("Invalid email or password");
       setLoading(false);
     } else {
-      window.location.href = "/";
+      window.location.href = safeNext(new URLSearchParams(window.location.search).get("next"));
     }
   }
 

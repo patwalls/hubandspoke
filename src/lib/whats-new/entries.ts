@@ -29,6 +29,18 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-10-28-answer-from-email",
+    shippedAt: "2026-10-28T20:00:00Z",
+    kind: "feature",
+    title: "Answer a review straight from the morning email",
+    body:
+      "Posts waiting on your review now show how long they've waited in the morning email, with three buttons under each: Approve, Already posted and Not this one. " +
+      "Tap one, check the post, and confirm. No digging through the app, and a post you've already posted or don't want stops waiting on you.",
+    href: "/my-work/email",
+    screen: "/my-work/answer/[id]",
+    audience: { flag: "myWorkDigest" },
+  },
+  {
     id: "2026-10-28-editor-review-notes",
     shippedAt: "2026-10-28T19:00:00Z",
     kind: "feature",

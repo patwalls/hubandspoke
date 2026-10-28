@@ -11,8 +11,13 @@
  * - One button to /my-work, where every row can be acted on.
  * - Each line names the platform ("Instagram Reel"): cross-posts share their
  *   post's title, so without it two lines read the same.
+ * - To review lines say how long the post has waited, the subject names the
+ *   oldest, and each carries Approve / Already posted / Not this one links to
+ *   /my-work/answer/[id] (rules in ./answer.ts), so a reviewer who only reads
+ *   the email can clear a post in two taps.
  */
 import { postTypeDisplay } from "@/lib/platforms";
+import { ANSWERS, waited } from "./answer";
 import type { RowNews } from "./news";
 
 export interface DigestRow {
@@ -28,6 +33,9 @@ export interface DigestInput {
   yourTurn: DigestRow[];
   toReview: DigestRow[];
   news: ReadonlyMap<string, RowNews>;
+  /** When each To review row went into Review (falls back to nothing shown). */
+  reviewSince?: ReadonlyMap<string, Date>;
+  now?: Date;
   /** App origin, no trailing slash. */
   baseUrl: string;
 }
@@ -36,8 +44,8 @@ export interface DigestEmail {
   subject: string;
   text: string;
   html: string;
-  /** The rows the email lists, in order. */
-  top: { row: DigestRow; why: string }[];
+  /** The rows the email lists, in order. `answerable` = a To review row. */
+  top: { row: DigestRow; why: string; answerable: boolean }[];
 }
 
 export const DIGEST_TOP = 5;
@@ -46,15 +54,25 @@ function plural(n: number, one: string, many: string) {
   return `${n} ${n === 1 ? one : many}`;
 }
 
-function why(row: DigestRow, section: "turn" | "review", news: RowNews | undefined): string {
+function why(
+  row: DigestRow,
+  section: "turn" | "review",
+  news: RowNews | undefined,
+  wait: string | null,
+): string {
   if (news?.sentBack) return `Sent back by ${news.sentBack.by}`;
   if (news?.isNew && news.comment) return `New comment from ${news.comment.author}`;
   if (news?.handedBy) return `Handed to you by ${news.handedBy.by}`;
-  return section === "review" ? "To review" : row.status ?? "Your turn";
+  if (section === "review") return wait ? `To review, waiting ${wait}` : "To review";
+  return row.status ?? "Your turn";
 }
 
 export function buildMyWorkDigest(input: DigestInput): DigestEmail | null {
-  const { yourTurn, toReview, news, baseUrl } = input;
+  const { yourTurn, toReview, news, baseUrl, reviewSince, now = new Date() } = input;
+  const waitOf = (r: DigestRow) => {
+    const since = reviewSince?.get(r.id);
+    return since ? waited(since, now) : null;
+  };
   const total = yourTurn.length + toReview.length;
   if (total === 0) return null;
 
@@ -71,17 +89,29 @@ export function buildMyWorkDigest(input: DigestInput): DigestEmail | null {
     .map((t, i) => ({ ...t, i }))
     .sort((a, b) => urgent(a.row) - urgent(b.row) || a.i - b.i)
     .slice(0, DIGEST_TOP)
-    .map(({ row, section }) => ({ row, why: why(row, section, news.get(row.id)) }));
+    .map(({ row, section }) => ({
+      row,
+      why: why(row, section, news.get(row.id), section === "review" ? waitOf(row) : null),
+      answerable: section === "review",
+    }));
 
+  const oldest = toReview.reduce<Date | null>((min, r) => {
+    const since = reviewSince?.get(r.id);
+    return since && (!min || since < min) ? since : min;
+  }, null);
+  const oldestWait = oldest ? waited(oldest, now) : null;
   const parts = [
     yourTurn.length ? plural(yourTurn.length, "on your turn", "on your turn") : null,
-    toReview.length ? `${toReview.length} to review` : null,
+    toReview.length
+      ? `${toReview.length} to review${oldestWait ? ` (oldest ${oldestWait})` : ""}`
+      : null,
   ].filter(Boolean);
   const subject = `${plural(total, "thing", "things")} waiting on you — ${parts.join(", ")}`;
   const greeting = input.firstName ? `Morning ${input.firstName},` : "Morning,";
   const myWorkUrl = `${baseUrl}/my-work`;
   const itemUrl = (r: DigestRow) => `${baseUrl}/${r.brand}/content/${r.id}`;
   const more = total - top.length;
+  const answerUrl = (r: DigestRow, kind: string) => `${baseUrl}/my-work/answer/${r.id}?a=${kind}`;
   // "starter-story · Instagram Reel" — brand, then the platform when known.
   const where = (r: DigestRow) =>
     [r.brand, postTypeDisplay(r.postType).label].filter(Boolean).join(" · ");
@@ -91,7 +121,11 @@ export function buildMyWorkDigest(input: DigestInput): DigestEmail | null {
     "",
     `${subject}.`,
     "",
-    ...top.map(({ row, why }) => `- ${row.title || "(Untitled)"} (${where(row)}) — ${why}\n  ${itemUrl(row)}`),
+    ...top.map(
+      ({ row, why, answerable }) =>
+        `- ${row.title || "(Untitled)"} (${where(row)}) — ${why}\n  ${itemUrl(row)}` +
+        (answerable ? ANSWERS.map((a) => `\n  ${a.label}: ${answerUrl(row, a.kind)}`).join("") : ""),
+    ),
     ...(more > 0 ? ["", `…and ${more} more.`] : []),
     "",
     `Open My Work: ${myWorkUrl}`,
@@ -102,11 +136,19 @@ export function buildMyWorkDigest(input: DigestInput): DigestEmail | null {
 
   const li = top
     .map(
-      ({ row, why }) => `
+      ({ row, why, answerable }) => `
       <tr>
         <td style="padding:10px 0;border-bottom:1px solid #eee;">
           <a href="${itemUrl(row)}" style="color:#111;font-weight:500;text-decoration:none;">${escapeHtml(row.title || "(Untitled)")}</a>
-          <div style="color:#666;font-size:12px;margin-top:2px;">${escapeHtml(where(row))} · ${escapeHtml(why)}</div>
+          <div style="color:#666;font-size:12px;margin-top:2px;">${escapeHtml(where(row))} · ${escapeHtml(why)}</div>${
+            answerable
+              ? `
+          <div style="margin-top:8px;">${ANSWERS.map(
+            (a) =>
+              `<a href="${answerUrl(row, a.kind)}" style="display:inline-block;margin:0 6px 4px 0;padding:5px 10px;border:1px solid ${a.kind === "approve" ? "#16a34a" : "#ccc"};border-radius:6px;color:${a.kind === "approve" ? "#16a34a" : "#333"};font-size:12px;text-decoration:none;">${a.label}</a>`,
+          ).join("")}</div>`
+              : ""
+          }
         </td>
       </tr>`,
     )

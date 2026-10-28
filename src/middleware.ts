@@ -47,8 +47,11 @@ export default auth((req) => {
   if (pathname.startsWith("/api")) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  // Remember the page so the login lands back on it (src/lib/safe-next.ts).
   const url = req.nextUrl.clone();
   url.pathname = "/login";
+  url.search = "";
+  if (pathname !== "/") url.searchParams.set("next", pathname + req.nextUrl.search);
   return NextResponse.redirect(url);
 });
 

@@ -909,6 +909,12 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
 - **Order and reasons:** send-backs, then new comments and posts handed to
   you since your last action ("Handed to you by …", my-day M9), then To
   review oldest first, then Your turn.
+- **Answer links (2026-10-28):** To review lines say how long they've waited
+  (`getStatusSinceMany`, falling back to `updatedAt`) and carry Approve /
+  Already posted / Not this one links to `/my-work/answer/[id]?a=…`. The
+  links only open a page; the answer saves on the tap there, so mail
+  scanners that follow links change nothing. Rules in
+  `src/lib/my-work/answer.ts`.
 
 ### `daily-scorecard-email` — daily publish-count scorecard
 - **Trigger:** cron `0 13 * * *` (13:00 UTC daily). 9am EDT during DST,
