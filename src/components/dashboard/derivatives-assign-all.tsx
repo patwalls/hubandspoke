@@ -7,6 +7,7 @@ import { UserCombobox } from "./user-combobox";
 import { trackUsage } from "@/lib/usage/track";
 import { inBatches } from "@/lib/my-work/bulk";
 import { ASSIGN_ALL_TO } from "@/lib/derivatives/assign-all";
+import { useCanEditBrand } from "@/components/brand-access";
 
 // The Derivatives tab, right after a format spawns its posts: pick one editor
 // and move every post still at Idea to Assigned in one go, instead of opening
@@ -34,6 +35,7 @@ export function DerivativesAssignAll({
 }) {
   const [editorUserId, setEditorUserId] = useState("");
   const [busy, setBusy] = useState(false);
+  const canEdit = useCanEditBrand(brand);
   const n = ids.length;
 
   async function assign() {
@@ -64,7 +66,8 @@ export function DerivativesAssignAll({
     }
   }
 
-  if (n === 0) return null;
+  // Bulk-assign is purely an edit action — nothing to show view-only users.
+  if (n === 0 || !canEdit) return null;
 
   return (
     <div

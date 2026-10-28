@@ -15,6 +15,9 @@ import { cn } from "@/lib/utils";
 import { AccountBadge } from "@/components/ui/account-badge";
 import { SourceBadge } from "@/components/ui/source-badge";
 import type { ProductionItem } from "@/types";
+import { useEditableBrands } from "@/components/brand-access";
+
+const VIEW_ONLY_TITLE = "View only — you don't have edit access to this brand";
 
 interface ClipIdeaSummary {
   id: string;
@@ -72,6 +75,7 @@ export function IdeaQueueTable({
   onMutate,
   formatNameToId,
 }: IdeaQueueTableProps) {
+  const editable = useEditableBrands();
   const [users, setUsers] = useState<AssignableUser[]>([]);
   const [sortKey, setSortKey] = useState<SortKey | null>("pillarDate");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
@@ -202,9 +206,15 @@ export function IdeaQueueTable({
     setSelected(new Set());
   }
 
+  // Bulk kill only when every selected row is on a brand the user can edit
+  // (rows mix brands on /all).
+  const canKillSelected =
+    editable === "all" ||
+    items.every((i) => !selected.has(i.id) || editable.includes(i.brand));
+
   async function bulkKill(reason: string) {
     const ids = Array.from(selected);
-    if (ids.length === 0) return;
+    if (ids.length === 0 || !canKillSelected) return;
     setBulkKilling(true);
     try {
       const results = await Promise.allSettled(
@@ -275,7 +285,8 @@ export function IdeaQueueTable({
             <button
               type="button"
               onClick={() => setBulkKillOpen(true)}
-              disabled={bulkKilling}
+              disabled={bulkKilling || !canKillSelected}
+              title={canKillSelected ? undefined : VIEW_ONLY_TITLE}
               className="inline-flex items-center rounded-full bg-red-600 px-3 h-7 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
             >
               Kill {selected.size}
@@ -745,6 +756,7 @@ function IdeaQueueRow({
             ideaId={item.sourceClipIdeaId}
             onDone={onDone}
             brand={brand}
+            itemBrand={item.brand}
             nav={
               nav
                 ? {

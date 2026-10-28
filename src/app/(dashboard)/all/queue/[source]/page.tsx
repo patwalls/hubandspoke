@@ -6,6 +6,7 @@ import {
   type QueueSource,
 } from "@/components/dashboard/queue-view";
 import { auth } from "@/lib/auth";
+import { isAdminNow } from "@/lib/brand-access";
 
 interface AllQueueSourcePageProps {
   params: Promise<{ source: string }>;
@@ -62,7 +63,7 @@ export default async function AllQueueSourcePage({
         brand="all"
         initialSource={internalSource}
         clippableFormats={[]}
-        isAdmin={session?.user?.role === "admin"}
+        isAdmin={await isAdminNow(session)}
       />
     </Suspense>
   );

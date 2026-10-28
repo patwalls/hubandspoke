@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { usesCtaOffer } from "@/lib/cta-offer-brands";
+import { useCanEditBrand } from "@/components/brand-access";
 import {
   DownloadIcon,
   UploadIcon,
@@ -28,6 +29,8 @@ interface Props {
   initialCtaFallbackUrl: string | null;
 }
 
+const VIEW_ONLY_TITLE = "View only — you don't have edit access to this brand";
+
 function formatBytes(bytes: number | null) {
   if (!bytes) return null;
   if (bytes < 1024) return `${bytes} B`;
@@ -43,6 +46,8 @@ export function BrandAssetsSettings({
   initialCtaFallbackUrl,
 }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const canEdit = useCanEditBrand(brand);
+  const viewOnlyTitle = canEdit ? undefined : VIEW_ONLY_TITLE;
   const [watermarks, setWatermarks] = useState<WatermarkFile[]>(initialWatermarks);
   const [uploadState, setUploadState] = useState<"idle" | "uploading" | "error">("idle");
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -196,7 +201,8 @@ export function BrandAssetsSettings({
             variant="outline"
             size="sm"
             onClick={() => fileInputRef.current?.click()}
-            disabled={uploadState === "uploading"}
+            disabled={uploadState === "uploading" || !canEdit}
+            title={viewOnlyTitle}
           >
             {uploadState === "uploading" ? (
               <Loader2Icon className="size-3.5 animate-spin mr-1.5" />
@@ -237,7 +243,8 @@ export function BrandAssetsSettings({
                   size="sm"
                   className="text-destructive hover:text-destructive"
                   onClick={() => handleDelete(wm.id)}
-                  disabled={deletingId === wm.id}
+                  disabled={deletingId === wm.id || !canEdit}
+                  title={viewOnlyTitle}
                 >
                   {deletingId === wm.id ? (
                     <Loader2Icon className="size-3.5 animate-spin" />
@@ -252,7 +259,8 @@ export function BrandAssetsSettings({
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            disabled={uploadState === "uploading"}
+            disabled={uploadState === "uploading" || !canEdit}
+            title={viewOnlyTitle}
             className="w-full flex flex-col items-center gap-2 p-8 rounded-md border-2 border-dashed text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {uploadState === "uploading" ? (
@@ -280,6 +288,7 @@ export function BrandAssetsSettings({
           accept=".zip,.png,.jpg,.jpeg,.gif,.webp,.svg,application/zip,application/x-zip-compressed,image/*"
           className="hidden"
           onChange={handleFileChange}
+          disabled={!canEdit}
         />
       </section>
 
@@ -298,13 +307,15 @@ export function BrandAssetsSettings({
           onChange={(e) => setGuidelines(e.target.value)}
           placeholder="Paste links and notes here, e.g.&#10;Brand media kit: https://…&#10;Preferred font: Inter&#10;Color palette: #1a1a1a / #ffffff"
           className="min-h-40 font-mono text-sm resize-y"
+          disabled={!canEdit}
         />
 
         <div className="flex items-center gap-3">
           <Button
             size="sm"
             onClick={handleSaveGuidelines}
-            disabled={saveState === "saving"}
+            disabled={saveState === "saving" || !canEdit}
+            title={viewOnlyTitle}
           >
             {saveState === "saving" && (
               <Loader2Icon className="size-3.5 animate-spin mr-1.5" />
@@ -338,13 +349,15 @@ export function BrandAssetsSettings({
             onChange={(e) => setCtaFallbackUrl(e.target.value)}
             placeholder="https://offers.hubspot.com/…"
             className="text-sm"
+            disabled={!canEdit}
           />
 
           <div className="flex items-center gap-3">
             <Button
               size="sm"
               onClick={handleSaveCtaFallback}
-              disabled={ctaSaveState === "saving"}
+              disabled={ctaSaveState === "saving" || !canEdit}
+              title={viewOnlyTitle}
             >
               {ctaSaveState === "saving" && (
                 <Loader2Icon className="size-3.5 animate-spin mr-1.5" />

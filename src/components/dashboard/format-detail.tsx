@@ -56,6 +56,7 @@ import {
 import type { PostType } from "@/lib/platform-field-schemas";
 import { applyStarterTemplate } from "@/lib/format-skill";
 import { recordVisit } from "@/lib/hooks/use-recent-items";
+import { useCanEditBrand } from "@/components/brand-access";
 import { FormatTemplatesSection } from "@/components/design-editor/format-templates-section";
 import { NewsletterTemplateSection } from "@/components/dashboard/newsletter-template-section";
 import { FormatStatusBadge } from "./format-status-badge";
@@ -242,7 +243,9 @@ type FormatTab = (typeof FORMAT_TAB_VALUES)[number];
 
 /** Skills longer than this show in a scrollable box with an Expand button. */
 const SKILL_COLLAPSE_CHARS = 4000;
+const VIEW_ONLY_TITLE = "View only — you don't have edit access to this brand";
 export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailProps) {
+  const canEdit = useCanEditBrand(brand);
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -1213,6 +1216,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
               Save failed
             </span>
           )}
+          {canEdit && (
           <DropdownMenu>
             <DropdownMenuTrigger
               className={buttonVariants({ variant: "outline", size: "sm" })}
@@ -1232,6 +1236,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          )}
         </div>
       </div>
 
@@ -1251,6 +1256,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
               }
             }}
             placeholder="(unnamed)"
+            readOnly={!canEdit}
             className="text-3xl sm:text-4xl font-bold tracking-tight h-auto py-1 px-2 border-0 bg-transparent shadow-none focus-visible:ring-1 focus-visible:ring-ring hover:bg-muted/30 rounded-sm flex-1 min-w-0"
             aria-label="Format name"
           />
@@ -1351,7 +1357,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
           <PropertyRowGroup>
             <PropertyRow label="Parent format" tooltip="Derivative formats inherit the pillar's audience and analytics context. Pillar formats have no parent — leave blank if this is a top-level format.">
             <Popover open={parentPopoverOpen} onOpenChange={setParentPopoverOpen}>
-              <PopoverTrigger className={`${PROPERTY_TRIGGER_CLASS} w-full flex items-center justify-between gap-2 cursor-pointer text-left`}>
+              <PopoverTrigger className={`${PROPERTY_TRIGGER_CLASS} w-full flex items-center justify-between gap-2 cursor-pointer text-left`} disabled={!canEdit} title={canEdit ? undefined : VIEW_ONLY_TITLE}>
                 {selectedParent ? (
                   <span className="flex items-center gap-2 truncate">
                     <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-50 text-purple-700 shrink-0">
@@ -1416,7 +1422,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
             </PropertyRow>
             <PropertyRow label="Accounts" tooltip="Which brand account and post type this format publishes to. Each entry maps to one (account, post type) pair — e.g. SS + instagram_reel. Used to route items to the right publishing channel and filter the content table.">
             <Popover open={channelsPopoverOpen} onOpenChange={setChannelsPopoverOpen}>
-              <PopoverTrigger className={`${PROPERTY_TRIGGER_CLASS} w-full flex min-h-8 items-center justify-between gap-2 cursor-pointer text-left`}>
+              <PopoverTrigger className={`${PROPERTY_TRIGGER_CLASS} w-full flex min-h-8 items-center justify-between gap-2 cursor-pointer text-left`} disabled={!canEdit} title={canEdit ? undefined : VIEW_ONLY_TITLE}>
                 {selections.length === 0 ? (
                   <span className="text-muted-foreground">Select accounts…</span>
                 ) : (
@@ -1505,12 +1511,13 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
                 if (next !== saved) void persistField({ viewThreshold: next });
               }}
               placeholder="e.g. 50000"
+              readOnly={!canEdit}
               className={PROPERTY_INPUT_CLASS}
             />
             </PropertyRow>
             <PropertyRow label="Editor" tooltip="The person responsible for producing content in this format. Used to filter the content board by editor.">
             <Popover open={editorPopoverOpen} onOpenChange={setEditorPopoverOpen}>
-              <PopoverTrigger className={`${PROPERTY_TRIGGER_CLASS} w-full flex items-center justify-between gap-2 cursor-pointer text-left`}>
+              <PopoverTrigger className={`${PROPERTY_TRIGGER_CLASS} w-full flex items-center justify-between gap-2 cursor-pointer text-left`} disabled={!canEdit} title={canEdit ? undefined : VIEW_ONLY_TITLE}>
                 {editor ? (
                   <span className="flex items-center gap-2 truncate">
                     <span className="w-6 h-6 rounded-full bg-green-100 text-green-700 flex items-center justify-center text-xs font-medium shrink-0">
@@ -1581,6 +1588,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
               }>
               <select
                 id="cta-strategy"
+                disabled={!canEdit}
                 aria-label="CTA offer"
                 value={ctaStrategy || defaultCtaStrategy(data?.format?.brand)}
                 onChange={(e) => {
@@ -1614,6 +1622,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
                     void persistField({ ctaFixedUrl: ctaFixedUrl.trim() || null });
                   }}
                   placeholder="https://offers.hubspot.com/…"
+                  readOnly={!canEdit}
                   className={PROPERTY_INPUT_CLASS}
                 />
                 </PropertyRow>
@@ -1638,7 +1647,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
                   </span>
                 </div>
                 <div className="flex items-center gap-3">
-                  {preTemplateInstructions !== null && (
+                  {canEdit && preTemplateInstructions !== null && (
                     <button
                       type="button"
                       onClick={() => {
@@ -1651,6 +1660,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
                       Revert
                     </button>
                   )}
+                  {canEdit && (
                   <button
                     type="button"
                     onClick={() => {
@@ -1663,6 +1673,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
                   >
                     Add template
                   </button>
+                  )}
                 </div>
               </div>
               <Textarea
@@ -1675,6 +1686,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
                   }
                 }}
                 rows={12}
+                readOnly={!canEdit}
                 placeholder="Teach Claude this format: what it is, why it works, how to pick the moment, what to avoid. Click &quot;Add template&quot; for the structure."
                 className={cn("font-mono text-xs", !skillExpanded && instructions.length > SKILL_COLLAPSE_CHARS && "max-h-80 overflow-y-auto")}
               />
@@ -1707,6 +1719,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
                     setIsClippableFormat(next);
                     void persistField({ isClippableFormat: next });
                   }}
+                  disabled={!canEdit}
                   className="mt-0.5"
                 />
                 <span className="text-sm">
@@ -1724,6 +1737,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
                     </Label>
                     <select
                       id="clip-target-post-type"
+                disabled={!canEdit}
                       value={clipTargetPostType}
                       onChange={(e) => {
                         // The brand's default choice is stored as null.
@@ -1770,6 +1784,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
                         });
                       }}
                       placeholder='Instagram Reel, X, YouTube Shorts'
+                      readOnly={!canEdit}
                       className={cn(PROPERTY_INPUT_CLASS, "h-8 text-xs")}
                     />
                     <p className="text-[11px] text-muted-foreground">
@@ -1782,6 +1797,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
                     </Label>
                     <select
                       id="clip-aspect-ratio"
+                disabled={!canEdit}
                       value={clipAspectRatio}
                       onChange={(e) => {
                         // The brand's default choice is stored as null.
@@ -1815,6 +1831,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
                     setLabelsAsOriginal(next);
                     void persistField({ labelsAsOriginal: next });
                   }}
+                  disabled={!canEdit}
                   className="mt-0.5"
                 />
                 <span className="text-sm">
@@ -1843,7 +1860,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
                 }
               }}
             >
-              <PopoverTrigger className={`${PROPERTY_TRIGGER_CLASS} w-full flex items-center justify-between gap-2 cursor-pointer text-left`}>
+              <PopoverTrigger className={`${PROPERTY_TRIGGER_CLASS} w-full flex items-center justify-between gap-2 cursor-pointer text-left`} disabled={!canEdit} title={canEdit ? undefined : VIEW_ONLY_TITLE}>
                 {(() => {
                   const selected = layoutPacks.find((p) => p.id === descriptLayoutPackId);
                   return selected ? (
@@ -1963,13 +1980,15 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
               Direct children in the repurpose tree. When a post in this format hits one of these children&apos;s thresholds, a repurpose task is created for that child.
             </p>
           </div>
+          {canEdit && (
           <Button size="sm" onClick={openAddChild}>
             + Add
           </Button>
+          )}
         </div>
         {children.length === 0 ? (
           <div className="px-5 py-12 text-center text-sm text-muted-foreground">
-            No derivatives yet. Click <span className="font-medium text-foreground">+ Add</span> to create one.
+            No derivatives yet.{canEdit && <> Click <span className="font-medium text-foreground">+ Add</span> to create one.</>}
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -2051,6 +2070,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
                           <DropdownMenuItem onClick={() => router.push(`/${brand}/formats/${f.id}`)}>
                             Edit derivative
                           </DropdownMenuItem>
+                          {canEdit && (
                           <DropdownMenuItem
                             onClick={async () => {
                               if (!confirm(`Unlink "${f.name}" from this parent? It will become a root format.`)) return;
@@ -2060,6 +2080,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
                           >
                             Unlink (promote to root)
                           </DropdownMenuItem>
+                          )}
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </td>
@@ -2082,10 +2103,10 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
             </h2>
             <p className="text-xs text-muted-foreground mt-0.5">
               All posts in this format. Click a column header to sort.
-              Tick rows + Clear format to fix mis-categorized posts in bulk.
+              {canEdit && "Tick rows + Clear format to fix mis-categorized posts in bulk."}
             </p>
           </div>
-          {selectedItemIds.size > 0 && (
+          {canEdit && selectedItemIds.size > 0 && (
             <div className="flex items-center gap-3 shrink-0">
               <span className="text-xs text-muted-foreground tabular-nums">
                 {selectedItemIds.size} selected
@@ -2148,7 +2169,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
                               return next;
                             });
                           }}
-                          disabled={bulkClearing}
+                          disabled={bulkClearing || !canEdit}
                           className="size-4 cursor-pointer rounded border-input accent-red-600 disabled:cursor-not-allowed"
                         />
                       );
@@ -2186,7 +2207,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
                             return next;
                           });
                         }}
-                        disabled={bulkClearing}
+                        disabled={bulkClearing || !canEdit}
                         className="size-4 cursor-pointer rounded border-input accent-red-600 disabled:cursor-not-allowed"
                       />
                     </td>
@@ -2259,6 +2280,8 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
                       {item.leads != null ? formatCompact(item.leads) : "—"}
                     </td>
                     <td className="px-3 py-2.5 text-right">
+                      {/* View-only users only get the "Open …" links — no menu when there are none. */}
+                      {(canEdit || (isPillar && item.descriptProjectUrl) || item.publishedLink) && (
                       <DropdownMenu>
                         <DropdownMenuTrigger
                           className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
@@ -2267,7 +2290,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
                           <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-48">
-                          {isPillar && !item.descriptProjectUrl && (
+                          {canEdit && isPillar && !item.descriptProjectUrl && (
                             <DropdownMenuItem onClick={() => openDescriptModal(item)}>
                               Add to Descript
                             </DropdownMenuItem>
@@ -2279,14 +2302,16 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
                               >
                                 Open in Descript
                               </DropdownMenuItem>
-                              {descriptClipTargets.length > 0 && (
+                              {canEdit && descriptClipTargets.length > 0 && (
                                 <DropdownMenuItem onClick={() => openClipModal(item)}>
                                   Clip out…
                                 </DropdownMenuItem>
                               )}
+                              {canEdit && (
                               <DropdownMenuItem onClick={() => openDescriptModal(item)}>
                                 Re-import to Descript
                               </DropdownMenuItem>
+                              )}
                             </>
                           )}
                           {item.publishedLink && (
@@ -2296,13 +2321,16 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
                               Open original
                             </DropdownMenuItem>
                           )}
+                          {canEdit && (
                           <DropdownMenuItem
                             onClick={() => setUpdateFormatItemId(item.id)}
                           >
                             Update format…
                           </DropdownMenuItem>
+                          )}
                         </DropdownMenuContent>
                       </DropdownMenu>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -2393,7 +2421,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
                     <Button variant="outline" onClick={closeClipModal} disabled={clipLoading}>
                       Cancel
                     </Button>
-                    <Button onClick={submitClip} disabled={clipLoading || !clipTargetId}>
+                    <Button onClick={submitClip} disabled={clipLoading || !clipTargetId || !canEdit}>
                       {clipLoading ? "Clipping…" : "Clip out"}
                     </Button>
                   </div>
@@ -2595,7 +2623,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
               <Button variant="outline" onClick={() => setAddChildOpen(false)} disabled={savingChild}>
                 Cancel
               </Button>
-              <Button onClick={submitAddChild} disabled={savingChild || !childName.trim()}>
+              <Button onClick={submitAddChild} disabled={savingChild || !childName.trim() || !canEdit}>
                 {savingChild ? "Creating…" : "Create derivative"}
               </Button>
             </div>
@@ -2741,7 +2769,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
                     {s3KeyForRetry && descriptError ? (
                       <Button
                         onClick={retryDescriptImport}
-                        disabled={descriptStage === "creating"}
+                        disabled={descriptStage === "creating" || !canEdit}
                       >
                         {descriptStage === "creating" ? "Retrying…" : "Retry Descript import"}
                       </Button>
@@ -2751,6 +2779,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
                           descriptMode === "upload" ? submitDescriptUpload : submitDescriptUrl
                         }
                         disabled={
+                          !canEdit ||
                           descriptStage === "creating" ||
                           descriptStage === "uploading" ||
                           (descriptMode === "upload" ? !descriptFile : !descriptUrl.trim())
@@ -2797,7 +2826,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
               <CommandGroup>
                 <CommandItem
                   value="__clear__"
-                  disabled={updateFormatSaving}
+                  disabled={updateFormatSaving || !canEdit}
                   onSelect={() =>
                     updateFormatItemId &&
                     changeItemFormat(updateFormatItemId, null)
@@ -2814,7 +2843,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
                     <CommandItem
                       key={f.id}
                       value={f.name}
-                      disabled={updateFormatSaving}
+                      disabled={updateFormatSaving || !canEdit}
                       onSelect={() =>
                         updateFormatItemId &&
                         changeItemFormat(updateFormatItemId, f.name)
@@ -2856,7 +2885,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
             <Button
               variant="destructive"
               onClick={() => void confirmDelete()}
-              disabled={deleting}
+              disabled={deleting || !canEdit}
             >
               {deleting ? "Deleting…" : "Yes, delete everything"}
             </Button>

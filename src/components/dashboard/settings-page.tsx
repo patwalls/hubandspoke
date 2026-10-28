@@ -13,6 +13,9 @@ import {
   SelectTrigger,
 } from "@/components/ui/select";
 import { UserChip } from "./user-chip";
+import { useCanEditBrand } from "@/components/brand-access";
+
+const VIEW_ONLY_TITLE = "View only — you don't have edit access to this brand";
 
 interface SettingsPageContentProps {
   brand: string;
@@ -57,6 +60,8 @@ export function SettingsPageContent({
   // Cross-post teaser is only shown in the legacy all-sections layout; the
   // split layout has a dedicated Cross posting sub-page.
   const showCrossPostTeaser = section == null;
+  const canEdit = useCanEditBrand(brand);
+  const viewOnlyTitle = canEdit ? undefined : VIEW_ONLY_TITLE;
   const [weeklyGoal, setWeeklyGoal] = useState<string>("");
   const [savedGoal, setSavedGoal] = useState<number | null>(null);
   const [weeklyViewsGoal, setWeeklyViewsGoal] = useState<string>("");
@@ -321,7 +326,7 @@ export function SettingsPageContent({
               setWeeklyGoal(e.target.value);
               setStatus(null);
             }}
-            disabled={loading || saving}
+            disabled={loading || saving || !canEdit}
             className="max-w-[200px]"
           />
           <p className="text-xs text-muted-foreground">
@@ -330,14 +335,19 @@ export function SettingsPageContent({
         </div>
 
         <div className="flex items-center gap-2 pt-1">
-          <Button type="submit" disabled={saving || loading || !dirty}>
+          <Button
+            type="submit"
+            disabled={saving || loading || !dirty || !canEdit}
+            title={viewOnlyTitle}
+          >
             {saving ? "Saving..." : "Save"}
           </Button>
           <Button
             type="button"
             variant="outline"
             onClick={handleClear}
-            disabled={saving || loading || savedGoal == null}
+            disabled={saving || loading || savedGoal == null || !canEdit}
+            title={viewOnlyTitle}
           >
             Clear goal
           </Button>
@@ -382,7 +392,7 @@ export function SettingsPageContent({
               setWeeklyViewsGoal(e.target.value);
               setViewsStatus(null);
             }}
-            disabled={loading || viewsSaving}
+            disabled={loading || viewsSaving || !canEdit}
             className="max-w-[200px]"
           />
           <p className="text-xs text-muted-foreground">
@@ -391,14 +401,19 @@ export function SettingsPageContent({
         </div>
 
         <div className="flex items-center gap-2 pt-1">
-          <Button type="submit" disabled={viewsSaving || loading || !viewsDirty}>
+          <Button
+            type="submit"
+            disabled={viewsSaving || loading || !viewsDirty || !canEdit}
+            title={viewOnlyTitle}
+          >
             {viewsSaving ? "Saving..." : "Save"}
           </Button>
           <Button
             type="button"
             variant="outline"
             onClick={handleViewsClear}
-            disabled={viewsSaving || loading || savedViewsGoal == null}
+            disabled={viewsSaving || loading || savedViewsGoal == null || !canEdit}
+            title={viewOnlyTitle}
           >
             Clear goal
           </Button>
@@ -431,7 +446,7 @@ export function SettingsPageContent({
           <Select
             value={String(weekStartDay)}
             onValueChange={(v) => void persistWeekStart(Number(v))}
-            disabled={loading}
+            disabled={loading || !canEdit}
           >
             <SelectTrigger>
               {WEEK_DAYS.find((d) => d.value === weekStartDay)?.label ?? "Sunday"}
@@ -474,7 +489,7 @@ export function SettingsPageContent({
               const next = v === UNASSIGNED ? null : v;
               void persistAssignee("defaultEditorUserId", next);
             }}
-            disabled={loading}
+            disabled={loading || !canEdit}
           >
             <SelectTrigger className="[&>span]:flex [&>span]:items-center [&>span]:min-w-0 [&>span]:flex-1">
               {editorUser ? (

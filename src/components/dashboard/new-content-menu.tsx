@@ -36,6 +36,7 @@ import { cn } from "@/lib/utils";
 import { NEW_POST_KINDS, type NewPostKind } from "@/lib/new-post-kinds";
 import { PillarVideoPicker, type PillarVideo } from "@/components/dashboard/pillar-video-picker";
 import { CLIP_PARAM } from "@/components/clip-editor/drafts";
+import { useCanEditBrand, useEditableBrands } from "@/components/brand-access";
 
 interface BrandOption {
   slug: string;
@@ -73,8 +74,13 @@ export function NewContentMenu({
   currentBrand: string | null;
 }) {
   const flags = useFeatureFlags();
+  const editable = useEditableBrands();
   const [open, setOpen] = useState<"newsletter" | NewPostKind | null>(null);
-  if (!flags?.newsletterDrafter) return null;
+  // Only brands the user can edit can get new content; no such brand → no menu.
+  const creatable = brands.filter(
+    (b) => b.slug !== "all" && !b.disabled && (editable === "all" || editable.includes(b.slug)),
+  );
+  if (!flags?.newsletterDrafter || creatable.length === 0) return null;
   return (
     <>
       <DropdownMenu>
@@ -113,7 +119,7 @@ export function NewContentMenu({
       </DropdownMenu>
       {open === "newsletter" && (
         <NewNewsletterDialog
-          brands={brands.filter((b) => b.slug !== "all" && !b.disabled)}
+          brands={creatable}
           initialBrand={currentBrand}
           onClose={() => setOpen(null)}
         />
@@ -122,7 +128,7 @@ export function NewContentMenu({
         <NewPostFlow
           key={open}
           kind={open}
-          brands={brands.filter((b) => b.slug !== "all" && !b.disabled)}
+          brands={creatable}
           initialBrand={currentBrand}
           onClose={() => setOpen(null)}
         />
@@ -258,9 +264,11 @@ export function NewNewsletterDialog({
   const onePiece = format?.kind === "single_video" || mode === "one";
   const pickList = format?.kind === "single_video" ? videos : brandVideos;
 
-  const ready = !!formatId && (!onePiece || (!!pickList && !!sourceItemId)) && !creating;
+  const canEdit = useCanEditBrand(brand || null);
+  const ready = canEdit && !!formatId && (!onePiece || (!!pickList && !!sourceItemId)) && !creating;
 
   async function create() {
+    if (!ready) return;
     setCreating(true);
     setError(null);
     try {
@@ -670,9 +678,11 @@ function NewPostDialog({
       : (options?.pillars.find(usable)?.id ?? "");
   const brandRow = brands.find((b) => b.slug === brand) ?? null;
 
-  const ready = !!options && !!pillarId && !creating;
+  const canEdit = useCanEditBrand(brand || null);
+  const ready = canEdit && !!options && !!pillarId && !creating;
 
   async function create() {
+    if (!ready) return;
     setCreating(true);
     setError(null);
     try {

@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { trackUsage } from "@/lib/usage/track";
+import { useCanEditBrand } from "@/components/brand-access";
 import type { ClipRenderStatus } from "@/lib/services/clip-editor/render-status";
 
 const ClipEditorDialog = dynamic(
@@ -83,6 +84,8 @@ export function ClipRenderStatusPill({
   onRendered?: () => void;
 }) {
   const [data, setData] = useState<StatusResponse | null>(null);
+  // Status stays visible to everyone; retry / edit need brand edit access.
+  const canEditBrand = useCanEditBrand(brand);
   const [retrying, setRetrying] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
   const lastState = useRef<string | null>(null);
@@ -142,7 +145,7 @@ export function ClipRenderStatusPill({
   const render = data?.render;
   if (!render) return null;
   const style = STATE_STYLE[render.state];
-  const canAct = !!data?.canEdit && !!data?.clipIdeaId;
+  const canAct = !!data?.canEdit && !!data?.clipIdeaId && canEditBrand;
   const openEditor = (mark: string) => {
     trackUsage(mark, brand);
     setEditorOpen(true);

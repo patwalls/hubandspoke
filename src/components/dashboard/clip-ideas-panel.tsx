@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ClipTriageDialog } from "./clip-triage-dialog";
+import { useCanEditBrand } from "@/components/brand-access";
 
 interface ClipIdea {
   id: string;
@@ -88,6 +89,9 @@ export function ClipIdeasPanel({
   brand,
   isAdmin,
 }: Props) {
+  // Generate is admin-only today; also require brand edit access so it
+  // stays closed if that ever loosens.
+  const canEdit = useCanEditBrand(brand);
   const [loading, setLoading] = useState(true);
   const [ideas, setIdeas] = useState<ClipIdea[]>([]);
   const [batchCreatedAt, setBatchCreatedAt] = useState<string | null>(null);
@@ -215,7 +219,7 @@ export function ClipIdeasPanel({
             </span>
           )}
         </div>
-        {isAdmin && (
+        {isAdmin && canEdit && (
           <div className="flex items-center gap-0">
             <Button
               variant="outline"
@@ -440,6 +444,7 @@ export function ClipIdeasPanel({
       )}
 
       <ClipTriageDialog
+        itemBrand={brand === "all" ? undefined : brand}
         open={triageIdea !== null}
         onOpenChange={(o) => {
           if (!o) setTriageIdea(null);

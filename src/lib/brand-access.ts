@@ -47,6 +47,12 @@ export async function currentRoleAndBrands(
   return row ?? null;
 }
 
+/** Is this user an admin right now (DB role, not the sign-in JWT)? */
+export async function isAdminNow(session: Session | null | undefined): Promise<boolean> {
+  if (!session?.user?.id) return false;
+  return (await currentRoleAndBrands(session.user.id))?.role === "admin";
+}
+
 /** Brand slugs this user may change. Admins get `"all"`. */
 export async function editableBrandSlugs(
   session: Session | null | undefined

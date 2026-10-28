@@ -28,12 +28,17 @@ import {
 } from "@/lib/platform-field-schemas";
 import { PreviewEmbed } from "./preview/embed";
 import { useDialogUrl } from "./use-dialog-url";
+import { useCanEditBrand } from "@/components/brand-access";
+
+const VIEW_ONLY_TITLE = "View only — you don't have edit access to this brand";
 /** Subset of `RepostCandidate` the dialog actually consumes. The queue
  *  triage path passes a full candidate (with hotness signals + evergreen
  *  reasoning + prior reposts); the content-detail Actions menu synthesizes
  *  a minimal one. Optional fields suppress queue-only UI sections. */
 export interface RepostTriageDialogCandidate {
   id: string;
+  /** Brand slug of the source item — drives the edit-access check. */
+  brand?: string;
   title: string | null;
   postType: string;
   format: string | null;
@@ -125,6 +130,8 @@ export function RepostTriagePanel({
   onSubmitted,
   onActioned,
 }: RepostTriagePanelProps) {
+  // The candidate's own brand — `brand` may be "all" on the cross-brand queue.
+  const canEdit = useCanEditBrand(candidate.brand || (brand === "all" ? null : brand));
   const [submitting, setSubmitting] = useState(false);
   const [manualSubmitting, setManualSubmitting] = useState(false);
   const [dismissing, setDismissing] = useState(false);
@@ -221,6 +228,7 @@ export function RepostTriagePanel({
   }
 
   async function handleRepost() {
+    if (!canEdit) return;
     if (!assigneeUserId) return;
     // Belt-and-suspenders re-entry guard. The button disables on
     // `submitting`, but a fast double-click can still queue two clicks
@@ -261,6 +269,7 @@ export function RepostTriagePanel({
    *  the row is created so it shows up in the workflow, and the editor
    *  attaches media themselves on the detail page. */
   async function handleManualRepost() {
+    if (!canEdit) return;
     if (!assigneeUserId) return;
     if (manualSubmitting) return;
     setManualSubmitting(true);
@@ -295,6 +304,7 @@ export function RepostTriagePanel({
   }
 
   async function handleDismissOnly() {
+    if (!canEdit) return;
     setDismissing(true);
     try {
       const res = await fetch(
@@ -322,6 +332,7 @@ export function RepostTriagePanel({
   }
 
   async function handleKill(reason: string) {
+    if (!canEdit) return;
     setDismissing(true);
     try {
       // "Kill" on a v2 candidate = a *permanent* dismiss with a reason.
@@ -355,7 +366,8 @@ export function RepostTriagePanel({
     }
   }
 
-  const busy = submitting || dismissing || manualSubmitting;
+  // View-only users get every action control disabled (the same as busy).
+  const busy = submitting || dismissing || manualSubmitting || !canEdit;
   // Queue-only "Hot" badge + stats / evergreen / prior-reposts sections.
   // Suppressed when the dialog is fired from the per-item Actions menu
   // where there's no hotness scoring to display.
@@ -536,7 +548,7 @@ export function RepostTriagePanel({
                   "bg-amber-600 text-white hover:bg-amber-700",
                   "disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed"
                 )}
-                title="Create the repost row without Descript prep. You'll attach media manually."
+                title={canEdit ? "Create the repost row without Descript prep. You'll attach media manually." : VIEW_ONLY_TITLE}
               >
                 {manualSubmitting
                   ? "Creating manual row…"
@@ -555,7 +567,9 @@ export function RepostTriagePanel({
               "disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed"
             )}
             title={
-              !assigneeUserId
+              !canEdit
+                ? VIEW_ONLY_TITLE
+                : !assigneeUserId
                 ? "Pick an editor first"
                 : gateFailure !== null
                   ? "Use the manual upload option above"
@@ -580,6 +594,7 @@ export function RepostTriagePanel({
                     type="button"
                     onClick={() => void handleDismissOnly()}
                     disabled={busy}
+                    title={canEdit ? undefined : VIEW_ONLY_TITLE}
                     className="text-sm text-muted-foreground hover:text-foreground disabled:opacity-50"
                   >
                     Not interested
@@ -588,6 +603,7 @@ export function RepostTriagePanel({
                     type="button"
                     onClick={() => setKillOpen(true)}
                     disabled={busy}
+                    title={canEdit ? undefined : VIEW_ONLY_TITLE}
                     className="text-sm text-red-600 hover:text-red-700 disabled:opacity-50"
                   >
                     Kill this idea

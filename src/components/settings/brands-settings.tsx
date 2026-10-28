@@ -6,6 +6,23 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
+import { EditGate, useCanEditBrand } from "@/components/brand-access";
+
+const VIEW_ONLY_TITLE = "View only — you don't have edit access to this brand";
+const ADMIN_ONLY_TITLE = "Only admins can add or reorder brands";
+
+/** Per-row edit actions, disabled (via EditGate's fieldset) when the viewer
+ *  can't edit that row's brand. A component so the hook can take the row slug. */
+function RowEditGate({ brand, children }: { brand: string; children: React.ReactNode }) {
+  const canEdit = useCanEditBrand(brand);
+  return (
+    <EditGate brand={brand}>
+      <div className="flex justify-end gap-2" title={canEdit ? undefined : VIEW_ONLY_TITLE}>
+        {children}
+      </div>
+    </EditGate>
+  );
+}
 
 interface BrandRow {
   id: string;
@@ -88,7 +105,15 @@ function DragHandle({ disabled }: { disabled?: boolean }) {
   );
 }
 
-export function BrandsSettingsContent({ brands: initialBrands }: { brands: BrandRow[] }) {
+export function BrandsSettingsContent({
+  brands: initialBrands,
+  canManageBrands = true,
+}: {
+  brands: BrandRow[];
+  /** Admin-only global actions (add brand, drag-reorder). Per-row edits are
+   *  gated separately by the viewer's access to that row's brand. */
+  canManageBrands?: boolean;
+}) {
   const router = useRouter();
   const [ordered, setOrdered] = useState<BrandRow[]>(initialBrands);
   const [saving, setSaving] = useState(false);
@@ -265,7 +290,12 @@ export function BrandsSettingsContent({ brands: initialBrands }: { brands: Brand
             show up in the top nav and as a filter option across the app.
           </p>
         </div>
-        <Button size="sm" onClick={() => setShowAdd((v) => !v)}>
+        <Button
+          size="sm"
+          onClick={() => setShowAdd((v) => !v)}
+          disabled={!canManageBrands}
+          title={canManageBrands ? undefined : ADMIN_ONLY_TITLE}
+        >
           {showAdd ? "Cancel" : "Add brand"}
         </Button>
       </div>
@@ -276,7 +306,7 @@ export function BrandsSettingsContent({ brands: initialBrands }: { brands: Brand
         </div>
       )}
 
-      {showAdd && (
+      {showAdd && canManageBrands && (
         <div className="rounded-lg border border-border bg-card p-4 space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -352,21 +382,22 @@ export function BrandsSettingsContent({ brands: initialBrands }: { brands: Brand
             {ordered.map((b) => {
               const isEditing = editingId === b.id;
               const isDragOver = dragOverId === b.id;
+              const canDrag = canManageBrands && !isEditing;
               return (
                 <tr
                   key={b.id}
-                  draggable={!isEditing}
-                  onDragStart={() => handleDragStart(b.id)}
-                  onDragOver={(e) => handleDragOver(e, b.id)}
-                  onDrop={(e) => handleDrop(e, b.id)}
-                  onDragEnd={handleDragEnd}
+                  draggable={canDrag}
+                  onDragStart={canManageBrands ? () => handleDragStart(b.id) : undefined}
+                  onDragOver={canManageBrands ? (e) => handleDragOver(e, b.id) : undefined}
+                  onDrop={canManageBrands ? (e) => handleDrop(e, b.id) : undefined}
+                  onDragEnd={canManageBrands ? handleDragEnd : undefined}
                   className={cn(
                     "border-t border-border align-top transition-colors",
                     isDragOver && "bg-muted/60"
                   )}
                 >
                   <td className="px-3 py-3">
-                    <DragHandle disabled={isEditing} />
+                    <DragHandle disabled={!canDrag} />
                   </td>
                   <td className="px-3 py-2">
                     <BrandAvatar brand={isEditing ? { ...b, label: editLabel, avatarUrl: editAvatar || null, color: editColor || null } : b} />
@@ -424,7 +455,7 @@ export function BrandsSettingsContent({ brands: initialBrands }: { brands: Brand
                   </td>
                   <td className="text-right px-3 py-2">
                     {isEditing ? (
-                      <div className="flex justify-end gap-2">
+                      <RowEditGate brand={b.slug}>
                         <Button
                           size="sm"
                           variant="outline"
@@ -440,9 +471,9 @@ export function BrandsSettingsContent({ brands: initialBrands }: { brands: Brand
                         >
                           {saving ? "…" : "Save"}
                         </Button>
-                      </div>
+                      </RowEditGate>
                     ) : (
-                      <div className="flex justify-end gap-2">
+                      <RowEditGate brand={b.slug}>
                         {b.disabled && (
                           <Button
                             size="sm"
@@ -459,7 +490,7 @@ export function BrandsSettingsContent({ brands: initialBrands }: { brands: Brand
                         >
                           Edit
                         </Button>
-                      </div>
+                      </RowEditGate>
                     )}
                   </td>
                 </tr>

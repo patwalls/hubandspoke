@@ -20,6 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { PickerAccount } from "@/components/ui/account-post-type-picker";
+import { useCanEditBrand } from "@/components/brand-access";
 
 type Stage = "idle" | "fetching" | "submitting";
 
@@ -45,6 +46,7 @@ export function UploadExternalLinkDialog({
   accounts,
 }: UploadExternalLinkDialogProps) {
   const router = useRouter();
+  const canEdit = useCanEditBrand(brand === "all" ? null : brand);
   const [youtubeUrl, setYoutubeUrl] = useState("");
   const [title, setTitle] = useState("");
   const [format, setFormat] = useState("");
@@ -101,6 +103,7 @@ export function UploadExternalLinkDialog({
   }
 
   async function handleSubmit() {
+    if (!canEdit) return;
     const url = youtubeUrl.trim();
     const t = title.trim();
     if (!url || !t) return;
@@ -142,7 +145,7 @@ export function UploadExternalLinkDialog({
 
   const busy = stage !== "idle";
   const canFetch = !!youtubeUrl.trim() && !busy;
-  const canSubmit = !!youtubeUrl.trim() && !!title.trim() && !busy;
+  const canSubmit = !!youtubeUrl.trim() && !!title.trim() && !busy && canEdit;
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>

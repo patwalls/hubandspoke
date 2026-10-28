@@ -13,6 +13,7 @@ import { Camera, Check, ImageIcon, Loader2, Trash2, Upload } from "lucide-react"
 import { Button } from "@/components/ui/button";
 import { TranscriptScrubber, type TranscriptLine } from "@/components/dashboard/transcript-scrubber";
 import { cn } from "@/lib/utils";
+import { useCanEditBrand } from "@/components/brand-access";
 import { startVisibleInterval } from "@/lib/visible-interval";
 import { formatTimestamp, parseScreenshotMarks, type ChosenScreenshot, type ScreenshotMark } from "@/lib/newsletter-screenshots";
 
@@ -238,6 +239,8 @@ export function ScreenshotMarkPanel({
   /** Take the screenshot out of the text entirely (else Remove only clears its image). */
   onDelete?: () => void;
 }) {
+  // Newsletter pages live under /[brand]/…: view-only users see the pick, not the pickers.
+  const canEdit = useCanEditBrand();
   const fileRef = useRef<HTMLInputElement>(null);
   const pick = shots.chosen[m.key];
   const pickUrl = pick ? shots.urlFor(pick, m.key) : null;
@@ -277,7 +280,7 @@ export function ScreenshotMarkPanel({
             </div>
           )
         )}
-        {onDelete ? (
+        {canEdit && (onDelete ? (
           <Button size="xs" variant="ghost" onClick={onDelete} disabled={saving} title="Take this screenshot out of the email">
             <Trash2 /> Remove
           </Button>
@@ -287,11 +290,13 @@ export function ScreenshotMarkPanel({
               <Trash2 /> Remove
             </Button>
           )
-        )}
+        ))}
+        {canEdit && (
         <Button size="xs" variant="outline" onClick={() => fileRef.current?.click()} disabled={saving} title="Use your own image (PNG, JPG, WebP or GIF, up to 10 MB)">
           {shots.busy === `upload:${m.key}` ? <Loader2 className="animate-spin" /> : <Upload />}
           {pick ? "Replace with upload" : "Upload"}
         </Button>
+        )}
         <input
           ref={fileRef}
           type="file"
@@ -303,14 +308,14 @@ export function ScreenshotMarkPanel({
             e.target.value = "";
           }}
         />
-        {onUseThumbnail && videoId && shots.thumbnails[videoId] && (
+        {canEdit && onUseThumbnail && videoId && shots.thumbnails[videoId] && (
           <Button size="xs" variant="ghost" onClick={onUseThumbnail} disabled={saving} title="Put the video's thumbnail here instead">
             <ImageIcon /> Use the video thumbnail
           </Button>
         )}
       </div>
 
-      {videoId && m.sec != null && (
+      {canEdit && videoId && m.sec != null && (
         <div className="flex flex-col gap-1.5">
           <span className="text-[11px] font-medium text-muted-foreground">Frames from this step · {formatTimestamp(Math.max(0, m.sec - 4))} to {formatTimestamp(m.sec + 40)}</span>
           {strip.length >= 6 ? (
@@ -326,7 +331,7 @@ export function ScreenshotMarkPanel({
         </div>
       )}
 
-      {videoUrl ? (
+      {!canEdit ? null : videoUrl ? (
         <TranscriptScrubber
           key={m.key}
           videoUrl={videoUrl}
@@ -376,6 +381,7 @@ export function ImagePanel({
   onUseThumbnail: () => void;
   onRemove: () => void;
 }) {
+  const canEdit = useCanEditBrand();
   const fileRef = useRef<HTMLInputElement>(null);
   return (
     <div className="flex flex-col gap-3">
@@ -383,6 +389,8 @@ export function ImagePanel({
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={url} alt={alt} className="w-full rounded border" />
       {alt && <span className="text-xs text-muted-foreground">{alt}</span>}
+      {canEdit && (
+      <>
       <div className="flex flex-wrap items-center gap-2">
         <Button size="xs" variant="outline" onClick={() => fileRef.current?.click()} disabled={busy} title="Use your own image (PNG, JPG, WebP or GIF, up to 10 MB)">
           {busy ? <Loader2 className="animate-spin" /> : <Upload />} Upload your own
@@ -411,6 +419,8 @@ export function ImagePanel({
         <TranscriptScrubber videoUrl={videoUrl} transcript={transcript} busy={busy} onGrab={onGrab} />
       ) : (
         <span className="text-[11px] text-muted-foreground">No archived video for this section, so frames can&apos;t be grabbed. Upload an image instead.</span>
+      )}
+      </>
       )}
     </div>
   );

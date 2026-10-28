@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { auth } from "@/lib/auth";
 import { UserManagement } from "@/components/settings/user-management";
+import { isAdminNow } from "@/lib/brand-access";
 
 export const metadata: Metadata = { title: "Users · Settings" };
 
@@ -11,7 +12,7 @@ export default async function UsersSettingsPage() {
     redirect("/login");
   }
 
-  if (session.user.role !== "admin") {
+  if (!(await isAdminNow(session))) {
     return (
       <div className="rounded-lg border border-border bg-card p-6 max-w-xl">
         <h2 className="text-base font-semibold text-foreground">

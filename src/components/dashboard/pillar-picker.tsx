@@ -72,6 +72,8 @@ interface PillarPickerProps {
    *  Notion-authoritative); set true for reposted-from where the source
    *  may be a discovered Threads/IG post. */
   includeAll?: boolean;
+  /** View-only: the trigger can't open the picker. */
+  disabled?: boolean;
 }
 
 export function PillarPicker({
@@ -82,6 +84,7 @@ export function PillarPicker({
   triggerClassName,
   placeholder = "No pillar — click to choose…",
   includeAll = false,
+  disabled = false,
 }: PillarPickerProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -123,9 +126,11 @@ export function PillarPicker({
     <div className="flex items-center gap-2">
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger
+          disabled={disabled}
           className={cn(
             "flex-1 flex items-center justify-between gap-2 rounded-md border border-input bg-background px-3 py-2 text-sm text-left hover:bg-accent/50 transition-colors min-w-0",
-            triggerClassName
+            triggerClassName,
+            disabled && "cursor-not-allowed opacity-60"
           )}
         >
           {value ? (

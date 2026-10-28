@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { useCanEditBrand } from "@/components/brand-access";
 
 const MAX_IMAGES = 6;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5 MB
@@ -94,6 +95,7 @@ export function QuickAddFormatDialog({
   onOpenChange,
   onCreated,
 }: Props) {
+  const canEdit = useCanEditBrand(brand);
   const [stage, setStage] = useState<"input" | "review">("input");
   const [description, setDescription] = useState("");
   const [images, setImages] = useState<StagedImage[]>([]);
@@ -413,7 +415,7 @@ export function QuickAddFormatDialog({
               <Button
                 type="button"
                 onClick={() => void handleDraft()}
-                disabled={drafting || description.trim().length === 0}
+                disabled={drafting || description.trim().length === 0 || !canEdit}
               >
                 {drafting
                   ? "Drafting…"
@@ -547,7 +549,7 @@ export function QuickAddFormatDialog({
                 <Button
                   type="button"
                   onClick={() => void handleCreate()}
-                  disabled={saving || !draft.name.trim()}
+                  disabled={saving || !draft.name.trim() || !canEdit}
                 >
                   {saving ? "Saving…" : "Create format"}
                 </Button>

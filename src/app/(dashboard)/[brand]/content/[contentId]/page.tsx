@@ -11,6 +11,7 @@ import { ContentDetail } from "@/components/dashboard/content-detail";
 import { getProductionItemDetail } from "@/lib/services/production-item-detail";
 import { auth } from "@/lib/auth";
 import { isUuid } from "@/lib/uuid";
+import { isAdminNow } from "@/lib/brand-access";
 
 interface ContentDetailPageProps {
   params: Promise<{ brand: string; contentId: string }>;
@@ -67,7 +68,7 @@ export default async function BrandContentDetailPage({
         typeof ContentDetail
       >[0]["initialData"])
     : null;
-  const isAdmin = session?.user?.role === "admin";
+  const isAdmin = await isAdminNow(session);
   const accounts = accountRows.map((a) => ({
     id: a.id,
     brandSlug: a.brandSlug,

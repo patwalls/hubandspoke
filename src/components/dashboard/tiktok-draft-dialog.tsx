@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { ProductionItem } from "@/types";
 import { parseNaturalTime, formatScheduledTime } from "@/lib/parse-natural-time";
+import { useCanEditBrand } from "@/components/brand-access";
 
 // TikTok Publish-or-Schedule dialog. Publishes the video LIVE to the connected
 // account via Zernio (pre-audited client), with the caption + chosen privacy —
@@ -65,6 +66,8 @@ export function TiktokDraftDialog({
   onSuccess,
   onGoOldWay,
 }: Props) {
+  // Defense in depth: the dialog's triggers are disabled for view-only users.
+  const canEdit = useCanEditBrand(item.brand);
   const [preview, setPreview] = useState<PublishPreview | null>(null);
   const [loading, setLoading] = useState(false);
   const [mode, setMode] = useState<Mode>("publish");
@@ -121,7 +124,7 @@ export function TiktokDraftDialog({
     mode === "publish" ||
     (!!scheduledAt && scheduledAt.getTime() > Date.now());
   const canSubmit =
-    !loading && !submitting && !blocked && !!preview && scheduleValid;
+    canEdit && !loading && !submitting && !blocked && !!preview && scheduleValid;
 
   async function handleSubmit() {
     if (!canSubmit || !preview || submittingRef.current) return;
@@ -361,7 +364,7 @@ export function TiktokDraftDialog({
           <button
             type="button"
             onClick={() => onGoOldWay?.()}
-            disabled={submitting}
+            disabled={submitting || !canEdit}
             className="text-xs text-muted-foreground underline-offset-2 hover:underline disabled:opacity-50"
           >
             Go to the old way

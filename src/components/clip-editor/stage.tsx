@@ -45,6 +45,8 @@ interface StageProps {
   /** "preview": the finished clip only — no tools, handles or outlines, a
    *  play/scrub overlay instead. What the Post tab's platform mock shows. */
   variant?: "edit" | "preview";
+  /** View-only (no brand edit access): nothing drags, resizes or adds. */
+  readOnly?: boolean;
 }
 
 function textCss(style: TextStyle, layout: TextBlockLayout): React.CSSProperties {
@@ -103,7 +105,7 @@ function LineBox({ style, layout, line, opacity }: { style: TextStyle; layout: T
   );
 }
 
-export function Stage({ plan, scene, engine, videoUrl, brand, variant = "edit" }: StageProps) {
+export function Stage({ plan, scene, engine, videoUrl, brand, variant = "edit", readOnly = false }: StageProps) {
   const isPreview = variant === "preview";
   const { width: W, height: H } = plan.canvas;
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -205,7 +207,7 @@ export function Stage({ plan, scene, engine, videoUrl, brand, variant = "edit" }
     onMove: (dxCanvas: number, dyCanvas: number, alt: boolean) => (doc: ClipEditDoc) => ClipEditDoc,
     coalesceKey: string,
   ) => {
-    if (scale === 0) return;
+    if (scale === 0 || readOnly) return;
     e.preventDefault();
     e.stopPropagation();
     // Take focus off an inspector field so the arrow keys nudge the layer
@@ -447,7 +449,7 @@ export function Stage({ plan, scene, engine, videoUrl, brand, variant = "edit" }
           canvas and not clipped by it, so a zoomed-in video shows where it
           spills past the frame (like Descript). */}
       {(() => {
-        if (selection?.kind !== "layer" || isPreview || scale === 0) return null;
+        if (selection?.kind !== "layer" || isPreview || readOnly || scale === 0) return null;
         const block = scene.textBlocks.find((b) => b.layer.id === selection.id);
         if (!block) return null;
         const layer = block.layer;
@@ -692,7 +694,7 @@ export function Stage({ plan, scene, engine, videoUrl, brand, variant = "edit" }
         </div>
         {isPreview && <PreviewControls engine={engine} />}
         {/* Add things: a line of text, or a logo from the brand's library. */}
-        {!isPreview && (<>
+        {!isPreview && !readOnly && (<>
         <div className="absolute left-2 top-2 z-10 flex items-center gap-1" onPointerDown={(e) => e.stopPropagation()}>
           <div className="relative">
             <button

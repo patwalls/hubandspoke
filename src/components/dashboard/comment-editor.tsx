@@ -27,6 +27,9 @@ interface CommentEditorProps {
   placeholder?: string;
   autoFocus?: boolean;
   disabled?: boolean;
+  /** View-only (no edit access to the brand): like `disabled`, but also
+   *  locks the toolbar and ignores file drop/paste uploads. */
+  readOnly?: boolean;
 }
 
 // Re-exported from the standalone module so existing imports keep working;
@@ -123,8 +126,15 @@ export function CommentEditor({
   onSubmit,
   placeholder = "Write a comment…",
   autoFocus = false,
-  disabled = false,
+  disabled: disabledProp = false,
+  readOnly = false,
 }: CommentEditorProps) {
+  const disabled = disabledProp || readOnly;
+  // Read inside ProseMirror's drop/paste handlers, which are captured once.
+  const readOnlyRef = useRef(readOnly);
+  useEffect(() => {
+    readOnlyRef.current = readOnly;
+  }, [readOnly]);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -256,6 +266,7 @@ export function CommentEditor({
       // text/HTML (which it would garble the binary into).
       handleDrop: (_view, event, _slice, moved) => {
         if (moved) return false;
+        if (readOnlyRef.current) return true;
         const dt = event.dataTransfer;
         if (!dt || dt.files.length === 0) return false;
         const files = Array.from(dt.files);
@@ -267,6 +278,7 @@ export function CommentEditor({
       // Pure-text paste falls through to the default handler so plain text
       // and rich-text paste keep working.
       handlePaste: (_view, event) => {
+        if (readOnlyRef.current) return true;
         const items = event.clipboardData?.items;
         if (!items) return false;
         const fileItems = Array.from(items).filter(
@@ -328,11 +340,21 @@ export function CommentEditor({
 
   return (
     <div className="rounded-md border border-input bg-background focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-0">
-      <Toolbar
-        editor={editor}
-        onPickFile={onPickFile}
-        uploading={uploading}
-      />
+      {readOnly ? (
+        <fieldset disabled className="m-0 min-w-0 border-0 p-0">
+          <Toolbar
+            editor={editor}
+            onPickFile={onPickFile}
+            uploading={uploading}
+          />
+        </fieldset>
+      ) : (
+        <Toolbar
+          editor={editor}
+          onPickFile={onPickFile}
+          uploading={uploading}
+        />
+      )}
       <input
         ref={fileInputRef}
         type="file"

@@ -13,6 +13,9 @@ import { trackUsage } from "@/lib/usage/track";
 import { READY_CHANGED_EVENT } from "@/lib/publish/events";
 import { focusGroupFirst, groupByPillar } from "@/lib/publish/group";
 import type { ReadyToPublishItem } from "@/lib/publish/ready";
+import { useCanEditBrand } from "@/components/brand-access";
+
+const VIEW_ONLY_TITLE = "View only — you don't have edit access to this brand";
 
 // The Publish screen: every Ready To Publish post in the brand, one row each,
 // with the link box right on the row. Post it on the platform, paste the live
@@ -164,6 +167,7 @@ function PublishRow({
   autoFocus: boolean;
   onPublished: (link: string) => void;
 }) {
+  const canEdit = useCanEditBrand(brand);
   const [link, setLink] = useState("");
   const [busy, setBusy] = useState(false);
   const [liveMatch, setLiveMatch] = useState(item.liveMatch);
@@ -174,7 +178,7 @@ function PublishRow({
 
   async function publish() {
     const url = link.trim();
-    if (!url) return;
+    if (!url || !canEdit) return;
     if (mismatch) return;
     setBusy(true);
     try {
@@ -284,7 +288,8 @@ function PublishRow({
             aria-label={`Live link for ${heading}`}
             placeholder="Paste the live link, then Enter"
             value={link}
-            disabled={busy}
+            disabled={busy || !canEdit}
+            title={canEdit ? undefined : VIEW_ONLY_TITLE}
             onChange={(e) => {
               setLink(e.target.value);
             }}
@@ -364,7 +369,8 @@ function PublishRow({
             <Button
               size="sm"
               className="h-7 text-xs"
-              disabled={busy}
+              disabled={busy || !canEdit}
+              title={canEdit ? undefined : VIEW_ONLY_TITLE}
               onClick={() => void resolveLiveMatch("confirm")}
             >
               That&apos;s it
@@ -373,7 +379,8 @@ function PublishRow({
               size="sm"
               variant="ghost"
               className="h-7 text-xs"
-              disabled={busy}
+              disabled={busy || !canEdit}
+              title={canEdit ? undefined : VIEW_ONLY_TITLE}
               onClick={() => void resolveLiveMatch("reject")}
             >
               Not it

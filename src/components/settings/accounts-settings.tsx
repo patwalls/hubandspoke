@@ -16,6 +16,23 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { EditGate, useCanEditBrand } from "@/components/brand-access";
+
+const VIEW_ONLY_TITLE = "View only — you don't have edit access to this brand";
+
+/** Per-row edit actions, disabled (via EditGate's fieldset) when the viewer
+ *  can't edit that row's brand. Wrapper is a component so the hook can take
+ *  each row's slug. */
+function RowEditGate({ brand, children }: { brand: string; children: React.ReactNode }) {
+  const canEdit = useCanEditBrand(brand);
+  return (
+    <EditGate brand={brand}>
+      <div className="inline-flex gap-1" title={canEdit ? undefined : VIEW_ONLY_TITLE}>
+        {children}
+      </div>
+    </EditGate>
+  );
+}
 
 /** Compact 1.2K / 48.2M number formatter. Falls back to — when null. */
 function formatCount(n: number | null): string {
@@ -144,6 +161,8 @@ export function AccountsSettingsContent({
   );
   const [newPlatform, setNewPlatform] = useState("youtube");
   const [newHandle, setNewHandle] = useState("");
+  // Add-account is checked against the brand it would be created under.
+  const canAdd = useCanEditBrand(newBrand || scopeBrandSlug);
 
   async function handleAdd() {
     if (!newBrand || !newHandle.trim()) {
@@ -311,7 +330,12 @@ export function AccountsSettingsContent({
             </p>
           </div>
         )}
-        <Button size="sm" onClick={() => setShowAdd((v) => !v)}>
+        <Button
+          size="sm"
+          onClick={() => setShowAdd((v) => !v)}
+          disabled={!canAdd && !showAdd}
+          title={canAdd || showAdd ? undefined : VIEW_ONLY_TITLE}
+        >
           {showAdd ? "Cancel" : "Add account"}
         </Button>
       </div>
@@ -392,7 +416,12 @@ export function AccountsSettingsContent({
             </div>
           </div>
           <div className="flex justify-end">
-            <Button size="sm" onClick={handleAdd} disabled={saving}>
+            <Button
+              size="sm"
+              onClick={handleAdd}
+              disabled={saving || !canAdd}
+              title={canAdd ? undefined : VIEW_ONLY_TITLE}
+            >
               {saving ? "Saving..." : "Save"}
             </Button>
           </div>
@@ -624,7 +653,7 @@ export function AccountsSettingsContent({
                     </td>
                     <td className="text-right px-3 py-2">
                       {editingId === a.id ? (
-                        <div className="inline-flex gap-1">
+                        <RowEditGate brand={a.brandSlug}>
                           <Button
                             size="sm"
                             disabled={saving}
@@ -639,9 +668,9 @@ export function AccountsSettingsContent({
                           >
                             Cancel
                           </Button>
-                        </div>
+                        </RowEditGate>
                       ) : (
-                        <div className="inline-flex gap-1">
+                        <RowEditGate brand={a.brandSlug}>
                           <Button
                             size="sm"
                             variant="ghost"
@@ -706,7 +735,7 @@ export function AccountsSettingsContent({
                           >
                             Delete
                           </Button>
-                        </div>
+                        </RowEditGate>
                       )}
                     </td>
                   </tr>

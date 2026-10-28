@@ -7,6 +7,9 @@ import { AlertTriangle, ArrowRight, Calendar, Eye } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { startVisibleInterval } from "@/lib/visible-interval";
 import { postTypeLabel } from "@/lib/badge-colors";
+import { useCanEditBrand } from "@/components/brand-access";
+
+const VIEW_ONLY_TITLE = "View only — you don't have edit access to this brand";
 import type {
   ScheduledReviewData,
   ScheduledMatchSuggestionView,
@@ -98,9 +101,11 @@ function SuggestionCard({
   s: ScheduledMatchSuggestionView;
   onResolved: (id: string) => void;
 }) {
+  const canEdit = useCanEditBrand(brand);
   const [busy, setBusy] = useState<"confirm" | "reject" | null>(null);
 
   async function act(action: "confirm" | "reject") {
+    if (!canEdit) return;
     setBusy(action);
     try {
       const res = await fetch(`/api/scheduled-matches/${s.id}`, {
@@ -160,14 +165,16 @@ function SuggestionCard({
         <Button
           variant="ghost"
           size="sm"
-          disabled={busy !== null}
+          disabled={busy !== null || !canEdit}
+          title={canEdit ? undefined : VIEW_ONLY_TITLE}
           onClick={() => act("reject")}
         >
           {busy === "reject" ? "Rejecting…" : "Not a match"}
         </Button>
         <Button
           size="sm"
-          disabled={busy !== null}
+          disabled={busy !== null || !canEdit}
+          title={canEdit ? undefined : VIEW_ONLY_TITLE}
           onClick={() => act("confirm")}
         >
           {busy === "confirm" ? "Tying…" : "Confirm & publish"}
@@ -186,11 +193,13 @@ function NeedsAttentionRow({
   n: NeedsAttentionItemView;
   onPublished: (id: string) => void;
 }) {
+  const canEdit = useCanEditBrand(brand);
   const [open, setOpen] = useState(false);
   const [link, setLink] = useState("");
   const [busy, setBusy] = useState(false);
 
   async function publish() {
+    if (!canEdit) return;
     const url = link.trim();
     if (!url) {
       toast.error("Paste the live post link first");
@@ -248,7 +257,13 @@ function NeedsAttentionRow({
             Cancel
           </Button>
         ) : (
-          <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setOpen(true)}
+            disabled={!canEdit}
+            title={canEdit ? undefined : VIEW_ONLY_TITLE}
+          >
             Mark published
           </Button>
         )}

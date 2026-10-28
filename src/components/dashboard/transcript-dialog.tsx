@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { TranscriptSpeaker } from "@/lib/diarization/types";
+import { EditGate, useCanEditBrand } from "@/components/brand-access";
 import {
   TranscriptSpeakers,
   speakerColor,
@@ -75,6 +76,9 @@ export function TranscriptButton({
   hasTranscript = false,
   variant = "default",
 }: Props) {
+  // View-only users can open and copy the transcript, but not (re)fetch it
+  // or detect/rename speakers.
+  const canEdit = useCanEditBrand();
   const [open, setOpen] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -328,10 +332,12 @@ export function TranscriptButton({
               variant="outline"
               size="sm"
               onClick={handleFetch}
-              disabled={fetchState.kind === "fetching"}
+              disabled={fetchState.kind === "fetching" || !canEdit}
               className="h-7 text-xs gap-1.5"
               title={
-                transcript
+                !canEdit
+                  ? "View only — you don't have edit access to this brand"
+                  : transcript
                   ? "Re-transcribe the archived media with Whisper"
                   : "Transcribe the archived media with Whisper"
               }
@@ -352,13 +358,15 @@ export function TranscriptButton({
         </div>
 
         {transcript && (
-          <TranscriptSpeakers
-            speakers={transcript.speakers}
-            detection={transcript.speakerDetection}
-            starting={detectStarting}
-            onDetect={() => void handleDetectSpeakers()}
-            onRename={handleRenameSpeaker}
-          />
+          <EditGate>
+            <TranscriptSpeakers
+              speakers={transcript.speakers}
+              detection={transcript.speakerDetection}
+              starting={detectStarting}
+              onDetect={() => void handleDetectSpeakers()}
+              onRename={handleRenameSpeaker}
+            />
+          </EditGate>
         )}
 
         {fetchState.kind === "error" && (

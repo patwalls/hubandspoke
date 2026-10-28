@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { MediaActions } from "./preview/media-actions";
+import { useCanEditBrand } from "@/components/brand-access";
 
 interface EnrichmentFields {
   captionFetched?: boolean;
@@ -186,6 +187,8 @@ function CopyButton({ text }: { text: string }) {
 }
 
 export function EnrichmentButton(props: Props) {
+  // Re-running enrichment is a (paid) write — view-only users can just read.
+  const canEdit = useCanEditBrand();
   const {
     itemId,
     enrichmentCompletedAt,
@@ -435,9 +438,13 @@ export function EnrichmentButton(props: Props) {
             variant="outline"
             size="sm"
             onClick={handleSync}
-            disabled={syncState.kind === "syncing"}
+            disabled={syncState.kind === "syncing" || !canEdit}
             className="h-7 text-xs gap-1.5"
-            title="Re-run enrichment against ScrapeCreators to refresh caption, author, and archived media"
+            title={
+              canEdit
+                ? "Re-run enrichment against ScrapeCreators to refresh caption, author, and archived media"
+                : "View only — you don't have edit access to this brand"
+            }
           >
             <RefreshCwIcon
               className={cn(

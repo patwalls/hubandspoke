@@ -4,6 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Loader2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useCanEditBrand } from "@/components/brand-access";
+
+const VIEW_ONLY_TITLE = "View only — you don't have edit access to this brand";
 
 // Persistent TikTok publish-status banner. Driven off the item's zernioStatus
 // so it survives a refresh: published (with live link) / publishing (async,
@@ -29,6 +32,7 @@ export function TiktokDraftBanner({
   onChanged,
 }: Props) {
   const [working, setWorking] = useState(false);
+  const canEdit = useCanEditBrand();
 
   // While a publish is finalizing on Zernio's side, poll the status endpoint
   // (which reconciles against Zernio and flips us to Published). Drives the
@@ -120,7 +124,8 @@ export function TiktokDraftBanner({
           type="button"
           size="sm"
           variant="outline"
-          disabled={working}
+          disabled={working || !canEdit}
+          title={canEdit ? undefined : VIEW_ONLY_TITLE}
           onClick={() => void cancelSchedule()}
         >
           {working ? "…" : "Cancel"}
@@ -136,7 +141,14 @@ export function TiktokDraftBanner({
           <span className="font-medium">TikTok publish failed.</span>{" "}
           {zernioError && <span className="break-words">{zernioError}</span>}
         </div>
-        <Button type="button" size="sm" variant="outline" onClick={onRetry}>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={onRetry}
+          disabled={!canEdit}
+          title={canEdit ? undefined : VIEW_ONLY_TITLE}
+        >
           Retry
         </Button>
       </div>

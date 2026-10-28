@@ -13,6 +13,7 @@ import {
 import { firstName, pickHandoff, type HandoffPerson } from "@/lib/handoff/pick";
 import { trackUsage } from "@/lib/usage/track";
 import { cn } from "@/lib/utils";
+import { useCanEditBrand } from "@/components/brand-access";
 
 interface HandoffData {
   me: string | null;
@@ -46,7 +47,9 @@ export function HandoffButton({
 }) {
   const [data, setData] = useState<HandoffData | null>(null);
   const [busy, setBusy] = useState(false);
-  const relevant = status === "Assigned" || status === "Review";
+  // View-only users can't hand off (it's a status + editor change).
+  const canEdit = useCanEditBrand(brand);
+  const relevant = canEdit && (status === "Assigned" || status === "Review");
 
   // Refetch on status change: "who sent it to review" moves with it.
   useEffect(() => {

@@ -13,6 +13,7 @@ import { PaletteIcon } from "lucide-react";
 import { useFeatureFlags } from "@/components/clip-editor/use-feature-flags";
 import { useDesignTemplates } from "@/components/design-editor/use-design-templates";
 import { readUrlParam, replaceUrlParam } from "./use-dialog-url";
+import { useCanEditBrand } from "@/components/brand-access";
 
 const DesignEditorDialog = dynamic(
   () => import("@/components/design-editor/design-editor-dialog").then((m) => m.DesignEditorDialog),
@@ -31,6 +32,9 @@ export function DesignEditorLauncher({
   const [open, setOpen] = useState(false);
   const [unsupported, setUnsupported] = useState(false);
   const autoOpened = useRef(false);
+  // The design editor only edits/renders — view-only users get the button
+  // disabled and no ?design=1 auto-open.
+  const canEdit = useCanEditBrand(item.brand);
   const eligible =
     !!flags?.designEditor &&
     item.sourceType === "repurposed" &&
@@ -39,11 +43,11 @@ export function DesignEditorLauncher({
     !unsupported;
 
   useEffect(() => {
-    if (!eligible || autoOpened.current || readUrlParam("design") !== "1") return;
+    if (!eligible || !canEdit || autoOpened.current || readUrlParam("design") !== "1") return;
     autoOpened.current = true;
     replaceUrlParam("design", null);
     setOpen(true);
-  }, [eligible]);
+  }, [eligible, canEdit]);
 
   if (!eligible) return null;
   return (
@@ -51,7 +55,9 @@ export function DesignEditorLauncher({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="inline-flex h-6 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted/40"
+        disabled={!canEdit}
+        title={canEdit ? undefined : "View only — you don't have edit access to this brand"}
+        className="inline-flex h-6 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50"
       >
         <PaletteIcon className="size-3" aria-hidden />
         Open design editor

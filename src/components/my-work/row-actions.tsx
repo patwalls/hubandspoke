@@ -7,6 +7,9 @@ import { Button } from "@/components/ui/button";
 import { trackUsage } from "@/lib/usage/track";
 import { sendBackCommentHtml, type RowAction } from "@/lib/my-work/actions";
 import { firstName } from "@/lib/handoff/pick";
+import { useCanEditBrand } from "@/components/brand-access";
+
+const VIEW_ONLY_TITLE = "View only — you don't have edit access to this brand";
 
 /**
  * The buttons on a My Work row (rules in src/lib/my-work/actions.ts). Moves
@@ -32,6 +35,7 @@ export function RowActions({
   actions: RowAction[];
 }) {
   const router = useRouter();
+  const canEdit = useCanEditBrand(brand);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<string | null>(null);
   const [noting, setNoting] = useState(false);
@@ -43,6 +47,7 @@ export function RowActions({
   }, [noting]);
 
   async function run(action: RowAction, noteText = "") {
+    if (!canEdit) return;
     setBusy(true);
     trackUsage(`my-work:${action.kind}`, brand);
     try {
@@ -121,10 +126,12 @@ export function RowActions({
           key={a.kind}
           size="xs"
           variant={a.kind === "send-back" ? "outline" : "default"}
-          disabled={busy}
+          disabled={busy || !canEdit}
           data-row-key={a.key}
           title={
-            a.handTo
+            !canEdit
+              ? VIEW_ONLY_TITLE
+              : a.handTo
               ? `${a.label}: moves it to ${a.to} and makes ${a.handTo.name} the editor (${a.key})`
               : `${a.label} (${a.key})`
           }

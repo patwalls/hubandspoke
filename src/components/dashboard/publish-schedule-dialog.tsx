@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { trackUsage } from "@/lib/usage/track";
 import { validatePublishedLinkPlatform } from "@/lib/published-link-validation";
+import { useCanEditBrand } from "@/components/brand-access";
 
 // The one and only path to status='Published' / status='Scheduled'. The
 // generic PUT /api/production-items route rejects those status values
@@ -59,6 +60,9 @@ interface Props {
   /** Other posts from the same video waiting in Ready To Publish: the
    *  dialog offers the Publish tab, where they all take a paste + Enter. */
   publishTab?: { href: string; others: number } | null;
+  /** The item's brand slug, for the edit-access check. Defaults to the
+   *  brand in the URL (pass it on /all, where the URL has none). */
+  brand?: string | null;
 }
 
 function todayIsoDate(): string {
@@ -89,7 +93,9 @@ export function PublishScheduleDialog({
   postType,
   onSuccess,
   publishTab,
+  brand,
 }: Props) {
+  const canEdit = useCanEditBrand(brand);
   const isAlreadyScheduled = currentStatus === "Scheduled";
   const isAlreadyPublished = currentStatus === "Published";
 
@@ -141,7 +147,7 @@ export function PublishScheduleDialog({
     : null;
 
   const saveDisabled =
-    submitting || (mode === "publish" && (!linkValid || !!mismatch));
+    !canEdit || submitting || (mode === "publish" && (!linkValid || !!mismatch));
 
   async function handleSave() {
     if (saveDisabled) return;
@@ -377,6 +383,7 @@ export function PublishScheduleDialog({
             type="button"
             onClick={() => void handleSave()}
             disabled={saveDisabled}
+            title={canEdit ? undefined : "View only — you don't have edit access to this brand"}
           >
             {saveLabel}
           </Button>

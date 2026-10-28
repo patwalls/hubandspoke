@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
+import { useCanEditBrand } from "@/components/brand-access";
 import type { DesignRenderStatus } from "@/lib/services/design-editor/render-status";
 
 const DesignEditorDialog = dynamic(
@@ -27,6 +28,8 @@ const STYLE: Record<DesignRenderStatus["state"], { dot: string; label: (r: Desig
 
 export function DesignRenderStatusPill({ productionItemId, brand, onRendered }: { productionItemId: string; brand: string; onRendered?: () => void }) {
   const [data, setData] = useState<{ render: DesignRenderStatus | null; canEdit?: boolean } | null>(null);
+  // Status stays visible to everyone; retry / edit need brand edit access.
+  const canEditBrand = useCanEditBrand(brand);
   const [retrying, setRetrying] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
   const lastState = useRef<string | null>(null);
@@ -75,7 +78,7 @@ export function DesignRenderStatusPill({ productionItemId, brand, onRendered }: 
   const render = data?.render;
   if (!render) return null;
   const style = STYLE[render.state];
-  const canAct = !!data?.canEdit;
+  const canAct = !!data?.canEdit && canEditBrand;
   return (
     <>
       <Popover>

@@ -7,6 +7,7 @@ import {
   type ShortLink,
 } from "@/lib/services/short-links";
 import { ShortLinksSettings } from "@/components/settings/short-links-settings";
+import { isAdminNow } from "@/lib/brand-access";
 
 export const metadata: Metadata = { title: "Short links · Settings" };
 export const dynamic = "force-dynamic";
@@ -15,7 +16,7 @@ export default async function ShortLinksSettingsPage() {
   const session = await auth();
   if (!session?.user) redirect("/login");
 
-  if (session.user.role !== "admin") {
+  if (!(await isAdminNow(session))) {
     return (
       <div className="rounded-lg border border-border bg-card p-6 max-w-xl">
         <h2 className="text-base font-semibold text-foreground">Admins only</h2>

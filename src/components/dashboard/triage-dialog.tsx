@@ -29,6 +29,9 @@ import { todayLocalISO } from "@/lib/utils/dates";
 import { cn } from "@/lib/utils";
 import { AccountBadge } from "@/components/ui/account-badge";
 import type { ProductionItem } from "@/types";
+import { useCanEditBrand } from "@/components/brand-access";
+
+const VIEW_ONLY_TITLE = "View only — you don't have edit access to this brand";
 
 interface AssignableUser {
   id: string;
@@ -138,7 +141,11 @@ export function TriageDialog(props: TriageDialogProps) {
   const templates = useDesignTemplates(!!flags?.designEditor, props.item.brand || props.brand);
   const [unsupported, setUnsupported] = useState<Set<string>>(() => new Set());
   const { item } = props;
+  // The design editor drafts (and saves) the moment it opens — view-only
+  // users get the classic dialog, whose actions render disabled.
+  const canEdit = useCanEditBrand(item.brand || (props.brand === "all" ? null : props.brand));
   const useDesigner =
+    canEdit &&
     !!flags?.designEditor &&
     item.sourceType === "repurposed" &&
     !!item.format &&
@@ -184,6 +191,8 @@ function ClassicTriageDialog({
   const [mode, setMode] = useState<RepostActionMode>("idle");
   const [killOpen, setKillOpen] = useState(false);
   const [acceptOpen, setAcceptOpen] = useState(false);
+  // On /all the page brand is "all" — check the item's own brand.
+  const canEdit = useCanEditBrand(item.brand || (brand === "all" ? null : brand));
 
   useEffect(() => {
     if (!open) return;
@@ -245,6 +254,7 @@ function ClassicTriageDialog({
     nextStatus: "Assigned" | "Killed" | "Published",
     extra?: Record<string, unknown>
   ) {
+    if (!canEdit) return;
     setSaving(true);
     setActionError(null);
     try {
@@ -299,6 +309,7 @@ function ClassicTriageDialog({
   }
 
   async function submitOutcome(action: "accept" | "kill", reason: string) {
+    if (!canEdit) return;
     setSaving(true);
     setActionError(null);
     try {
@@ -385,6 +396,7 @@ function ClassicTriageDialog({
             brand={brand}
             users={users}
             saving={saving}
+            readOnly={!canEdit}
             mode={mode}
             setMode={setMode}
             actionError={actionError}
@@ -404,6 +416,7 @@ function ClassicTriageDialog({
             formatInstructions={formatInstructions}
             users={users}
             saving={saving}
+            readOnly={!canEdit}
             actionError={actionError}
             onAssign={assignTo}
             onKill={killIt}
@@ -439,6 +452,7 @@ function SourcedBody({
   brand,
   users,
   saving,
+  readOnly = false,
   mode,
   setMode,
   actionError,
@@ -455,6 +469,7 @@ function SourcedBody({
   brand: string;
   users: AssignableUser[];
   saving: boolean;
+  readOnly?: boolean;
   mode: RepostActionMode;
   setMode: (m: RepostActionMode) => void;
   actionError: string | null;
@@ -525,7 +540,8 @@ function SourcedBody({
               <button
                 type="button"
                 onClick={onAccept}
-                disabled={saving}
+                disabled={saving || readOnly}
+                title={readOnly ? VIEW_ONLY_TITLE : undefined}
                 className="inline-flex h-9 items-center justify-center rounded-md bg-emerald-600 px-3 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
               >
                 Accept this cross-post
@@ -554,7 +570,8 @@ function SourcedBody({
                   <button
                     type="button"
                     onClick={() => setMode("form")}
-                    disabled={saving}
+                    disabled={saving || readOnly}
+                    title={readOnly ? VIEW_ONLY_TITLE : undefined}
                     className="inline-flex h-9 items-center justify-center rounded-md bg-emerald-600 px-3 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
                   >
                     I posted this ✓
@@ -602,7 +619,8 @@ function SourcedBody({
                         key={u.id}
                         type="button"
                         onClick={() => onAssign(u.id)}
-                        disabled={saving}
+                        disabled={saving || readOnly}
+                        title={readOnly ? VIEW_ONLY_TITLE : undefined}
                         className="flex items-center w-full text-left rounded-md px-2 py-1.5 text-sm hover:bg-accent disabled:opacity-50"
                       >
                         <UserChip user={u} size="xs" />
@@ -619,7 +637,8 @@ function SourcedBody({
           <button
             type="button"
             onClick={onKill}
-            disabled={saving}
+            disabled={saving || readOnly}
+            title={readOnly ? VIEW_ONLY_TITLE : undefined}
             className="text-sm text-red-600 hover:text-red-700 disabled:opacity-50"
           >
             Kill this idea
@@ -817,6 +836,7 @@ function OriginalBody({
   formatInstructions,
   users,
   saving,
+  readOnly = false,
   actionError,
   onAssign,
   onKill,
@@ -831,6 +851,7 @@ function OriginalBody({
   formatInstructions: string | null;
   users: AssignableUser[];
   saving: boolean;
+  readOnly?: boolean;
   actionError: string | null;
   onAssign: (userId: string) => Promise<unknown>;
   onKill: () => void;
@@ -908,7 +929,8 @@ function OriginalBody({
                 key={u.id}
                 type="button"
                 onClick={() => onAssign(u.id)}
-                disabled={saving}
+                disabled={saving || readOnly}
+                title={readOnly ? VIEW_ONLY_TITLE : undefined}
                 className="flex items-center w-full text-left rounded-md px-2 py-1.5 text-sm hover:bg-accent disabled:opacity-50"
               >
                 <UserChip user={u} size="xs" />
@@ -925,7 +947,8 @@ function OriginalBody({
           <button
             type="button"
             onClick={onKill}
-            disabled={saving}
+            disabled={saving || readOnly}
+            title={readOnly ? VIEW_ONLY_TITLE : undefined}
             className="text-sm text-red-600 hover:text-red-700 disabled:opacity-50"
           >
             Kill this idea

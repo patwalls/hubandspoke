@@ -22,6 +22,7 @@ import { PlaybackEngine } from "./playback-engine";
 import { Stage } from "./stage";
 import { EditorStoreContext, createEditorStore, useEditor, useEditorStoreApi } from "./store";
 import { framingFor } from "./framing";
+import { useCanEditBrand } from "@/components/brand-access";
 
 const AUTOSAVE_DELAY_MS = 900;
 
@@ -56,6 +57,8 @@ function LookEditor(props: { formatId: string; formatName: string; brand: string
 
 function LookWorkspace({ formatId, formatName, brand, onSaved, onClose }: { formatId: string; formatName: string; brand: string; onSaved: () => void; onClose: () => void }) {
   const storeApi = useEditorStoreApi();
+  // View-only users can look at the format's clip look, not change it.
+  const viewOnly = !useCanEditBrand(brand);
   const doc = useEditor((s) => s.doc);
   const saveState = useEditor((s) => s.saveState);
   const canUndo = useEditor((s) => s.past.length > 0);
@@ -78,7 +81,7 @@ function LookWorkspace({ formatId, formatName, brand, onSaved, onClose }: { form
   const save = useCallback((): Promise<boolean> => {
     saving.current = saving.current.then(async () => {
       const { doc: current, savedDoc, revision } = storeApi.getState();
-      if (current === savedDoc) return true;
+      if (viewOnly || current === savedDoc) return true;
       storeApi.getState().markSaving();
       try {
         const res = await fetch(`/api/formats/${formatId}/clip-template`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ look: lookFromDoc(current) }) });
@@ -92,7 +95,7 @@ function LookWorkspace({ formatId, formatName, brand, onSaved, onClose }: { form
       }
     });
     return saving.current;
-  }, [formatId, onSaved, storeApi]);
+  }, [formatId, onSaved, storeApi, viewOnly]);
 
   // Closing with Esc / a click outside unmounts us: flush whatever is unsaved.
   const saveRef = useRef(save);
@@ -135,19 +138,19 @@ function LookWorkspace({ formatId, formatName, brand, onSaved, onClose }: { form
           <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
             {saveState === "saving" ? <><Loader2Icon className="size-3 animate-spin" /> Saving…</> : saveState === "error" ? <span className="text-destructive">Not saved</span> : saveState === "dirty" ? "Unsaved" : <><CheckIcon className="size-3" /> Saved</>}
           </span>
-          <Button type="button" size="icon" variant="ghost" className="size-7" disabled={!canUndo} onClick={undo} title="Undo (⌘Z)"><Undo2Icon className="size-3.5" /></Button>
-          <Button type="button" size="icon" variant="ghost" className="size-7" disabled={!canRedo} onClick={redo} title="Redo (⇧⌘Z)"><Redo2Icon className="size-3.5" /></Button>
+          <Button type="button" size="icon" variant="ghost" className="size-7" disabled={!canUndo || viewOnly} onClick={undo} title="Undo (⌘Z)"><Undo2Icon className="size-3.5" /></Button>
+          <Button type="button" size="icon" variant="ghost" className="size-7" disabled={!canRedo || viewOnly} onClick={redo} title="Redo (⇧⌘Z)"><Redo2Icon className="size-3.5" /></Button>
         </div>
       </header>
       <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_340px] gap-4 p-4">
         <div className="relative min-h-0 min-w-0">
-          <Stage plan={plan} scene={scene} engine={engine} videoUrl={null} brand={brand} />
+          <Stage plan={plan} scene={scene} engine={engine} videoUrl={null} brand={brand} readOnly={viewOnly} />
         </div>
-        <Inspector doc={doc} framing={framingFor(doc, null, null)} disabled={false} brand={brand} />
+        <Inspector doc={doc} framing={framingFor(doc, null, null)} disabled={viewOnly} brand={brand} />
       </div>
       <footer className="flex items-center gap-3 border-t border-border px-4 py-2.5">
         <p className="text-[11px] text-muted-foreground">Style the hook, captions, video placement and layers. Every new clip of this format starts from this look — with its own AI-written hook; the text here is a placeholder.</p>
-        <Button type="button" size="sm" className="ml-auto h-8" onClick={() => void close()}>Save look &amp; close</Button>
+        <Button type="button" size="sm" className="ml-auto h-8" onClick={() => void close()}>{viewOnly ? "Close" : <>Save look &amp; close</>}</Button>
       </footer>
     </>
   );

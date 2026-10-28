@@ -23,6 +23,7 @@ import { LayoutEditor, removeSlot } from "@/components/dashboard/layout-editor";
 import { defaultSection, layoutFor, layoutText, newSlotKey, withLayout, type LayoutDoc } from "@/lib/newsletter-layout";
 import { bodyStyle } from "@/lib/newsletter-email-html";
 import { cn } from "@/lib/utils";
+import { useCanEditBrand } from "@/components/brand-access";
 import {
   STORY_KIND_LABELS,
   STORY_KINDS,
@@ -54,6 +55,8 @@ interface StoryContext {
 }
 
 
+const VIEW_ONLY_TITLE = "View only — you don't have edit access to this brand";
+
 /** A field label in the side panel. */
 function FieldLabel({ text }: { text: string }) {
   return <span className="flex items-center gap-1 text-muted-foreground">{text}</span>;
@@ -78,6 +81,10 @@ function HubspotTemplateNote({ url }: { url: string | null }) {
 export function NewsletterTemplateSection({ formatId }: { formatId: string }) {
   const flags = useFeatureFlags();
   const enabled = !!flags?.newsletterDrafter;
+  // Format pages live under /[brand]/…, so the brand comes from the URL.
+  const canEdit = useCanEditBrand();
+  /** View-only users: a full-size, read-only look at the template instead of the editor. */
+  const [viewing, setViewing] = useState(false);
   const [template, setTemplate] = useState<NewsletterTemplate | null>(null);
   const [isDefault, setIsDefault] = useState(true);
   const [hubspotUrl, setHubspotUrl] = useState<string | null>(null);
@@ -172,9 +179,9 @@ export function NewsletterTemplateSection({ formatId }: { formatId: string }) {
       {template.hubspot && <HubspotTemplateNote url={hubspotUrl} />}
       <button
         type="button"
-        onClick={() => setEditing(true)}
+        onClick={() => (canEdit ? setEditing(true) : setViewing(true))}
         className="block w-[220px] overflow-hidden rounded-md border bg-white text-left shadow-sm hover:ring-2 hover:ring-primary/40"
-        aria-label="Edit newsletter template"
+        aria-label={canEdit ? "Edit newsletter template" : "View newsletter template"}
       >
         <EmailPreview template={template} showHints scale={0.33} clipHeight={300} />
       </button>
@@ -183,7 +190,7 @@ export function NewsletterTemplateSection({ formatId }: { formatId: string }) {
         {template.learnedFrom ? ` · learned from ${template.learnedFrom} past issues${template.learnedAt ? ` on ${template.learnedAt.slice(0, 10)}` : ""}` : ""}
       </p>
       <div className="flex flex-wrap items-center gap-2">
-        <Button size="sm" onClick={() => setEditing(true)}>
+        <Button size="sm" onClick={() => setEditing(true)} disabled={!canEdit} title={canEdit ? undefined : VIEW_ONLY_TITLE}>
           <Pencil /> Edit template
         </Button>
         {(proposal?.status === "pending" ? (
@@ -192,10 +199,10 @@ export function NewsletterTemplateSection({ formatId }: { formatId: string }) {
             </Button>
           ) : proposal?.status === "done" && proposal.proposal ? (
             <>
-              <Button size="sm" variant="outline" onClick={() => setReviewing(true)} title="A template learned from the past issues — review it, then save or discard">
+              <Button size="sm" variant="outline" onClick={() => setReviewing(true)} disabled={!canEdit} title={canEdit ? "A template learned from the past issues — review it, then save or discard" : VIEW_ONLY_TITLE}>
                 <GraduationCap /> Review learned template
               </Button>
-              <Button size="sm" variant="ghost" onClick={discardProposal}>
+              <Button size="sm" variant="ghost" onClick={discardProposal} disabled={!canEdit} title={canEdit ? undefined : VIEW_ONLY_TITLE}>
                 Discard
               </Button>
             </>
@@ -204,23 +211,44 @@ export function NewsletterTemplateSection({ formatId }: { formatId: string }) {
               size="sm"
               variant="outline"
               onClick={learn}
-              title="Read this newsletter's past issues (the sent ones, pulled from HubSpot / beehiiv) and propose the template that fits them: sections, instructions, how it reads"
+              disabled={!canEdit}
+              title={canEdit ? "Read this newsletter's past issues (the sent ones, pulled from HubSpot / beehiiv) and propose the template that fits them: sections, instructions, how it reads" : VIEW_ONLY_TITLE}
             >
               <GraduationCap /> Learn from past issues
             </Button>
           ))}
         {!isDefault && (
-          <Button size="sm" variant="ghost" onClick={reset} disabled={busy}>
+          <Button size="sm" variant="ghost" onClick={reset} disabled={busy || !canEdit} title={canEdit ? undefined : VIEW_ONLY_TITLE}>
             <RotateCcw /> Reset to default
           </Button>
         )}
       </div>
       {proposal?.status === "failed" && (
         <p className="rounded-md bg-red-50 p-2 text-xs text-red-800 dark:bg-red-900/30 dark:text-red-200">
-          Learning failed: {proposal.error} <button type="button" className="underline" onClick={discardProposal}>Dismiss</button>
+          Learning failed: {proposal.error}{" "}
+          {canEdit && <button type="button" className="underline" onClick={discardProposal}>Dismiss</button>}
         </p>
       )}
       {learnError && <p className="text-xs text-destructive">{learnError}</p>}
+      {viewing && (
+        <Dialog open onOpenChange={(o) => !o && setViewing(false)}>
+          <DialogContent className="max-h-[94vh] overflow-y-auto sm:max-w-[680px]">
+            <DialogTitle className="text-base font-semibold">Newsletter template</DialogTitle>
+            <p className="text-xs text-muted-foreground">View only — each AI section shows the instructions the drafter follows.</p>
+            {template.styleNotes && (
+              <div className="flex flex-col gap-1 text-xs">
+                <span className="flex items-center gap-1.5 text-muted-foreground">
+                  <Sparkles className="size-3 text-[#2563eb]" /> How this newsletter reads
+                </span>
+                <p className="whitespace-pre-wrap rounded-md bg-muted/60 p-3">{template.styleNotes}</p>
+              </div>
+            )}
+            <div className="overflow-hidden rounded-md border bg-white">
+              <EmailPreview template={template} showHints />
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
       {editing && (
         <TemplateEditorDialog
           formatId={formatId}
@@ -275,6 +303,7 @@ export function TemplateEditorDialog({
   onClose: () => void;
   onSaved: (t: NewsletterTemplate) => void;
 }) {
+  const canEdit = useCanEditBrand();
   const [t, setT] = useState<NewsletterTemplate>(initial);
   /** The design: the layout document the canvas edits (every template, HubSpot and beehiiv alike). */
   const [design, setDesign] = useState<LayoutDoc>(() => layoutFor(initial));
@@ -344,7 +373,7 @@ export function TemplateEditorDialog({
             <Button size="sm" variant="ghost" onClick={onClose}>
               Cancel
             </Button>
-            <Button size="sm" onClick={save} disabled={!dirty || saving}>
+            <Button size="sm" onClick={save} disabled={!dirty || saving || !canEdit} title={canEdit ? undefined : VIEW_ONLY_TITLE}>
               {saving && <Loader2 className="animate-spin" />}
               {proposalNote ? "Save as the template" : "Save template"}
             </Button>

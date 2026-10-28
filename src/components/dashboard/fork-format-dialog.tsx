@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { useCanEditBrand } from "@/components/brand-access";
 
 interface DraftedFormat {
   name: string;
@@ -59,6 +60,7 @@ export function ForkFormatDialog({
   onOpenChange,
   onForked,
 }: Props) {
+  const canEdit = useCanEditBrand(brand);
   const [stage, setStage] = useState<"input" | "review">("input");
   const [name, setName] = useState("");
   const [note, setNote] = useState("");
@@ -238,7 +240,7 @@ export function ForkFormatDialog({
               <Button
                 type="button"
                 onClick={() => void handleDraft()}
-                disabled={drafting || name.trim().length === 0}
+                disabled={drafting || name.trim().length === 0 || !canEdit}
               >
                 {drafting ? "Drafting…" : "Draft fork"}
               </Button>
@@ -366,7 +368,7 @@ export function ForkFormatDialog({
                 <Button
                   type="button"
                   onClick={() => void handleCreateAndAssign()}
-                  disabled={saving || !draft.name.trim()}
+                  disabled={saving || !draft.name.trim() || !canEdit}
                 >
                   {saving ? "Saving…" : "Create & assign"}
                 </Button>

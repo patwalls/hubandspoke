@@ -41,6 +41,14 @@ import { UserCombobox } from "./user-combobox";
 import { KillIdeaDialog } from "./kill-idea-dialog";
 import { cn } from "@/lib/utils";
 import type { SpokeCandidate } from "@/lib/services/spoke-candidates";
+import { useCanEditBrand } from "@/components/brand-access";
+
+const VIEW_ONLY_TITLE = "View only — you don't have edit access to this brand";
+
+/** The candidate's own brand — `brand` may be "all" on the cross-brand queue. */
+function useCanEditCandidate(candidate: SpokeCandidate, brand: string): boolean {
+  return useCanEditBrand(candidate.brand || (brand === "all" ? null : brand));
+}
 
 interface SpokeTriageDialogProps {
   open: boolean;
@@ -79,10 +87,14 @@ export function SpokeTriageDialog(props: SpokeTriageDialogProps) {
   const templates = useDesignTemplates(!!flags?.designEditor, props.brand);
   const clipPostFormats = useClipPostFormats(!!flags?.clipEditor, props.brand);
   const [unsupported, setUnsupported] = useState<Set<string>>(() => new Set());
+  // The editor hand-offs create an item the moment they open — view-only
+  // users get the classic dialog (read-only) instead.
+  const canEdit = useCanEditCandidate(props.candidate, props.brand);
   const onUnsupported = (message?: string) => {
     if (message) toast.message("Opening the classic view", { description: message });
     setUnsupported((prev) => new Set(prev).add(props.candidate.id));
   };
+  if (!canEdit) return <ClassicSpokeTriageDialog {...props} />;
   if (!!flags?.clipEditor && !!clipPostFormats?.has(props.candidate.format.name) && !unsupported.has(props.candidate.id)) {
     return <ClipPostFromCandidate {...props} onUnsupported={onUnsupported} />;
   }
@@ -232,6 +244,7 @@ function ClassicSpokeTriageDialog({
   brand,
   onActioned,
 }: SpokeTriageDialogProps) {
+  const canEdit = useCanEditCandidate(candidate, brand);
   const [submitting, setSubmitting] = useState(false);
   const [dismissing, setDismissing] = useState(false);
   const [killOpen, setKillOpen] = useState(false);
@@ -270,10 +283,11 @@ function ClassicSpokeTriageDialog({
     };
   }, [assignableUsers.length]);
 
-  const busy = submitting || dismissing;
+  // View-only users get every action control disabled (the same as busy).
+  const busy = submitting || dismissing || !canEdit;
 
   async function handleRepurpose() {
-    if (!assigneeUserId) return;
+    if (!canEdit || !assigneeUserId) return;
     if (submitting) return;
     setSubmitting(true);
     try {
@@ -356,6 +370,7 @@ function ClassicSpokeTriageDialog({
   }
 
   async function handleKill(reason: string) {
+    if (!canEdit) return;
     setDismissing(true);
     try {
       await postDismiss(reason);
@@ -549,7 +564,9 @@ function ClassicSpokeTriageDialog({
               "disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed",
             )}
             title={
-              !assigneeUserId
+              !canEdit
+                ? VIEW_ONLY_TITLE
+                : !assigneeUserId
                 ? "Pick an editor first"
                 : `Create a ${candidate.format.name} draft in Assigned`
             }
@@ -567,6 +584,7 @@ function ClassicSpokeTriageDialog({
                 type="button"
                 onClick={() => void handleDismissOnly()}
                 disabled={busy}
+                title={canEdit ? undefined : VIEW_ONLY_TITLE}
                 className="text-sm text-muted-foreground hover:text-foreground disabled:opacity-50"
               >
                 Not interested
@@ -575,6 +593,7 @@ function ClassicSpokeTriageDialog({
                 type="button"
                 onClick={() => setKillOpen(true)}
                 disabled={busy}
+                title={canEdit ? undefined : VIEW_ONLY_TITLE}
                 className="text-sm text-red-600 hover:text-red-700 disabled:opacity-50"
               >
                 Kill this idea

@@ -35,6 +35,9 @@ import type { IdeaNav } from "./idea-nav";
 import { useDialogUrl } from "./use-dialog-url";
 import { useFeatureFlags } from "@/components/clip-editor/use-feature-flags";
 import { CLIP_PARAM, refreshClipDrafts } from "@/components/clip-editor/drafts";
+import { useCanEditBrand } from "@/components/brand-access";
+
+const VIEW_ONLY_TITLE = "View only — you don't have edit access to this brand";
 
 // Lazy: the editor bundle (player, stage, font metrics, zustand) is only ever
 // fetched by a browser whose user has the `clipEditor` flag AND opens a clip.
@@ -124,6 +127,9 @@ interface Props {
   /** Previous / Next between the queue's clip ideas, editor only. `onGo`
    *  closes this row's dialog and opens the neighbour's. */
   nav?: IdeaNav;
+  /** Brand slug the idea belongs to, for the edit-access check. Pass it on
+   *  cross-brand surfaces where `brand` is "all"; defaults to `brand`. */
+  itemBrand?: string | null;
 }
 
 function fmtTs(sec: number): string {
@@ -188,7 +194,10 @@ function ClassicClipTriageDialog({
   onDone,
   brand,
   promotionFormat,
+  itemBrand,
 }: Props) {
+  const canEdit = useCanEditBrand(itemBrand || (brand === "all" ? null : brand));
+  const readOnlyTitle = canEdit ? undefined : VIEW_ONLY_TITLE;
   // When the parent doesn't already pass promotionFormat (e.g. the queue
   // page mounts the dialog without pre-fetching per-row formats), fetch
   // it ourselves on open. Cached for the dialog lifetime.
@@ -261,7 +270,7 @@ function ClassicClipTriageDialog({
   const commitHook = useCallback(async () => {
     if (!idea) return;
     const next = hookDraft.trim();
-    if (!next || next === hookBaseline) {
+    if (!canEdit || !next || next === hookBaseline) {
       setHookDraft(hookBaseline);
       return;
     }
@@ -289,7 +298,7 @@ function ClassicClipTriageDialog({
     } finally {
       setHookSaving(false);
     }
-  }, [idea, hookDraft, hookBaseline]);
+  }, [idea, hookDraft, hookBaseline, canEdit]);
 
   // Fetch transcript excerpt + signed video URL whenever the dialog opens on
   // a new idea. Short-circuit while closed — the fetch is cheap but useless
@@ -342,7 +351,7 @@ function ClassicClipTriageDialog({
 
   const saveHookSegments = useCallback(
     async (segs: { startSec: number; endSec: number }[] | null) => {
-      if (!idea) return;
+      if (!idea || !canEdit) return;
       setIntroSaving(true);
       setError(null);
       try {
@@ -359,7 +368,7 @@ function ClassicClipTriageDialog({
         setIntroSaving(false);
       }
     },
-    [idea],
+    [idea, canEdit],
   );
 
   const toggleIntro = useCallback(
@@ -372,7 +381,7 @@ function ClassicClipTriageDialog({
 
   const handleKill = useCallback(
     async (reason: string | null) => {
-      if (!idea) return;
+      if (!idea || !canEdit) return;
       setSaving(true);
       setError(null);
       try {
@@ -393,14 +402,14 @@ function ClassicClipTriageDialog({
         setSaving(false);
       }
     },
-    [idea, onDone, onOpenChange],
+    [idea, onDone, onOpenChange, canEdit],
   );
 
   const runCreateInDescript = useCallback(
     async (
       path: "agent" | "precise" | "buffered" | "buffered-pack" | "full",
     ) => {
-      if (!idea) return;
+      if (!idea || !canEdit) return;
       setSaving(true);
       setError(null);
       try {
@@ -459,7 +468,7 @@ function ClassicClipTriageDialog({
         setSaving(false);
       }
     },
-    [idea, onDone, onOpenChange, brand, router],
+    [idea, onDone, onOpenChange, brand, router, canEdit],
   );
 
   if (!idea) return null;
@@ -500,7 +509,8 @@ function ClassicClipTriageDialog({
                     value={hookDraft}
                     onChange={(e) => setHookDraft(e.target.value)}
                     onBlur={() => void commitHook()}
-                    disabled={isDecided || hookSaving}
+                    disabled={isDecided || hookSaving || !canEdit}
+                    title={readOnlyTitle}
                     rows={2}
                     placeholder="The first line the viewer hears"
                     className="w-full resize-y rounded-md border border-border bg-background px-2.5 py-1.5 text-sm font-medium leading-snug focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-60"
@@ -532,7 +542,8 @@ function ClassicClipTriageDialog({
                     <input
                       type="checkbox"
                       checked={includeIntro}
-                      disabled={introSaving}
+                      disabled={introSaving || !canEdit}
+                      title={readOnlyTitle}
                       onChange={(e) => toggleIntro(e.target.checked)}
                       className="mt-0.5 size-4 accent-primary disabled:opacity-50"
                     />
@@ -636,7 +647,8 @@ function ClassicClipTriageDialog({
                 <button
                   type="button"
                   onClick={() => setKillOpen(true)}
-                  disabled={saving}
+                  disabled={saving || !canEdit}
+                  title={readOnlyTitle}
                   className="text-sm text-red-600 hover:text-red-700 disabled:opacity-50"
                 >
                   Kill idea
@@ -646,7 +658,8 @@ function ClassicClipTriageDialog({
                 {!isDecided && (
                   <DropdownMenu>
                     <DropdownMenuTrigger
-                      disabled={saving}
+                      disabled={saving || !canEdit}
+                      title={readOnlyTitle}
                       className={buttonVariants({ variant: "default" })}
                     >
                       Create

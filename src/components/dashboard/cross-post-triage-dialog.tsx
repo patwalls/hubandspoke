@@ -36,6 +36,9 @@ import { cn } from "@/lib/utils";
 import type { BrandAccount } from "@/lib/services/cross-post-candidates";
 import { PreviewEmbed } from "./preview/embed";
 import { useDialogUrl } from "./use-dialog-url";
+import { useCanEditBrand } from "@/components/brand-access";
+
+const VIEW_ONLY_TITLE = "View only — you don't have edit access to this brand";
 
 /** "3d ago", "2h ago", "just now" — short relative-time helper for the
  *  "Already posted · Xd ago" hint on a cross-post target row. Same shape
@@ -210,6 +213,8 @@ export function CrossPostTriagePanel({
   onSubmitted,
   onActioned,
 }: CrossPostTriagePanelProps) {
+  // The candidate's own brand — `brand` is "all" on the cross-brand queue.
+  const canEdit = useCanEditBrand(candidate.brand || (brand === "all" ? null : brand));
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [submitting, setSubmitting] = useState(false);
   const [dismissing, setDismissing] = useState(false);
@@ -483,6 +488,7 @@ export function CrossPostTriagePanel({
   }
 
   async function handleSubmit() {
+    if (!canEdit) return;
     const keys = Array.from(selected);
     setSubmitting(true);
     setGateFailures([]);
@@ -557,6 +563,7 @@ export function CrossPostTriagePanel({
    *  row is created so it shows up in the workflow, and the operator
    *  attaches media themselves. */
   async function handleManualSubmit() {
+    if (!canEdit) return;
     const keys = gateFailures.map((f) => f.key);
     if (keys.length === 0) return;
     setManualSubmitting(true);
@@ -602,6 +609,7 @@ export function CrossPostTriagePanel({
   }
 
   async function handleDismissOnly() {
+    if (!canEdit) return;
     setDismissing(true);
     try {
       const res = await fetch(
@@ -634,7 +642,8 @@ export function CrossPostTriagePanel({
   const allVisibleSelected =
     visibleSelectableKeys.length > 0 &&
     visibleSelectableKeys.every((k) => selected.has(k));
-  const busy = submitting || dismissing || manualSubmitting;
+  // View-only users get every action control disabled (the same as busy).
+  const busy = submitting || dismissing || manualSubmitting || !canEdit;
   // Queue-only "Hot" badge + stats block. Hidden when the dialog is fired
   // from a non-queue surface (per-item Actions menu) where there's no
   // hotness scoring to show.
@@ -879,7 +888,7 @@ export function CrossPostTriagePanel({
                 "bg-amber-600 text-white hover:bg-amber-700",
                 "disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed"
               )}
-              title="Create the cross-post rows without Descript prep. You'll attach media manually."
+              title={canEdit ? "Create the cross-post rows without Descript prep. You'll attach media manually." : VIEW_ONLY_TITLE}
             >
               {manualSubmitting
                 ? "Creating manual rows…"
@@ -898,7 +907,9 @@ export function CrossPostTriagePanel({
             "disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed"
           )}
           title={
-            selected.size === 0
+            !canEdit
+              ? VIEW_ONLY_TITLE
+              : selected.size === 0
               ? "Pick at least one target"
               : !assigneeUserId
               ? "Pick an editor first"
@@ -920,6 +931,7 @@ export function CrossPostTriagePanel({
               type="button"
               onClick={() => void handleDismissOnly()}
               disabled={busy}
+              title={canEdit ? undefined : VIEW_ONLY_TITLE}
               className="text-sm text-muted-foreground hover:text-foreground disabled:opacity-50"
             >
               Not interested

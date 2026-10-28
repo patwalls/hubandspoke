@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { startVisibleInterval } from "@/lib/visible-interval";
+import { EditGate, useCanEditBrand } from "@/components/brand-access";
 import type { NewsletterSpecialSource } from "@/lib/db/schema";
 import { NewsletterEditorDialog } from "./newsletter-editor-dialog";
 
@@ -41,6 +42,7 @@ interface FormatOption {
 }
 
 const POLL_MS = 8_000;
+const VIEW_ONLY_TITLE = "View only — you don't have edit access to this brand";
 
 function fmtDate(iso: string | null): string {
   if (!iso) return "No date";
@@ -170,6 +172,7 @@ function IssueTable({ rows, onOpen, groupByDate }: { rows: BoardRow[]; onOpen: (
 }
 
 export function NewsletterDrafterPage({ brand }: { brand: string }) {
+  const canEdit = useCanEditBrand(brand);
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -236,7 +239,7 @@ export function NewsletterDrafterPage({ brand }: { brand: string }) {
             until you do), edit or regenerate any section, then send it on to the email tool.
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={refresh} disabled={refreshing}>
+        <Button variant="outline" size="sm" onClick={refresh} disabled={refreshing || !canEdit} title={canEdit ? undefined : VIEW_ONLY_TITLE}>
           {refreshing ? <Loader2 className="animate-spin" /> : <RefreshCw />}
           Refresh sponsors
         </Button>
@@ -330,7 +333,7 @@ function OneOffDraft({ brand, onCreated }: { brand: string; onCreated: (id: stri
   return (
     <details className="rounded-lg border p-3 text-sm">
       <summary className="cursor-pointer font-medium">One-off draft</summary>
-      <div className="mt-3 flex flex-wrap items-end gap-3">
+      <EditGate brand={brand} className="mt-3 flex flex-wrap items-end gap-3">
         <label className="flex flex-col gap-1">
           <span className="text-xs font-medium">Format</span>
           <select className="h-8 min-w-56 rounded-lg border border-input bg-background px-2 text-sm" value={formatId} onChange={(e) => setFormatId(e.target.value)}>
@@ -351,7 +354,7 @@ function OneOffDraft({ brand, onCreated }: { brand: string; onCreated: (id: stri
           Draft
         </Button>
         {error && <span className="text-xs text-destructive">{error}</span>}
-      </div>
+      </EditGate>
     </details>
   );
 }

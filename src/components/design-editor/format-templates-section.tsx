@@ -22,6 +22,7 @@ import { PlaybackEngine } from "@/components/clip-editor/playback-engine";
 import { Stage } from "@/components/clip-editor/stage";
 import { EditorStoreContext as ClipEditorStoreContext, createEditorStore } from "@/components/clip-editor/store";
 import { cn } from "@/lib/utils";
+import { useCanEditBrand } from "@/components/brand-access";
 import type { DesignDoc } from "@/lib/design-editor/doc";
 import { resolveChannelsInDoc, type ChannelInfo } from "@/lib/design-editor/channel";
 import { DESIGN_PRESETS, type DesignPresetId } from "@/lib/design-editor/templates";
@@ -30,6 +31,8 @@ import { DesignTemplateDialog } from "./design-editor-dialog";
 import { PageCanvas } from "./page-canvas";
 import { DesignStoreContext, createDesignStore } from "./store";
 import { invalidateDesignTemplates } from "./use-design-templates";
+
+const VIEW_ONLY_TITLE = "View only — you don't have edit access to this brand";
 
 interface TemplateResponse {
   template: { doc: DesignDoc; source: "stored" | "preset"; updatedAt: string | null } | null;
@@ -50,6 +53,7 @@ export function FormatTemplatesSection({ brand, formatId, formatName, isClippabl
 }
 
 function DesignTemplateCard({ brand, formatId, formatName }: { brand: string; formatId: string; formatName: string }) {
+  const canEdit = useCanEditBrand(brand);
   const [data, setData] = useState<TemplateResponse | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
@@ -99,11 +103,11 @@ function DesignTemplateCard({ brand, formatId, formatName }: { brand: string; fo
             <span>{t.doc.pages.length} slides · {t.source === "stored" ? `custom${t.updatedAt ? `, updated ${new Date(t.updatedAt).toLocaleDateString()}` : ""}` : "built-in preset (edit to customise)"}</span>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button type="button" size="sm" className="h-7 text-xs" onClick={() => setEditing(true)}>
+            <Button type="button" size="sm" className="h-7 text-xs" disabled={!canEdit} title={canEdit ? undefined : VIEW_ONLY_TITLE} onClick={() => setEditing(true)}>
               <PencilIcon className="mr-1 size-3" /> Edit template
             </Button>
             {t.source === "stored" && (
-              <Button type="button" size="sm" variant="ghost" className="h-7 text-xs" disabled={busy !== null} onClick={() => void remove()}>
+              <Button type="button" size="sm" variant="ghost" className="h-7 text-xs" disabled={busy !== null || !canEdit} title={canEdit ? undefined : VIEW_ONLY_TITLE} onClick={() => void remove()}>
                 <RotateCcwIcon className="mr-1 size-3" /> Reset to preset
               </Button>
             )}
@@ -114,7 +118,7 @@ function DesignTemplateCard({ brand, formatId, formatName }: { brand: string; fo
           <p className="text-[12px] text-muted-foreground">No template yet. Start from a preset, then edit it in the design editor.</p>
           <div className="flex flex-wrap gap-2">
             {(Object.keys(DESIGN_PRESETS) as DesignPresetId[]).map((id) => (
-              <Button key={id} type="button" size="sm" variant="outline" className="h-7 text-xs" disabled={busy !== null} title={DESIGN_PRESETS[id].description} onClick={() => void createFrom(id)}>
+              <Button key={id} type="button" size="sm" variant="outline" className="h-7 text-xs" disabled={busy !== null || !canEdit} title={canEdit ? DESIGN_PRESETS[id].description : VIEW_ONLY_TITLE} onClick={() => void createFrom(id)}>
                 {busy === id ? <Loader2Icon className="mr-1 size-3 animate-spin" /> : null}
                 {DESIGN_PRESETS[id].label}
               </Button>
@@ -122,7 +126,7 @@ function DesignTemplateCard({ brand, formatId, formatName }: { brand: string; fo
           </div>
         </>
       )}
-      {data && <ImportFromPdf formatId={formatId} hasCustomTemplate={t?.source === "stored"} onOpen={(d) => { setDraft(d); setEditing(true); }} />}
+      {data && canEdit && <ImportFromPdf formatId={formatId} hasCustomTemplate={t?.source === "stored"} onOpen={(d) => { setDraft(d); setEditing(true); }} />}
       <DesignTemplateDialog open={editing} onOpenChange={(o) => { setEditing(o); if (!o) setDraft(null); }} formatId={formatId} formatName={formatName} brand={brand} initial={draft} onSaved={() => { invalidateDesignTemplates(); void load(); }} />
     </Card>
   );
@@ -236,6 +240,7 @@ function Filmstrip({ doc, imageUrls, channels }: { doc: DesignDoc; imageUrls: Re
 }
 
 function ClipLookCard({ brand, formatId, formatName }: { brand: string; formatId: string; formatName: string }) {
+  const canEdit = useCanEditBrand(brand);
   const [look, setLook] = useState<{ look: ClipLook | null; updatedAt: string | null; aspectRatio: AspectRatio } | null>(null);
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -287,11 +292,11 @@ function ClipLookCard({ brand, formatId, formatName }: { brand: string; formatId
             )}
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button type="button" size="sm" className="h-7 text-xs" onClick={() => setEditing(true)}>
+            <Button type="button" size="sm" className="h-7 text-xs" disabled={!canEdit} title={canEdit ? undefined : VIEW_ONLY_TITLE} onClick={() => setEditing(true)}>
               <PencilIcon className="mr-1 size-3" /> {l ? "Edit look" : "Create look"}
             </Button>
             {l && (
-              <Button type="button" size="sm" variant="ghost" className="h-7 text-xs" disabled={busy} onClick={() => void remove()}>
+              <Button type="button" size="sm" variant="ghost" className="h-7 text-xs" disabled={busy || !canEdit} title={canEdit ? undefined : VIEW_ONLY_TITLE} onClick={() => void remove()}>
                 <Trash2Icon className="mr-1 size-3" /> Remove
               </Button>
             )}

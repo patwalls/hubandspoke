@@ -52,6 +52,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ChevronDownIcon } from "lucide-react";
+import { useCanEditBrand } from "@/components/brand-access";
 import type { FormatProvenStatus } from "@/lib/services/format-proven-shared";
 
 interface AssignableUser {
@@ -78,6 +79,7 @@ interface FormatRow {
 type SortKey = "name" | "viewThreshold" | "totalViews" | "totalPublished" | "proven";
 
 export function FormatsPageContent({ brand }: { brand: string }) {
+  const canEdit = useCanEditBrand(brand);
   const [formats, setFormats] = useState<FormatRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -361,6 +363,7 @@ export function FormatsPageContent({ brand }: { brand: string }) {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {canEdit && (
           <DropdownMenu>
             <DropdownMenuTrigger className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-xs transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring w-full sm:w-auto">
               Add Format
@@ -378,6 +381,7 @@ export function FormatsPageContent({ brand }: { brand: string }) {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          )}
 
           <FormatLibraryDialog
             brand={brand}
@@ -600,7 +604,7 @@ export function FormatsPageContent({ brand }: { brand: string }) {
                 </p>
               </div>
 
-              <Button onClick={handleSave} className="w-full">
+              <Button onClick={handleSave} className="w-full" disabled={!canEdit}>
                 Create
               </Button>
             </div>

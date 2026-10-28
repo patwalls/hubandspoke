@@ -14,6 +14,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useCanEditBrand } from "@/components/brand-access";
 
 interface MergeModalProps {
   open: boolean;
@@ -36,6 +37,8 @@ export function MergeModal({
   preselectedSecondaryItem,
   onMergeComplete,
 }: MergeModalProps) {
+  // Defense in depth: the Merge… menu item is disabled for view-only users.
+  const canEdit = useCanEditBrand(brand);
   const [searchQuery, setSearchQuery] = useState("");
   const [foundItems, setFoundItems] = useState<ProductionItem[]>(
     preselectedSecondaryItem ? [preselectedSecondaryItem] : []
@@ -235,7 +238,7 @@ export function MergeModal({
             </Button>
             <Button
               onClick={handleMerge}
-              disabled={!selectedSecondaryId || merging}
+              disabled={!selectedSecondaryId || merging || !canEdit}
             >
               {merging ? "Merging..." : "Merge"}
             </Button>

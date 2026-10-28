@@ -11,6 +11,7 @@ import { validatePublishedLinkPlatform } from "@/lib/published-link-validation";
 import { trackUsage } from "@/lib/usage/track";
 import { READY_CHANGED_EVENT } from "@/lib/publish/events";
 import { nextOpenId } from "@/lib/publish/next-open";
+import { useCanEditBrand } from "@/components/brand-access";
 
 // The content page's Cross-post tab, right after cross-posting: one link box
 // per ready cross-post. Post it on the platform, paste the live link, press
@@ -104,13 +105,15 @@ function PasteRow({
 }) {
   const [link, setLink] = useState("");
   const [busy, setBusy] = useState(false);
+  // Pasting a link publishes the post — view-only users see the box disabled.
+  const canEdit = useCanEditBrand(brand);
   // A link from another platform than the post is caught before it's saved.
   const mismatch = validatePublishedLinkPlatform(link.trim(), row.postType);
   const label = postTypeLabel(row.postType);
 
   async function publish() {
     const url = link.trim();
-    if (!url || mismatch) return;
+    if (!url || mismatch || !canEdit) return;
     setBusy(true);
     try {
       const res = await fetch(`/api/production-items/${row.id}/publish`, {
@@ -163,7 +166,8 @@ function PasteRow({
             aria-label={`Live link for the ${label} cross-post`}
             placeholder={`Paste the live ${label} link, then Enter`}
             value={link}
-            disabled={busy}
+            disabled={busy || !canEdit}
+            title={canEdit ? undefined : "View only — you don't have edit access to this brand"}
             onChange={(e) => setLink(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") {

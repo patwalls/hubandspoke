@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { useCanEditBrand } from "@/components/brand-access";
 
 /**
  * Hover overlay with download / copy / (optional) resync buttons for an
@@ -52,6 +53,8 @@ export function MediaActions({
 }) {
   const [copied, setCopied] = useState(false);
   const [resyncing, setResyncing] = useState(false);
+  // Re-sync pulls a new render into S3 — a change, so view-only users don't get it.
+  const canEdit = useCanEditBrand();
   const [error, setError] = useState<string | null>(null);
 
   const fetchBlob = async (): Promise<Blob> => {
@@ -161,7 +164,7 @@ export function MediaActions({
           <PencilIcon />
         </a>
       )}
-      {onResync && (
+      {onResync && canEdit && (
         <Button
           type="button"
           variant="outline"

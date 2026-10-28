@@ -21,6 +21,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { POST_TYPE_LABELS } from "@/lib/badge-colors";
+import { useCanEditBrand } from "@/components/brand-access";
 
 interface FormatExample {
   title: string | null;
@@ -251,6 +252,8 @@ function FormatPreviewPanel({
 }
 
 export function FormatLibraryDialog({ brand, open, onOpenChange, onAdded }: Props) {
+  // Using a format copies it INTO `brand` — gate on the destination brand.
+  const canEditDest = useCanEditBrand(brand);
   const [libraryFormats, setLibraryFormats] = useState<LibraryFormat[]>([]);
   const [destFormats, setDestFormats] = useState<DestFormat[]>([]);
   const [loading, setLoading] = useState(true);
@@ -368,6 +371,7 @@ export function FormatLibraryDialog({ brand, open, onOpenChange, onAdded }: Prop
           <select
             value={state.selectedParentId ?? ""}
             onChange={(e) => patchCard(format.id, { selectedParentId: e.target.value })}
+            disabled={!canEditDest}
             className="h-7 text-xs rounded-md border border-input bg-background px-2 min-w-[130px]"
           >
             <option value="" disabled>
@@ -393,9 +397,11 @@ export function FormatLibraryDialog({ brand, open, onOpenChange, onAdded }: Prop
             size="sm"
             onClick={() => void handleUse(format)}
             disabled={
+              !canEditDest ||
               state.status === "loading" ||
               (isDerivative && destPillars.length > 1 && !state.selectedParentId)
             }
+            title={canEditDest ? undefined : "View only — you don't have edit access to this brand"}
           >
             {state.status === "loading" ? "Adding…" : "Use Format"}
           </Button>

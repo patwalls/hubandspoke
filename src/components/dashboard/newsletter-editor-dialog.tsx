@@ -22,6 +22,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
+import { EditGate, useCanEditBrand } from "@/components/brand-access";
 import { startVisibleInterval } from "@/lib/visible-interval";
 import { composeIssue, sponsorBlock, variableNames, type NewsletterSection, type NewsletterTemplate } from "@/lib/newsletter-template";
 import { EmailPreview, FOOTER_NOTE, MOBILE_WIDTH } from "@/components/dashboard/email-preview";
@@ -100,6 +101,7 @@ interface VideoOption {
 }
 
 const POLL_MS = 4_000;
+const VIEW_ONLY_TITLE = "View only — you don't have edit access to this brand";
 /** Autosave this long after the last edit. */
 const AUTOSAVE_MS = 1200;
 
@@ -218,6 +220,9 @@ function Workspace({
   flushRef: React.MutableRefObject<() => Promise<boolean>>;
   onClose: () => void;
 }) {
+  // Newsletter drafts open on /[brand]/… pages: the brand comes from the URL.
+  const canEdit = useCanEditBrand();
+  const vo = canEdit ? undefined : VIEW_ONLY_TITLE;
   const [subject, setSubject] = useState(draft.subject ?? "");
   const [previewText, setPreviewText] = useState(draft.previewText ?? "");
   const [sections, setSections] = useState<NewsletterSection[]>(draft.sections);
@@ -304,12 +309,12 @@ function Workspace({
 
   // Autosave, like the design editor: a moment after the last change.
   useEffect(() => {
-    if (!dirty || draft.status !== "ready") return;
+    if (!canEdit || !dirty || draft.status !== "ready") return;
     const t = setTimeout(() => void save(), AUTOSAVE_MS);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- re-arm on every edit; save() reads the latest state
-  }, [dirty, draft.status, subject, previewText, sections, body, specialCopy, notes, layout, variables]);
-  flushRef.current = () => (dirty ? save() : saveChain.current);
+  }, [canEdit, dirty, draft.status, subject, previewText, sections, body, specialCopy, notes, layout, variables]);
+  flushRef.current = () => (canEdit && dirty ? save() : saveChain.current);
 
   const preview = useMemo(() => {
     if (!draft.template) return body;
@@ -555,7 +560,7 @@ function Workspace({
         <span className="flex min-w-0 items-center gap-2">
           <span className="truncate text-sm font-semibold">{draft.formatName}</span>
           {draft.template && draft.formatId && (
-            <button type="button" onClick={openTemplate} className="flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground" title="Open this newsletter's template: its design and what AI writes in each section">
+            <button type="button" onClick={openTemplate} disabled={!canEdit} className="flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50" title={vo ?? "Open this newsletter's template: its design and what AI writes in each section"}>
               <LayoutTemplate className="size-3" /> Template
             </button>
           )}
@@ -580,8 +585,8 @@ function Workspace({
                 variant="ghost"
                 size="sm"
                 onClick={startReview}
-                disabled={busyAction !== null || draft.review?.status === "running"}
-                title="A senior-editor read of the whole issue: voice, structure, facts, links, subject line — with one-click fixes"
+                disabled={!canEdit || busyAction !== null || draft.review?.status === "running"}
+                title={vo ?? "A senior-editor read of the whole issue: voice, structure, facts, links, subject line — with one-click fixes"}
                 aria-label="AI review"
               >
                 {draft.review?.status === "running" ? <Loader2 className="animate-spin" /> : <Wand2 />}
@@ -595,7 +600,7 @@ function Workspace({
                 <span className="hidden 2xl:inline">Preview</span>
               </Button>
             )}
-            {draft.template && <ReviseButton onRevise={reviseAll} disabled={busyAction !== null || draft.regenerating.length > 0} busy={busyAction === "revise" || draft.regenerating.length > 0} />}
+            {draft.template && <ReviseButton onRevise={reviseAll} disabled={!canEdit || busyAction !== null || draft.regenerating.length > 0} busy={busyAction === "revise" || draft.regenerating.length > 0} />}
             <DropdownMenu>
               <DropdownMenuTrigger aria-label="More" className={buttonVariants({ size: "icon-sm", variant: "ghost" })}>
                 <MoreHorizontal />
@@ -607,23 +612,25 @@ function Workspace({
                     Visual view
                   </DropdownMenuItem>
                 )}
-                {draft.template && draft.formatId && (
+                {canEdit && draft.template && draft.formatId && (
                   <DropdownMenuItem onClick={openTemplate} className="cursor-pointer gap-2">
                     <LayoutTemplate className="size-4" />
                     Edit template
                   </DropdownMenuItem>
                 )}
-                {layout && (
+                {canEdit && layout && (
                   <DropdownMenuItem onClick={() => setLayout(null)} className="cursor-pointer gap-2">
                     <RotateCcw className="size-4" />
                     Reset to the template&apos;s design
                   </DropdownMenuItem>
                 )}
+                {canEdit && (
                 <DropdownMenuItem onClick={redraft} disabled={busyAction !== null} className="cursor-pointer gap-2">
                   <RefreshCw className="size-4" />
                   Redraft the whole issue
                 </DropdownMenuItem>
-                {draft.template && (
+                )}
+                {canEdit && draft.template && (
                   <>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem onClick={runChecks} disabled={busyAction !== null} className="cursor-pointer gap-2">
@@ -653,13 +660,13 @@ function Workspace({
                         Preview in beehiiv
                       </DropdownMenuItem>
                     )}
-                    {draft.template?.beehiiv && (
+                    {canEdit && draft.template?.beehiiv && (
                       <DropdownMenuItem onClick={() => updateBeehiiv(false)} disabled={busyAction !== null || pushPending} className="cursor-pointer gap-2">
                         <RefreshCw className="size-4" />
                         Update in beehiiv
                       </DropdownMenuItem>
                     )}
-                    {!draft.template?.beehiiv && (
+                    {canEdit && !draft.template?.beehiiv && (
                       <DropdownMenuItem onClick={() => updateHubspot(false)} disabled={busyAction !== null || pushPending} className="cursor-pointer gap-2">
                         <RefreshCw className="size-4" />
                         Update in HubSpot
@@ -669,16 +676,16 @@ function Workspace({
                 )}
               </DropdownMenuContent>
             </DropdownMenu>
-            <Button variant="outline" size="sm" onClick={onClose} disabled={saving} title="Saves your edits and closes. The newsletter stays in the queue as a Draft until you create the email draft.">
-              Save &amp; close
+            <Button variant="outline" size="sm" onClick={onClose} disabled={saving} title={canEdit ? "Saves your edits and closes. The newsletter stays in the queue as a Draft until you create the email draft." : undefined}>
+              {canEdit ? <>Save &amp; close</> : "Close"}
             </Button>
             {pushUrl && !draft.template?.beehiiv && (
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => updateHubspot(false)}
-                disabled={busyAction !== null || pushPending}
-                title="Saves, then puts this email as it is now — words, design, subject and preview text — into the HubSpot draft. Only while it's a draft there: a scheduled or sent email is refused. Edits made in HubSpot itself are kept unless you choose to replace them."
+                disabled={!canEdit || busyAction !== null || pushPending}
+                title={vo ?? "Saves, then puts this email as it is now — words, design, subject and preview text — into the HubSpot draft. Only while it's a draft there: a scheduled or sent email is refused. Edits made in HubSpot itself are kept unless you choose to replace them."}
               >
                 {pushBusy ? <Loader2 className="animate-spin" /> : <RefreshCw />}
                 Update in HubSpot
@@ -692,11 +699,11 @@ function Workspace({
               <Button
                 size="sm"
                 onClick={draft.template?.beehiiv ? pushToBeehiiv : pushToHubspot}
-                disabled={busyAction !== null || pushPending}
+                disabled={!canEdit || busyAction !== null || pushPending}
                 title={
-                  draft.template?.beehiiv
+                  vo ?? (draft.template?.beehiiv
                     ? "Creates an unsent DRAFT post in beehiiv — this whole email as one HTML block, plus the feedback poll — and moves this newsletter out of the queue into production. beehiiv's editor shows that block as code; its Preview toggle renders it. Never sends or schedules."
-                    : `Creates an unsent DRAFT in ${tool} — the whole email, exactly as shown here — and moves this newsletter out of the queue into production. Never sends or schedules.`
+                    : `Creates an unsent DRAFT in ${tool} — the whole email, exactly as shown here — and moves this newsletter out of the queue into production. Never sends or schedules.`)
                 }
               >
                 {pushBusy && <Loader2 className="animate-spin" />}
@@ -837,7 +844,7 @@ function Workspace({
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between gap-2">
           <span className="text-sm font-medium">Subject</span>
-          <Button size="xs" variant="ghost" onClick={moreSubjects} disabled={busyAction !== null} title="Six more subject lines in this newsletter's own habits, each from a different angle">
+          <Button size="xs" variant="ghost" onClick={moreSubjects} disabled={!canEdit || busyAction !== null} title={vo ?? "Six more subject lines in this newsletter's own habits, each from a different angle"}>
             {busyAction === "subjects" ? <Loader2 className="animate-spin" /> : <Lightbulb />}
             More ideas
           </Button>
@@ -849,6 +856,7 @@ function Workspace({
                 key={opt}
                 type="button"
                 onClick={() => setSubject(opt)}
+                disabled={!canEdit}
                 title={subjectAngles[opt]}
                 className={cn("rounded-full border px-3 py-1 text-left text-xs hover:bg-muted", subject === opt && "border-primary bg-muted", subjectAngles[opt] && subject !== opt && "border-dashed")}
               >
@@ -857,11 +865,11 @@ function Workspace({
             ))}
           </div>
         )}
-        <Input value={subject} onChange={(e) => setSubject(e.target.value)} />
+        <Input value={subject} onChange={(e) => setSubject(e.target.value)} readOnly={!canEdit} />
       </div>
       <label className="flex flex-col gap-2 text-sm">
         <span className="font-medium">Preview text</span>
-        <Input value={previewText} onChange={(e) => setPreviewText(e.target.value)} />
+        <Input value={previewText} onChange={(e) => setPreviewText(e.target.value)} readOnly={!canEdit} />
       </label>
       {fieldNames.length > 0 && (
         <div className="flex flex-col gap-2 text-sm">
@@ -872,7 +880,7 @@ function Workspace({
             return (
               <label key={name} className="flex items-center gap-2 text-xs">
                 <span className="w-28 shrink-0 truncate font-mono text-muted-foreground" title={v?.hint || `{${name}}`}>{`{${name}}`}</span>
-                <Input className="h-8 text-xs" value={variables[name] ?? ""} placeholder={v?.sample || ""} onChange={(e) => setVariables({ ...variables, [name]: e.target.value })} />
+                <Input className="h-8 text-xs" value={variables[name] ?? ""} placeholder={v?.sample || ""} readOnly={!canEdit} onChange={(e) => setVariables({ ...variables, [name]: e.target.value })} />
               </label>
             );
           })}
@@ -894,7 +902,7 @@ function Workspace({
           <button
             type="button"
             onClick={deselect}
-            title="Edit the subject and preview text"
+            title={canEdit ? "Edit the subject and preview text" : undefined}
             className={cn(
               "flex w-full items-start gap-3 rounded-xl border bg-background px-4 py-3 text-left shadow-sm transition-shadow hover:shadow-md",
               !selected && "ring-2 ring-[#49adff]",
@@ -919,7 +927,8 @@ function Workspace({
               width={canvasWidth}
               layout={layout}
               variables={variables}
-              edit={{
+              // View-only: the rendered email, with no click-to-edit canvas.
+              edit={!canEdit ? undefined : {
                 selected,
                 editingSection,
                 regenerating: draft.regenerating,
@@ -976,7 +985,7 @@ function Workspace({
           </div>
         </div>
         <p className="flex items-center justify-center gap-1.5 px-5 pb-6 text-center text-xs text-muted-foreground">
-          <MousePointerClick className="size-3.5" /> Click any text to edit it in place · click an image or screenshot to swap it, or drop a file on it
+          <MousePointerClick className="size-3.5" /> {canEdit ? "Click any text to edit it in place · click an image or screenshot to swap it, or drop a file on it" : "View only"}
           {" · this is the email itself, exactly as it sends"}
         </p>
       </div>
@@ -989,13 +998,15 @@ function Workspace({
         )}
         {selSection ? (
           selSection.kind === "sponsor" ? (
-            <AdPanel
-              label={draft.specialLabel ?? selSection.heading ?? "Sponsor"}
-              draft={draft}
-              adText={adText(selSection.key)}
-              busyAction={busyAction}
-              onAction={special}
-            />
+            <EditGate>
+              <AdPanel
+                label={draft.specialLabel ?? selSection.heading ?? "Sponsor"}
+                draft={draft}
+                adText={adText(selSection.key)}
+                busyAction={busyAction}
+                onAction={special}
+              />
+            </EditGate>
           ) : (
             <>
               <SectionEditor
@@ -1008,13 +1019,14 @@ function Workspace({
                 onChange={(md) => setSectionMd(selSection.key, md)}
                 hideText
                 regenerating={draft.regenerating.includes(selSection.key)}
-                disabled={busyAction !== null}
+                disabled={!canEdit || busyAction !== null}
+                readOnly={!canEdit}
                 onRegenerate={(instruction) => regenerate(selSection.key, instruction)}
                 source={draft.kind === "roundup" ? (sections.find((x) => x.key === selSection.key)?.source ?? null) : null}
                 usage={draft.sectionUsage?.[selSection.key] ?? null}
-                onFindNewStory={draft.kind === "roundup" && !draft.sourceItemId ? (instruction) => regenerate(selSection.key, instruction, true) : undefined}
-                    onPickStory={draft.kind === "roundup" && !draft.sourceItemId ? (story, instruction) => void pickStory(selSection.key, story, instruction) : undefined}
-                onCancel={() => cancelRun(selSection.key)}
+                onFindNewStory={canEdit && draft.kind === "roundup" && !draft.sourceItemId ? (instruction) => regenerate(selSection.key, instruction, true) : undefined}
+                    onPickStory={canEdit && draft.kind === "roundup" && !draft.sourceItemId ? (story, instruction) => void pickStory(selSection.key, story, instruction) : undefined}
+                onCancel={canEdit ? () => cancelRun(selSection.key) : undefined}
               />
               <p className="text-xs text-muted-foreground">
                 {editingSection === selSection.key
@@ -1085,7 +1097,7 @@ function Workspace({
           <ReviewPanel
             review={draft.review}
             sections={draft.template?.sections ?? []}
-            busy={busyAction !== null}
+            busy={!canEdit || busyAction !== null}
             regenerating={draft.regenerating}
             onApply={(f) => void applyFinding(f)}
             onDismiss={(f) => void markFinding(f.id, "dismissed")}
@@ -1106,7 +1118,7 @@ function Workspace({
                 <span className="text-muted-foreground">Open</span>
               </button>
             )}
-            {draft.template && (
+            {canEdit && draft.template && (
               <div className="flex flex-col gap-2 rounded-lg border p-3">
                 <span className="text-xs font-medium">Before you send</span>
                 <div className="flex flex-wrap gap-1.5">
@@ -1127,9 +1139,9 @@ function Workspace({
             )}
             <label className="flex flex-col gap-1 text-xs">
               <span className="font-medium">Angle</span>
-              <Textarea className="min-h-16 text-xs" placeholder="What this issue is about: a topic, a point to make, a part of the video. Regenerate and Redraft steer by it." value={notes} onChange={(e) => setNotes(e.target.value)} />
+              <Textarea className="min-h-16 text-xs" placeholder="What this issue is about: a topic, a point to make, a part of the video. Regenerate and Redraft steer by it." value={notes} readOnly={!canEdit} onChange={(e) => setNotes(e.target.value)} />
             </label>
-            <p className="rounded-md bg-muted/60 p-3 text-xs text-muted-foreground">
+            <p className={cn("rounded-md bg-muted/60 p-3 text-xs text-muted-foreground", !canEdit && "hidden")}>
               Click any part of the email to edit it. Text opens right where it is, with Regenerate{draft.kind === "roundup" && !draft.sourceItemId ? " and Find new story" : ""} here{hasShots ? "; a screenshot opens its video scrubber, frames, Upload and Remove" : ""}. Headings, the masthead and other designed parts come from the template: edit them here for this issue, or open Template to change every issue.
             </p>
             {sourcesList}
@@ -1156,7 +1168,7 @@ function Workspace({
           }}
         />
       )}
-      {draft.kind === "single_video" && <VideoBar draft={draft} disabled={draft.status === "drafting" || busyAction !== null} onPick={(itemId) => post(`/api/newsletter-drafts/${draft.id}/video`, { itemId }, "video")} />}
+      {draft.kind === "single_video" && <VideoBar draft={draft} disabled={!canEdit || draft.status === "drafting" || busyAction !== null} onPick={(itemId) => post(`/api/newsletter-drafts/${draft.id}/video`, { itemId }, "video")} />}
       {draft.kind === "roundup" && draft.sourceItemId && (
         <div className="flex flex-wrap items-center gap-2 border-b px-5 py-2 text-sm">
           <span className="font-medium">About one video</span>
@@ -1173,7 +1185,7 @@ function Workspace({
         <p className="mx-5 mt-3 flex flex-wrap items-center gap-2 rounded-md bg-red-50 p-2 text-xs text-red-800 dark:bg-red-900/30 dark:text-red-200">
           <span>Email push: {draft.hubspotError}</span>
           {draft.hubspotEmailUrl && draft.hubspotError.includes("edited by hand") && (
-            <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={() => updateHubspot(true)} disabled={busyAction !== null || pushPending}>
+            <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={() => updateHubspot(true)} disabled={!canEdit || busyAction !== null || pushPending} title={vo}>
               Replace anyway
             </Button>
           )}
@@ -1193,9 +1205,9 @@ function Workspace({
           <button
             type="button"
             onClick={() => updateBeehiiv(false)}
-            disabled={busyAction !== null || pushPending}
+            disabled={!canEdit || busyAction !== null || pushPending}
             className="inline-flex items-center gap-1 rounded-md border bg-background px-1.5 py-0.5 font-medium text-foreground hover:bg-muted disabled:opacity-50"
-            title="Replaces the beehiiv draft's body with this email as it is now. The subject, preview text and send settings you set in beehiiv stay. Refuses a post that was sent, scheduled or edited by hand there."
+            title={vo ?? "Replaces the beehiiv draft's body with this email as it is now. The subject, preview text and send settings you set in beehiiv stay. Refuses a post that was sent, scheduled or edited by hand there."}
           >
             {pushBusy ? <Loader2 className="size-3 animate-spin" /> : <RefreshCw className="size-3" />} Update in beehiiv
           </button>{" "}
@@ -1206,7 +1218,7 @@ function Workspace({
         <p className="mx-5 mt-3 flex flex-wrap items-center gap-2 rounded-md bg-red-50 p-2 text-xs text-red-800 dark:bg-red-900/30 dark:text-red-200">
           <span>beehiiv: {draft.beehiivError}</span>
           {draft.beehiivPostUrl && draft.beehiivError.includes("edited by hand") && (
-            <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={() => updateBeehiiv(true)} disabled={busyAction !== null || pushPending}>
+            <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={() => updateBeehiiv(true)} disabled={!canEdit || busyAction !== null || pushPending} title={vo}>
               Replace anyway
             </Button>
           )}
@@ -1220,20 +1232,20 @@ function Workspace({
         <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-sm text-muted-foreground">
           <span className="font-medium text-foreground">No recent video to draft from yet</span>
           <span>Pick a video above, then draft.</span>
-          <Button onClick={() => post(`/api/newsletter-drafts/${draft.id}/draft`, {}, "draft")} disabled={busyAction !== null}>
+          <Button onClick={() => post(`/api/newsletter-drafts/${draft.id}/draft`, {}, "draft")} disabled={!canEdit || busyAction !== null} title={vo}>
             {busyAction === "draft" && <Loader2 className="animate-spin" />}
             Draft
           </Button>
         </div>
       ) : draft.status === "idea" ? (
-        <IdeaPanel draft={draft} disabled={busyAction !== null} drafting={busyAction === "draft"} onDraft={() => post(`/api/newsletter-drafts/${draft.id}/draft`, {}, "draft")} />
+        <IdeaPanel draft={draft} disabled={!canEdit || busyAction !== null} drafting={busyAction === "draft"} onDraft={() => post(`/api/newsletter-drafts/${draft.id}/draft`, {}, "draft")} />
       ) : draft.status === "drafting" ? (
-        <DraftingPanel draft={draft} cancelling={busyAction === "cancel"} onCancel={() => cancelRun()} />
+        <DraftingPanel draft={draft} cancelling={busyAction === "cancel"} canCancel={canEdit} onCancel={() => cancelRun()} />
       ) : draft.status === "failed" ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-sm">
           <span className="font-medium text-destructive">The draft failed</span>
           <pre className="max-w-2xl whitespace-pre-wrap text-xs text-muted-foreground">{draft.error}</pre>
-          <Button onClick={() => post(`/api/newsletter-drafts/${draft.id}/draft`, {}, "retry")} disabled={busyAction !== null}>
+          <Button onClick={() => post(`/api/newsletter-drafts/${draft.id}/draft`, {}, "retry")} disabled={!canEdit || busyAction !== null} title={vo}>
             {busyAction === "retry" && <Loader2 className="animate-spin" />}
             Try again
           </Button>
@@ -1252,6 +1264,7 @@ function Workspace({
                       key={opt}
                       type="button"
                       onClick={() => setSubject(opt)}
+                      disabled={!canEdit}
                       className={cn("rounded-full border px-3 py-1 text-left text-xs hover:bg-muted", subject === opt && "border-primary bg-muted")}
                     >
                       {opt}
@@ -1259,19 +1272,19 @@ function Workspace({
                   ))}
                 </div>
               )}
-              <Input value={subject} onChange={(e) => setSubject(e.target.value)} />
+              <Input value={subject} onChange={(e) => setSubject(e.target.value)} readOnly={!canEdit} />
             </div>
             <label className="flex flex-col gap-2 text-sm">
               <span className="font-medium">Preview text</span>
-              <Input value={previewText} onChange={(e) => setPreviewText(e.target.value)} />
+              <Input value={previewText} onChange={(e) => setPreviewText(e.target.value)} readOnly={!canEdit} />
             </label>
 
             {draft.template ? (
               draft.template.sections.map((sec) =>
                 sec.kind === "sponsor" ? (
-                  <div key={sec.key} className="rounded-lg border p-3">
+                  <EditGate key={sec.key} className="rounded-lg border p-3">
                     <AdPanel label={draft.specialLabel ?? sec.heading ?? "Sponsor"} draft={draft} adText={adText(sec.key)} busyAction={busyAction} onAction={special} />
-                  </div>
+                  </EditGate>
                 ) : (
                   <SectionEditor
                     key={sec.key}
@@ -1284,13 +1297,14 @@ function Workspace({
                       setSections((cur) => (cur.some((x) => x.key === sec.key) ? cur.map((x) => (x.key === sec.key ? { ...x, markdown: md } : x)) : [...cur, { key: sec.key, markdown: md }]))
                     }
                     regenerating={draft.regenerating.includes(sec.key)}
-                    disabled={busyAction !== null}
+                    disabled={!canEdit || busyAction !== null}
+                    readOnly={!canEdit}
                     onRegenerate={(instruction) => regenerate(sec.key, instruction)}
                     source={draft.kind === "roundup" ? (sections.find((x) => x.key === sec.key)?.source ?? null) : null}
                     usage={draft.sectionUsage?.[sec.key] ?? null}
-                    onFindNewStory={draft.kind === "roundup" && !draft.sourceItemId ? (instruction) => regenerate(sec.key, instruction, true) : undefined}
-                    onPickStory={draft.kind === "roundup" && !draft.sourceItemId ? (story, instruction) => void pickStory(sec.key, story, instruction) : undefined}
-                    onCancel={() => cancelRun(sec.key)}
+                    onFindNewStory={canEdit && draft.kind === "roundup" && !draft.sourceItemId ? (instruction) => regenerate(sec.key, instruction, true) : undefined}
+                    onPickStory={canEdit && draft.kind === "roundup" && !draft.sourceItemId ? (story, instruction) => void pickStory(sec.key, story, instruction) : undefined}
+                    onCancel={canEdit ? () => cancelRun(sec.key) : undefined}
                   >
                     {hasShots && (
                       <ScreenshotPicker sectionKey={sec.key} markdown={sections.find((x) => x.key === sec.key)?.markdown ?? ""} shots={shots} />
@@ -1301,7 +1315,7 @@ function Workspace({
             ) : (
               <label className="flex flex-col gap-2 text-sm">
                 <span className="font-medium">Body (Markdown)</span>
-                <Textarea className="min-h-[480px] font-mono text-xs" value={body} onChange={(e) => setBody(e.target.value)} />
+                <Textarea className="min-h-[480px] font-mono text-xs" value={body} readOnly={!canEdit} onChange={(e) => setBody(e.target.value)} />
               </label>
             )}
 
@@ -1454,7 +1468,7 @@ const PHASE_LABELS: Record<DraftPhaseName, string> = {
   reviewing: "Reviewing",
 };
 
-function DraftingPanel({ draft, cancelling, onCancel }: { draft: EditorDraft; cancelling: boolean; onCancel: () => void }) {
+function DraftingPanel({ draft, cancelling, canCancel = true, onCancel }: { draft: EditorDraft; cancelling: boolean; canCancel?: boolean; onCancel: () => void }) {
   const now = useNow();
   const left = Math.ceil((Date.parse(draft.updatedAt) + NEWSLETTER_START_DELAY_MS - now) / 1000);
   const p = draft.progress ?? null;
@@ -1498,7 +1512,7 @@ function DraftingPanel({ draft, cancelling, onCancel }: { draft: EditorDraft; ca
           ? "Cancel now and nothing runs (no charge)."
           : "Usually a few minutes. You can close this and come back. Cancel stops it at the end of its current step; you're only charged for the steps already done."}
       </span>
-      <Button variant="outline" size="sm" onClick={onCancel} disabled={cancelling}>
+      <Button variant="outline" size="sm" onClick={onCancel} disabled={cancelling || !canCancel} title={canCancel ? undefined : VIEW_ONLY_TITLE}>
         {cancelling ? <Loader2 className="animate-spin" /> : <X />}
         Cancel
       </Button>
@@ -1531,6 +1545,7 @@ function SectionEditor({
   onPickStory,
   onCancel,
   hideText = false,
+  readOnly = false,
   children,
 }: {
   draftId: string;
@@ -1550,6 +1565,8 @@ function SectionEditor({
   onCancel?: () => void;
   /** Visual view: the text is edited in the email itself, not here. */
   hideText?: boolean;
+  /** View-only (no edit access to the brand): the text stays readable; no rewrite controls. */
+  readOnly?: boolean;
   /** Extra controls under the section (the How-To's screenshot picker). */
   children?: React.ReactNode;
 }) {
@@ -1605,6 +1622,7 @@ function SectionEditor({
           onChange={(e) => onChange(e.target.value)}
           // Cmd+B / Cmd+I, same as the visual view.
           onKeyDown={(e) => {
+            if (readOnly) return;
             const mark = formatShortcut(e);
             const next = mark ? applyFormat(value, mark) : null;
             if (next == null) return;
@@ -1612,9 +1630,12 @@ function SectionEditor({
             onChange(next);
           }}
           disabled={regenerating}
+          readOnly={readOnly}
         />
       )}
       {children}
+      {!readOnly && (
+      <>
       <div className="flex flex-wrap items-center gap-1">
         {REWRITE_PRESETS.map((p) => (
           <button
@@ -1700,6 +1721,8 @@ function SectionEditor({
           {instruction.trim() ? "Revise" : "Regenerate"}
         </Button>
       </div>
+      </>
+      )}
     </div>
   );
 }

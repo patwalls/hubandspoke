@@ -74,6 +74,7 @@ import { Inspector, PicturePicker, formatSec, frameCandidate } from "./inspector
 import { PageCanvas, PlaybackContext, type PlaybackState } from "./page-canvas";
 import { DesignStoreContext, commands, createDesignStore, useDesign, useDesignStoreApi } from "./store";
 import { trackUsage } from "@/lib/usage/track";
+import { useCanEditBrand } from "@/components/brand-access";
 
 const AUTOSAVE_DELAY_MS = 900;
 const FRAMES_POLL_MS = 2500;
@@ -100,13 +101,16 @@ export interface DesignEditorDialogProps {
 
 export function DesignEditorDialog({ open, onOpenChange, productionItemId, brand, onDone, onUnsupported }: DesignEditorDialogProps) {
   const [session, setSession] = useState<DesignEditorSession | null>(null);
+  // The editor only edits — and its first open kicks off a paid AI draft —
+  // so view-only users get a notice instead (their triggers are disabled too).
+  const canEdit = useCanEditBrand(brand);
 
   useEffect(() => {
     if (open) trackUsage("modal:design-editor", brand);
   }, [open, brand]);
 
   useEffect(() => {
-    if (!open) {
+    if (!open || !canEdit) {
       setSession(null);
       return;
     }
@@ -141,7 +145,25 @@ export function DesignEditorDialog({ open, onOpenChange, productionItemId, brand
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, productionItemId]);
+  }, [open, productionItemId, canEdit]);
+
+  if (!canEdit) {
+    return (
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="sm:max-w-md">
+          <DialogTitle>View only</DialogTitle>
+          <p className="text-sm text-muted-foreground">
+            You don&apos;t have edit access to this brand, so the design editor is off.
+          </p>
+          <div className="flex justify-end">
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              Close
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    );
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

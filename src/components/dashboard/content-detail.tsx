@@ -133,6 +133,7 @@ import { trackUsage } from "@/lib/usage/track";
 import { HandoffButton } from "./handoff-button";
 import { leavePublishedConfirm } from "@/lib/status/leave-published";
 import { CrossPostPasteLinks } from "./cross-post-paste-links";
+import { useCanEditBrand } from "@/components/brand-access";
 
 interface BrandFormat {
   id: string;
@@ -427,6 +428,8 @@ const PROPERTY_TRIGGER_CLASS =
 // Pattern A — "Editable property chip". Trailing chevron is mandatory
 // and supplied by the caller. The Status variant adds a palette tint via
 // `statusClassWithPalette` *on top of* this base.
+const VIEW_ONLY_TITLE = "View only — you don't have edit access to this brand";
+
 const CHIP_A_BASE =
   "inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-background px-2 text-xs font-medium hover:bg-muted/50 transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-ring";
 // Pattern B — "Read-only info tag". Optional `CHIP_B_CLICKABLE` is added
@@ -466,6 +469,9 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  // Per-brand edit access: view-only users can browse everything here but
+  // every control that changes the post renders disabled (the API 403s too).
+  const canEdit = useCanEditBrand(brand);
   const tabParam = searchParams.get("tab");
   const activeTabParam: DetailTab = DETAIL_TAB_VALUES.includes(
     tabParam as DetailTab,
@@ -756,7 +762,8 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
   const autoPublishFiredRef = useRef<string | null>(null);
   useEffect(() => {
     const item = data?.item;
-    if (!item) return;
+    // View-only users never auto-fire writes (paid Descript/LLM calls).
+    if (!item || !canEdit) return;
     const awaitingPublish =
       !!item.sourceClipIdeaId &&
       !!item.descriptCompositionId &&
@@ -780,6 +787,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     data?.item?.descriptPublishJobId,
     data?.item?.descriptPublishedAt,
     data?.item?.descriptPublishError,
+    canEdit,
   ]);
 
   // Auto-create an empty draft row for any inline-drafting item that
@@ -792,7 +800,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
   const ensureDraftFiredRef = useRef<string | null>(null);
   useEffect(() => {
     const it = data?.item;
-    if (!it) return;
+    if (!it || !canEdit) return;
     if (data?.currentDraft) return;
     const isInlineDrafting =
       typeof it.postType === "string" &&
@@ -817,7 +825,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     // Intentionally omitting `load` from deps; `ensureDraftFiredRef`
     // already prevents repeat fires per id.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data?.item?.id, data?.item?.postType, data?.item?.status, data?.currentDraft]);
+  }, [data?.item?.id, data?.item?.postType, data?.item?.status, data?.currentDraft, canEdit]);
 
   // Auto-fire the Draft Algorithm when an editor lands on an IG drafting
   // surface that has no draft yet. The cross-post / repurpose routes
@@ -832,7 +840,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
   const autoGenCaptionFiredRef = useRef<string | null>(null);
   useEffect(() => {
     const item = data?.item;
-    if (!item) return;
+    if (!item || !canEdit) return;
     const isIg =
       typeof item.postType === "string" && item.postType.startsWith("instagram_");
     const noDraft = !data?.currentDraft;
@@ -864,6 +872,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     data?.item?.postType,
     data?.currentDraft,
     data?.transcript,
+    canEdit,
   ]);
 
   // Auto-clear per-field "Saved" pills 1.5s after each successful save.
@@ -1753,7 +1762,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     !data?.item.descriptPublishedAt &&
     !data?.item.descriptPublishError;
   useEffect(() => {
-    if (!itemIdForAutoSync) return;
+    if (!itemIdForAutoSync || !canEdit) return;
     if (!isAwaitingRender) return;
     void fetch(
       `/api/production-items/${itemIdForAutoSync}/sync-descript-publish`,
@@ -1767,7 +1776,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
       // surfaces the state via its own polling.
     });
     // We intentionally only re-fire when the item or state changes.
-  }, [itemIdForAutoSync, isAwaitingRender]);
+  }, [itemIdForAutoSync, isAwaitingRender, canEdit]);
 
   const onLocalEdit = useCallback(
     (fieldKey: string, value: string | string[]) => {
@@ -1847,6 +1856,11 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
         });
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
+          // 403 = view-only on this brand (src/lib/brand-access.ts). Fields
+          // update optimistically before this call, so refetch to snap every
+          // one back to what's actually saved instead of showing an edit that
+          // never landed.
+          if (res.status === 403) void load();
           throw new Error(err.error || `HTTP ${res.status}`);
         }
         const payload = await res.json();
@@ -2284,7 +2298,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                   placeholder="Untitled"
                   className="border-0 bg-transparent shadow-none h-auto px-0 py-0 text-xl sm:text-2xl md:text-2xl font-semibold leading-tight focus-visible:ring-0 focus-visible:ring-offset-0"
                 />
-              ) : isYouTube ? (
+              ) : isYouTube || !canEdit ? (
                 <h1 className="text-xl sm:text-2xl font-semibold leading-tight text-foreground min-w-0 break-words">
                   {item.title || (
                     <span className="text-muted-foreground">(Untitled)</span>
@@ -2309,7 +2323,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                   )}
                 </h1>
               )}
-              {!isYouTube && !editingTitle && (
+              {!isYouTube && canEdit && !editingTitle && (
                 <button
                   type="button"
                   onClick={() => setEditingTitle(true)}
@@ -2359,6 +2373,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                 // editable so operators can correct e.g. a Short that came
                 // in with a watch?v= link and got tagged youtube_long.
                 accountDisabled={isYouTube}
+                disabled={!canEdit}
                 onChange={({ accountId: nextId, postType: nextType }) => {
                   setAccountId(nextId);
                   setPostType(nextType);
@@ -2382,7 +2397,8 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
             >
               <PopoverTrigger
                 aria-label="Format"
-                className={CHIP_A_BASE}
+                disabled={!canEdit}
+                className={cn(CHIP_A_BASE, !canEdit && "cursor-not-allowed opacity-60")}
               >
                 <span className="truncate max-w-[260px]">
                   {format || (
@@ -2483,6 +2499,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
               triggerClassName={cn(CHIP_A_BASE, "w-auto")}
               placeholder="Unassigned"
               allowUnassigned
+              disabled={!canEdit}
             />
 
             {/* Status chip — colored pill matching the current status
@@ -2493,6 +2510,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
              *  modal. */}
             <Select
               value={status}
+              disabled={!canEdit}
               onValueChange={(v) => {
                 const prev = status;
                 const next = v ?? "";
@@ -2701,6 +2719,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                           brand={brand}
                           excludeId={contentId}
                           value={pillar}
+                          disabled={!canEdit}
                           onChange={(next) => {
                             setPillar(next);
                             void persistField({
@@ -2721,6 +2740,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                           brand={brand}
                           excludeId={contentId}
                           value={repostedFromOption}
+                          disabled={!canEdit}
                           onChange={(next) => {
                             setRepostedFromOption(next);
                             void persistField({
@@ -2798,10 +2818,13 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                     ? "text-emerald-600 dark:text-emerald-400"
                     : "",
                 )}
+                disabled={!canEdit}
                 title={
-                  item.hubSpokeOverride
-                    ? "Marked as Hub & Spoke — click to remove"
-                    : "Mark as Hub & Spoke content"
+                  !canEdit
+                    ? VIEW_ONLY_TITLE
+                    : item.hubSpokeOverride
+                      ? "Marked as Hub & Spoke — click to remove"
+                      : "Mark as Hub & Spoke content"
                 }
                 onClick={() =>
                   void persistField({
@@ -2996,6 +3019,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                       }
                     }}
                     aria-label="CTA UTM campaign"
+                    readOnly={!canEdit}
                     className="h-8 text-xs font-mono flex-1"
                     placeholder="e.g. angus-warner-42"
                   />
@@ -3005,7 +3029,8 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                       variant="outline"
                       size="sm"
                       className="h-8 px-2 text-xs shrink-0"
-                      disabled={generatingUtm}
+                      disabled={generatingUtm || !canEdit}
+                      title={canEdit ? undefined : VIEW_ONLY_TITLE}
                       onClick={async () => {
                         if (generatingUtm) return;
                         setGeneratingUtm(true);
@@ -3112,6 +3137,8 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                         variant="outline"
                         size="sm"
                         className="h-8 text-xs"
+                        disabled={!canEdit}
+                        title={canEdit ? undefined : VIEW_ONLY_TITLE}
                         onClick={() => setDmKeywordDialogOpen(true)}
                       >
                         Edit
@@ -3129,6 +3156,8 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                         variant="outline"
                         size="sm"
                         className="h-8 text-xs"
+                        disabled={!canEdit}
+                        title={canEdit ? undefined : VIEW_ONLY_TITLE}
                         onClick={() => setDmKeywordDialogOpen(true)}
                       >
                         + Attach DM keyword
@@ -3196,8 +3225,9 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
             <button
               type="button"
               onClick={() => setPublishDialogOpen(true)}
+              disabled={!canEdit}
               className={buttonVariants({ variant: "outline", size: "sm" })}
-              title="Edit the published link or date for this post"
+              title={canEdit ? "Edit the published link or date for this post" : VIEW_ONLY_TITLE}
             >
               <PencilIcon className="size-3.5" /> Edit publish info
             </button>
@@ -3209,9 +3239,12 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                   ? setTiktokDialogOpen(true)
                   : setPublishDialogOpen(true)
               }
+              disabled={!canEdit}
               className={buttonVariants({ variant: "default", size: "sm" })}
               title={
-                item.postType === "tiktok"
+                !canEdit
+                  ? VIEW_ONLY_TITLE
+                  : item.postType === "tiktok"
                   ? "Publish this video to your TikTok inbox now, or schedule it"
                   : "Mark this post as published (paste the live link) or schedule it for later"
               }
@@ -3254,25 +3287,25 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                     <RepeatIcon className="size-3.5" /> Repost
                   </DropdownMenuItem>
                   <DropdownMenuItem
-                    disabled={actionPending}
+                    disabled={actionPending || !canEdit}
                     onClick={() => void handleRedraft()}
                   >
                     <SparklesIcon className="size-3.5" /> Redraft
                   </DropdownMenuItem>
                   <DropdownMenuItem
-                    disabled={actionPending}
+                    disabled={actionPending || !canEdit}
                     onClick={() => void handleDuplicate()}
                   >
                     <CopyIcon className="size-3.5" /> Duplicate
                   </DropdownMenuItem>
                   <DropdownMenuItem
-                    disabled={actionPending}
+                    disabled={actionPending || !canEdit}
                     onClick={() => setShowMergeModal(true)}
                   >
                     <GitMerge className="size-3.5" /> Merge…
                   </DropdownMenuItem>
                   <DropdownMenuItem
-                    disabled={actionPending || !currentFormat}
+                    disabled={actionPending || !currentFormat || !canEdit}
                     onClick={() => setShowForkFormat(true)}
                   >
                     <GitBranchIcon className="size-3.5" /> Fork format…
@@ -3285,6 +3318,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                   {(item.status === "Published" ||
                     item.status === "Scheduled") && (
                     <DropdownMenuItem
+                      disabled={!canEdit}
                       onClick={() => setPublishDialogOpen(true)}
                     >
                       <PencilIcon className="size-3.5" /> Edit publish info
@@ -3293,7 +3327,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                   <DropdownMenuSeparator />
                   {item.sourceClipIdeaId && (
                     <DropdownMenuSub>
-                      <DropdownMenuSubTrigger disabled={actionPending}>
+                      <DropdownMenuSubTrigger disabled={actionPending || !canEdit}>
                         <FilmIcon className="size-3.5" /> Send to Descript
                       </DropdownMenuSubTrigger>
                       <DropdownMenuSubContent>
@@ -3352,20 +3386,21 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                   )}
                   {!hasDescriptProject && item.mediaS3Key && (
                     <DropdownMenuItem
-                      disabled={actionPending}
+                      disabled={actionPending || !canEdit}
                       onClick={() => void handleAddToDescript()}
                     >
                       <FilmIcon className="size-3.5" /> Add to Descript
                     </DropdownMenuItem>
                   )}
                   {hasDescriptProject && (
-                    <DropdownMenuItem onClick={openDescriptModal}>
+                    <DropdownMenuItem disabled={!canEdit} onClick={openDescriptModal}>
                       <RefreshCwIcon className="size-3.5" /> Replace Descript
                       file
                     </DropdownMenuItem>
                   )}
                   {hasDescriptProject && item.descriptCompositionId && (
                     <DropdownMenuItem
+                      disabled={!canEdit}
                       onClick={() => void handleDownloadFromDescript()}
                     >
                       <DownloadIcon className="size-3.5" /> Download from
@@ -3404,6 +3439,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                     item.hasWatermarkedMedia &&
                     !isPublished && (
                       <DropdownMenuItem
+                        disabled={!canEdit}
                         onClick={() => void handleSwapOriginalMedia()}
                         title={item.cleanOriginLabel ?? undefined}
                       >
@@ -3426,6 +3462,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                    *  one-shot trigger per item. */}
                   {isYouTube && !isPublished && !item.mediaS3Key && (
                     <DropdownMenuItem
+                      disabled={!canEdit}
                       onClick={() => setMediaUploadOpen(true)}
                     >
                       <UploadIcon className="size-3.5" /> Upload source video
@@ -3443,7 +3480,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                   )}
                   {isPublished && (
                     <DropdownMenuItem
-                      disabled={isSyncing}
+                      disabled={isSyncing || !canEdit}
                       onClick={() => void handleSync()}
                     >
                       <RefreshCwIcon
@@ -3461,7 +3498,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                   {status !== "Killed" && (
                     <DropdownMenuItem
                       variant="destructive"
-                      disabled={actionPending}
+                      disabled={actionPending || !canEdit}
                       onClick={() =>
                         setPendingKill({ previousStatus: status })
                       }
@@ -3472,7 +3509,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                   {!isYouTube && (
                     <DropdownMenuItem
                       variant="destructive"
-                      disabled={deleting}
+                      disabled={deleting || !canEdit}
                       onClick={() => void handleDelete()}
                     >
                       <Trash2Icon className="size-3.5" />
@@ -4292,8 +4329,8 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                     repurposeTargets.map((f) => ({ id: f.id, name: f.name }))
                   )
                 }
-                disabled={creatingAll}
-                title="Create a derivative for every target format, one after another."
+                disabled={creatingAll || !canEdit}
+                title={canEdit ? "Create a derivative for every target format, one after another." : VIEW_ONLY_TITLE}
                 className="inline-flex items-center h-7 px-3 rounded-full bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {creatingAll ? "Creating all…" : "Create all"}
@@ -4339,7 +4376,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                     buttonVariants({ variant: "outline", size: "sm" }),
                     "gap-2",
                   )}
-                  disabled={creatingAll}
+                  disabled={creatingAll || !canEdit}
                 >
                   <span>Pick a format…</span>
                   <ChevronDownIcon className="size-3 opacity-50" />
@@ -4496,8 +4533,8 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                         <button
                           type="button"
                           onClick={() => createDerivative(f.id, f.name)}
-                          disabled={busy || creatingAll}
-                          title="Create a new draft in this format, assigned to you."
+                          disabled={busy || creatingAll || !canEdit}
+                          title={canEdit ? "Create a new draft in this format, assigned to you." : VIEW_ONLY_TITLE}
                           className="inline-flex items-center h-7 px-3 rounded-full bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           {busy ? "Creating…" : "Create →"}
@@ -4666,7 +4703,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                   {s3KeyForRetry && descriptError ? (
                     <Button
                       onClick={retryDescriptImport}
-                      disabled={descriptStage === "creating"}
+                      disabled={descriptStage === "creating" || !canEdit}
                     >
                       {descriptStage === "creating" ? "Retrying…" : "Retry Descript import"}
                     </Button>
@@ -4676,6 +4713,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                       descriptMode === "upload" ? submitDescriptUpload : submitDescriptUrl
                     }
                     disabled={
+                      !canEdit ||
                       descriptStage === "creating" ||
                       descriptStage === "uploading" ||
                       (descriptMode === "upload" ? !descriptFile : !descriptUrl.trim())
@@ -4790,6 +4828,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                   <Button
                     onClick={submitMediaUpload}
                     disabled={
+                      !canEdit ||
                       !mediaUploadFile ||
                       mediaUploadStage === "uploading" ||
                       mediaUploadStage === "confirming"
@@ -4819,6 +4858,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
       />
 
       <PublishScheduleDialog
+        brand={item.brand}
         open={publishDialogOpen}
         onOpenChange={setPublishDialogOpen}
         itemId={item.id}
@@ -5076,6 +5116,7 @@ function GoLinkPopover({
   slug: string | null;
   baseUrl: string;
 }) {
+  const canEdit = useCanEditBrand();
   const [data, setData] = useState<GoLinkData | null>(null);
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -5225,7 +5266,7 @@ function GoLinkPopover({
                     type="button"
                     size="sm"
                     className="h-7 px-2 text-xs"
-                    disabled={busy}
+                    disabled={busy || !canEdit}
                     onClick={() => void saveRedirect()}
                   >
                     {busy ? "Saving…" : "Save"}
@@ -5255,6 +5296,8 @@ function GoLinkPopover({
                   variant="outline"
                   size="sm"
                   className="h-7 px-2 text-xs shrink-0"
+                  disabled={!canEdit}
+                  title={canEdit ? undefined : VIEW_ONLY_TITLE}
                   onClick={() => {
                     setDestDraft(data?.destinationUrl ?? "");
                     setEditing(true);
@@ -5269,7 +5312,8 @@ function GoLinkPopover({
               variant="ghost"
               size="sm"
               className="h-8 text-xs"
-              disabled={busy}
+              disabled={busy || !canEdit}
+              title={canEdit ? undefined : VIEW_ONLY_TITLE}
               onClick={() => void regenerate()}
             >
               {busy ? "Working…" : "Regenerate link"}
@@ -5286,7 +5330,8 @@ function GoLinkPopover({
               variant="outline"
               size="sm"
               className="h-8 text-xs"
-              disabled={busy}
+              disabled={busy || !canEdit}
+              title={canEdit ? undefined : VIEW_ONLY_TITLE}
               onClick={() => void regenerate()}
             >
               {busy ? "Generating…" : "Generate link"}
@@ -5478,6 +5523,7 @@ function DescriptStatusPill({
 }) {
   const router = useRouter();
   const pathname = usePathname();
+  const canEdit = useCanEditBrand();
   const [data, setData] = useState<DescriptStatusResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [redriving, setRedriving] = useState(false);
@@ -5768,6 +5814,8 @@ function DescriptStatusPill({
                   size="sm"
                   variant="outline"
                   className="w-full"
+                  disabled={!canEdit}
+                  title={canEdit ? undefined : VIEW_ONLY_TITLE}
                   onClick={() =>
                     void handleSyncFromDescript(data.publish.state === "failed")
                   }
@@ -5818,7 +5866,7 @@ function DescriptStatusPill({
               type="button"
               size="sm"
               onClick={() => void handleCreateInDescript()}
-              disabled={creating}
+              disabled={creating || !canEdit}
             >
               {creating ? "Starting…" : "Create in Descript"}
             </Button>
@@ -5829,7 +5877,7 @@ function DescriptStatusPill({
               variant="outline"
               size="sm"
               onClick={() => void handleStartOver()}
-              disabled={redriving || startingOver}
+              disabled={redriving || startingOver || !canEdit}
             >
               {startingOver ? "Starting over…" : "Start Over"}
             </Button>
@@ -5839,7 +5887,7 @@ function DescriptStatusPill({
               type="button"
               size="sm"
               onClick={handleRedrive}
-              disabled={redriving || startingOver}
+              disabled={redriving || startingOver || !canEdit}
             >
               {redriving ? "Re-running…" : "Re-run"}
             </Button>
@@ -5937,6 +5985,7 @@ const TYPEFULLY_STATUS_STYLES: Record<
  * typefullySocialSetId).
  */
 function TypefullyStatusPill({ productionItemId }: { productionItemId: string }) {
+  const canEdit = useCanEditBrand();
   const [data, setData] = useState<TypefullyStatusResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [redriving, setRedriving] = useState(false);
@@ -6011,12 +6060,12 @@ function TypefullyStatusPill({ productionItemId }: { productionItemId: string })
       <button
         type="button"
         onClick={handleRedrive}
-        disabled={redriving}
+        disabled={redriving || !canEdit}
         className={cn(
           buttonVariants({ variant: "outline", size: "sm" }),
           style.pillClass,
         )}
-        title="Create a Typefully draft for this post"
+        title={canEdit ? "Create a Typefully draft for this post" : VIEW_ONLY_TITLE}
       >
         <span className={cn("size-1.5 rounded-full", style.dot)} aria-hidden />
         {redriving ? "Creating…" : style.label}
@@ -6140,7 +6189,7 @@ function TypefullyStatusPill({ productionItemId }: { productionItemId: string })
               type="button"
               size="sm"
               onClick={handleRedrive}
-              disabled={redriving}
+              disabled={redriving || !canEdit}
             >
               {redriving ? "Re-running…" : "Re-run"}
             </Button>

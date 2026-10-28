@@ -71,6 +71,7 @@ import { speakerColor, speakerLabel } from "@/components/dashboard/transcript-sp
 import { Transport } from "./transport";
 import type { TimelineNote } from "./timeline";
 import { trackUsage } from "@/lib/usage/track";
+import { useCanEditBrand } from "@/components/brand-access";
 import type { IdeaNav } from "@/components/dashboard/idea-nav";
 
 const AUTOSAVE_DELAY_MS = 900;
@@ -205,6 +206,9 @@ function EditorWorkspace({
 }) {
   const router = useRouter();
   const storeApi = useEditorStoreApi();
+  // View-only (no edit access to this brand): the editor opens like a
+  // conflicted copy — everything plays and reads, nothing edits or saves.
+  const viewOnly = !useCanEditBrand(brand);
   const doc = useEditor((s) => s.doc);
   const saveState = useEditor((s) => s.saveState);
   const canUndo = useEditor((s) => s.past.length > 0);
@@ -260,7 +264,7 @@ function EditorWorkspace({
       list.map((s, i) => [s.id, { label: speakerLabel(s, i), className: speakerColor(i).text }]),
     );
   }, [session.speakers]);
-  const locked = saveState === "conflict";
+  const locked = saveState === "conflict" || viewOnly;
   const isReExport = session.clipIdea.status !== "suggested";
 
   useEffect(() => {
@@ -271,6 +275,7 @@ function EditorWorkspace({
   // One save in flight at a time; a save requested mid-flight runs after it.
   const saveChain = useRef<Promise<boolean>>(Promise.resolve(true));
   const save = useCallback((): Promise<boolean> => {
+    if (viewOnly) return Promise.resolve(false);
     saveChain.current = saveChain.current.then(async () => {
       const { doc: current, savedDoc, revision, saveState: state } = storeApi.getState();
       if (state === "conflict") return false;
@@ -304,7 +309,7 @@ function EditorWorkspace({
       }
     });
     return saveChain.current;
-  }, [session.clipIdea.id, storeApi]);
+  }, [session.clipIdea.id, storeApi, viewOnly]);
 
   useEffect(() => {
     if (saveState !== "dirty") return;
@@ -332,7 +337,7 @@ function EditorWorkspace({
   useEffect(() => {
     const flush = () => {
       const { doc: current, savedDoc, revision, saveState: state } = storeApi.getState();
-      if (current === savedDoc || state === "conflict") return;
+      if (viewOnly || current === savedDoc || state === "conflict") return;
       void fetch(`/api/clip-ideas/${session.clipIdea.id}/editor`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -357,9 +362,10 @@ function EditorWorkspace({
       window.removeEventListener("pagehide", flush);
       window.removeEventListener("beforeunload", onBeforeUnload);
     };
-  }, [session.clipIdea.id, storeApi]);
+  }, [session.clipIdea.id, storeApi, viewOnly]);
 
   const saveAndClose = async () => {
+    if (viewOnly) return onClose();
     if (!(await save()) && storeApi.getState().saveState !== "conflict") {
       toast.error("Couldn't save your draft", {
         description: "Your edits are kept in this browser — check your connection and try again.",
@@ -375,7 +381,7 @@ function EditorWorkspace({
       const t = e.target as HTMLElement;
       const typing = t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable;
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
-        if (typing) return; // leave native text undo alone
+        if (typing || viewOnly) return; // leave native text undo alone
         e.preventDefault();
         if (e.shiftKey) redo();
         else undo();
@@ -394,7 +400,7 @@ function EditorWorkspace({
       // steps); ⌫ removes an added text or logo layer — but never while
       // transcript words are highlighted, where ⌫ means "cut these words".
       const { stageSelection, wordSelection, doc: current } = storeApi.getState();
-      if (!stageSelection || storeApi.getState().saveState === "conflict") return;
+      if (!stageSelection || viewOnly || storeApi.getState().saveState === "conflict") return;
       const arrow = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] }[e.key];
       if (arrow) {
         e.preventDefault();
@@ -430,7 +436,7 @@ function EditorWorkspace({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [engine, plan, undo, redo, apply, storeApi]);
+  }, [engine, plan, undo, redo, apply, storeApi, viewOnly]);
 
   // ── Bulk clean-up ────────────────────────────────────────────────────────
   const fillerCount = doc.sections.reduce(
@@ -665,7 +671,7 @@ function EditorWorkspace({
               {session.clipIdea.targetFormat && (
                 <button
                   type="button"
-                  disabled={busy !== null}
+                  disabled={busy !== null || viewOnly}
                   title={`Make this edit's fonts, caption style, hook position and video inset the starting point for every new "${session.clipIdea.targetFormat}" clip — what a Descript pack did. The cut stays this clip's.`}
                   onClick={() => void saveLook()}
                   className="flex w-full flex-col items-start gap-0.5 rounded px-2 py-1.5 text-left hover:bg-muted disabled:opacity-50"
@@ -698,7 +704,13 @@ function EditorWorkspace({
         </div>
       </div>
 
-      {locked && (
+      {viewOnly && (
+        <div className="flex shrink-0 items-center gap-2 border-b border-border bg-muted/60 px-5 py-2 text-xs text-muted-foreground">
+          <AlertTriangleIcon className="size-3.5" />
+          View only — you don&apos;t have edit access to this brand, so changes are off.
+        </div>
+      )}
+      {locked && !viewOnly && (
         <div className="flex shrink-0 items-center gap-2 border-b border-amber-200 bg-amber-50 px-5 py-2 text-xs text-amber-900">
           <AlertTriangleIcon className="size-3.5" />
           This clip was changed in another tab, so this copy is out of date.
@@ -779,7 +791,7 @@ function EditorWorkspace({
             className={cn("min-h-0 min-w-0", vertical && "h-full")}
             style={vertical ? { aspectRatio: `${doc.canvas.width} / ${doc.canvas.height}` } : undefined}
           >
-            <Stage plan={plan} scene={scene} engine={engine} videoUrl={session.source.videoUrl} brand={brand} />
+            <Stage plan={plan} scene={scene} engine={engine} videoUrl={session.source.videoUrl} brand={brand} readOnly={viewOnly} />
           </div>
         )}
 
@@ -793,7 +805,7 @@ function EditorWorkspace({
               onDraftingChange={setPostDrafting}
               beforeRedraft={save}
               mediaOverride={
-                tab === "post" ? <Stage plan={plan} scene={scene} engine={engine} videoUrl={session.source.videoUrl} brand={brand} variant="preview" /> : undefined
+                tab === "post" ? <Stage plan={plan} scene={scene} engine={engine} videoUrl={session.source.videoUrl} brand={brand} variant="preview" readOnly={viewOnly} /> : undefined
               }
             />
           </div>
@@ -810,7 +822,7 @@ function EditorWorkspace({
           uploadItemId={session.source.productionItemId}
           readOnly={locked}
           notes={notes}
-          onResolveNote={(id) => void resolveNote(id)}
+          onResolveNote={viewOnly ? undefined : (id) => void resolveNote(id)}
         />
       </div>
 
@@ -827,7 +839,7 @@ function EditorWorkspace({
           <button
             type="button"
             onClick={() => setKillOpen(true)}
-            disabled={busy !== null}
+            disabled={busy !== null || viewOnly}
             className="text-sm text-red-600 hover:text-red-700 disabled:opacity-50"
           >
             Kill idea
@@ -846,12 +858,13 @@ function EditorWorkspace({
             disabled={busy === "export"}
             title="Your edits save automatically as a draft — reopen this idea from the queue to keep going"
           >
-            {isReExport ? "Close" : "Save draft & close"}
+            {isReExport || viewOnly ? "Close" : "Save draft & close"}
           </Button>
           <Button
             type="button"
             onClick={() => void exportClip()}
             disabled={busy !== null || locked || plan.totalFrames === 0}
+            title={viewOnly ? "View only — you don't have edit access to this brand" : undefined}
           >
             {busy === "export" && <Loader2Icon className="mr-1.5 size-3.5 animate-spin" />}
             {postFirst ? (isReExport ? "Re-export post" : "Export post") : isReExport ? "Re-export clip" : "Export clip"}

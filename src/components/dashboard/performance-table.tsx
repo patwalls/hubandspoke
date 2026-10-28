@@ -48,6 +48,7 @@ import {
 } from "@/components/ui/account-post-type-picker";
 import type { PostType } from "@/lib/platform-field-schemas";
 import type { FormatViewBar } from "@/types";
+import { useCanEditBrand } from "@/components/brand-access";
 
 interface PerformanceTableProps {
   items: ProductionItem[];
@@ -128,6 +129,7 @@ function getFreshness(item: ProductionItem): {
 
 export function PerformanceTable({ items: itemsProp, brand, formats, accounts, formatBars, onPostCreated }: PerformanceTableProps) {
   const router = useRouter();
+  const canEdit = useCanEditBrand(brand === "all" ? null : brand);
   // Defensive: when the report API errors, callers can end up passing
   // undefined — without this the whole dashboard client-crashes into a
   // redbox ("Cannot read properties of undefined (reading 'some')",
@@ -583,9 +585,10 @@ export function PerformanceTable({ items: itemsProp, brand, formats, accounts, f
             Cross-brand /all view: hide the create-item entry point. New
             items must be created against a real brand slug — POST
             /api/production-items would happily store `brand="all"` and
-            corrupt filtering. Switch to a brand to add a post.
+            corrupt filtering. Switch to a brand to add a post. Also hidden
+            for view-only users (no edit access to this brand).
           */}
-          {brand !== "all" && (
+          {brand !== "all" && canEdit && (
             <DropdownMenu>
               <DropdownMenuTrigger
                 className={buttonVariants({ variant: "outline", size: "sm" })}

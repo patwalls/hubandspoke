@@ -23,6 +23,7 @@ import {
 import { cn } from "@/lib/utils";
 import { runMultipartUpload } from "@/lib/client-multipart-upload";
 import type { PickerAccount } from "@/components/ui/account-post-type-picker";
+import { useCanEditBrand } from "@/components/brand-access";
 
 type Stage = "idle" | "creating" | "uploading" | "confirming";
 
@@ -42,6 +43,7 @@ export function UploadRecordingDialog({
   accounts,
 }: UploadRecordingDialogProps) {
   const router = useRouter();
+  const canEdit = useCanEditBrand(brand === "all" ? null : brand);
   const [title, setTitle] = useState("");
   const [format, setFormat] = useState("");
   const [accountId, setAccountId] = useState("");
@@ -163,6 +165,7 @@ export function UploadRecordingDialog({
   }, [title]);
 
   async function handleSubmit() {
+    if (!canEdit) return;
     if (!title.trim() || !file) return;
     setError(null);
     cancelledRef.current = false;
@@ -311,7 +314,7 @@ export function UploadRecordingDialog({
   }
 
   const busy = stage !== "idle";
-  const canSubmit = !!title.trim() && !!file && !busy;
+  const canSubmit = !!title.trim() && !!file && !busy && canEdit;
 
   function stageLabel() {
     if (stage === "creating") return "Creating…";

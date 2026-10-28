@@ -21,6 +21,7 @@ import type { EnrichmentMedia } from "@/components/dashboard/enrichment-dialog";
 import { AttachDmKeywordDialog } from "@/components/dashboard/attach-dm-keyword-dialog";
 import { PLATFORM_FIELD_MAP, type PostType } from "@/lib/platform-field-schemas";
 import { captionMentionsKeyword, keywordCtaLine, replaceKeywordInCaption } from "@/lib/dm-keyword-text";
+import { useCanEditBrand } from "@/components/brand-access";
 
 interface DraftRow {
   id: string;
@@ -62,6 +63,9 @@ export function PostPane({
   mediaOverride?: React.ReactNode;
 }) {
   const itemId = post.productionItemId;
+  // View-only users read the post (ContentPreview goes read-only on its
+  // own); redraft and the DM-keyword controls are off.
+  const canEdit = useCanEditBrand(brand);
   const [detail, setDetail] = useState<DetailResponse | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [liveContent, setLiveContent] = useState<ContentDraftContent | null>(null);
@@ -244,9 +248,9 @@ export function PostPane({
         )}
         <button
           type="button"
-          disabled={drafting || !detail}
+          disabled={drafting || !detail || !canEdit}
           onClick={() => void redraft()}
-          title="Write the post again from the words this cut keeps. Replaces the current text (the old version stays in the item's history)."
+          title={canEdit ? "Write the post again from the words this cut keeps. Replaces the current text (the old version stays in the item's history)." : "View only — you don't have edit access to this brand"}
           className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs hover:bg-muted disabled:opacity-50"
         >
           <SparklesIcon className="size-3" /> {draft ? "Redraft" : "Draft the post"}
@@ -271,10 +275,10 @@ export function PostPane({
           ) : (
             <span className="text-muted-foreground">none — comments won&apos;t trigger a DM</span>
           )}
-          <button type="button" onClick={() => setKeywordOpen(true)} className="rounded-md border border-border bg-background px-2 py-0.5 hover:bg-muted">
+          <button type="button" onClick={() => setKeywordOpen(true)} disabled={!canEdit} title={canEdit ? undefined : "View only — you don't have edit access to this brand"} className="rounded-md border border-border bg-background px-2 py-0.5 hover:bg-muted disabled:opacity-50">
             {currentKeyword ? "Change…" : "Attach…"}
           </button>
-          {currentKeyword && draft && !mentionsKeyword && (
+          {canEdit && currentKeyword && draft && !mentionsKeyword && (
             <button type="button" onClick={() => void addKeywordToCaption()} className="ml-auto text-sky-700 hover:underline" title={`The caption doesn't say ${currentKeyword.toUpperCase()} yet`}>
               Add &ldquo;comment {currentKeyword.toUpperCase()}&rdquo; to the caption
             </button>

@@ -83,6 +83,7 @@ export async function requireBrandEdit(
   return guard;
 }
 
+/** JWT role — frozen at sign-in. Prefer `isAdminNow` (src/lib/brand-access.ts). */
 export function isAdmin(session: Session | null | undefined): boolean {
   return session?.user?.role === "admin";
 }

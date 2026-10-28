@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import type { Metadata } from "next";
 import { QueueView } from "@/components/dashboard/queue-view";
 import { auth } from "@/lib/auth";
+import { isAdminNow } from "@/lib/brand-access";
 
 export const metadata: Metadata = { title: "Queue · All" };
 
@@ -19,7 +20,7 @@ export default async function AllQueuePage() {
         brand="all"
         initialSource="all"
         clippableFormats={[]}
-        isAdmin={session?.user?.role === "admin"}
+        isAdmin={await isAdminNow(session)}
       />
     </Suspense>
   );

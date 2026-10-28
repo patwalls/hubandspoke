@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { DM_LINK_PREFIX_BY_BRAND, commentKeywordFor, usesRebrandlyDm } from "@/lib/cta-offer-brands";
 import { isDefaultDestination, prefillDestination } from "@/lib/dm-destination-prefill";
+import { useCanEditBrand } from "@/components/brand-access";
 
 // Mirror of ShortLink from lib/services/short-links, but redeclared here so
 // the client component doesn't have to import a server-only module.
@@ -100,6 +101,8 @@ export function AttachDmKeywordDialog({
   onSaved,
 }: Props) {
   const rebrandly = usesRebrandlyDm(brand);
+  // Defense in depth: the trigger is already disabled for view-only users.
+  const canEdit = useCanEditBrand(brand);
   const [view, setView] = useState<View>("loading");
   const [links, setLinks] = useState<ShortLink[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -526,7 +529,7 @@ export function AttachDmKeywordDialog({
                     size="sm"
                     className="text-destructive hover:text-destructive"
                     onClick={handleDetach}
-                    disabled={saving}
+                    disabled={saving || !canEdit}
                   >
                     Detach from post
                   </Button>
@@ -541,7 +544,7 @@ export function AttachDmKeywordDialog({
                 >
                   Cancel
                 </Button>
-                <Button type="button" onClick={handleSaveExisting} disabled={saving || !destination.trim()}>
+                <Button type="button" onClick={handleSaveExisting} disabled={saving || !destination.trim() || !canEdit}>
                   {saving ? "Saving…" : "Save"}
                 </Button>
               </div>
@@ -605,7 +608,7 @@ export function AttachDmKeywordDialog({
                 <Button
                   type="button"
                   onClick={handleCreateNew}
-                  disabled={saving || !newSlug.trim() || !newDestination.trim()}
+                  disabled={saving || !newSlug.trim() || !newDestination.trim() || !canEdit}
                 >
                   {saving ? "Creating…" : "Create + attach"}
                 </Button>

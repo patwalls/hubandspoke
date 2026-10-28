@@ -13,6 +13,8 @@ import { WhatsNewDialog, type WhatsNewCard } from "@/components/dashboard/whats-
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { getBrands, getDefaultBrandSlug } from "@/lib/db/brands";
+import { editableBrandSlugs } from "@/lib/brand-access";
+import { BrandAccessProvider } from "@/components/brand-access";
 import { setSentrySessionUser } from "@/lib/sentry-user";
 import { hrefFor, unseenFor, visibleTo, type WhatsNewEntry } from "@/lib/whats-new";
 
@@ -32,6 +34,7 @@ export default async function DashboardLayout({
         .select({
           name: users.name,
           avatarUrl: users.avatarUrl,
+          role: users.role,
           whatsNewSeenAt: users.whatsNewSeenAt,
           createdAt: users.createdAt,
         })
@@ -43,6 +46,11 @@ export default async function DashboardLayout({
   // Brands are DB-driven — fetch once per request at the layout and thread
   // through the nav + section-tabs. `avatar` maps the DB's `avatar_url`
   // column to the nav's existing prop shape.
+  // Which brands this user can change — drives disabled edit controls across
+  // the UI (src/components/brand-access.tsx). The API enforces it regardless.
+  const editableSlugs = await editableBrandSlugs(session);
+  const editable = editableSlugs === "all" ? ("all" as const) : [...editableSlugs];
+
   const brandRows = await getBrands();
   const defaultBrand = await getDefaultBrandSlug();
   // Synthetic "All content" entry rendered to the left of every real brand.
@@ -61,7 +69,8 @@ export default async function DashboardLayout({
   };
   // What's new: the cards this user hasn't seen pop up once; the nav menu
   // reopens the full list. Links get the default brand filled in.
-  const viewer = { email: session.user.email, role: session.user.role };
+  // DB role, not the sign-in JWT, so a promotion shows up without re-login.
+  const viewer = { email: session.user.email, role: userRow?.role ?? session.user.role };
   const toCard = (e: WhatsNewEntry): WhatsNewCard => ({
     id: e.id,
     shippedAt: e.shippedAt,
@@ -90,6 +99,7 @@ export default async function DashboardLayout({
   ];
 
   return (
+    <BrandAccessProvider editable={editable}>
     <div className="min-h-screen bg-background">
       <SentryUser
         id={session.user.id as string}
@@ -118,5 +128,6 @@ export default async function DashboardLayout({
       <WhatsNewDialog unseen={whatsNewUnseen} all={whatsNewAll} />
       <Toaster position="bottom-right" richColors closeButton />
     </div>
+    </BrandAccessProvider>
   );
 }

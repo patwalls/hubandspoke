@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { BrandLogo } from "@/lib/design-editor/brand-assets";
 import { cn } from "@/lib/utils";
+import { useCanEditBrand } from "@/components/brand-access";
 
 const GROUPS: Array<{ key: BrandLogo["group"]; label: string }> = [
   { key: "upload", label: "Uploaded" },
@@ -31,6 +32,8 @@ export function LogoPicker({
   onPick: (logo: BrandLogo) => void;
   className?: string;
 }) {
+  // Picking adds a logo to the post; uploading/removing changes the brand's library.
+  const canEdit = useCanEditBrand(brand);
   const [open, setOpen] = useState(false);
   const [logos, setLogos] = useState<BrandLogo[] | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -83,7 +86,12 @@ export function LogoPicker({
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger className={className} onPointerDown={(e) => e.stopPropagation()}>
+      <PopoverTrigger
+        className={className}
+        onPointerDown={(e) => e.stopPropagation()}
+        disabled={!canEdit}
+        title={canEdit ? undefined : "View only — you don't have edit access to this brand"}
+      >
         {trigger}
       </PopoverTrigger>
       <PopoverContent
@@ -99,6 +107,7 @@ export function LogoPicker({
           }
         }}
       >
+        {canEdit && (
         <label
           className={cn(
             "flex cursor-pointer items-center justify-center gap-2 rounded-md border border-dashed border-border px-3 py-2 text-xs hover:bg-muted",
@@ -118,6 +127,7 @@ export function LogoPicker({
             }}
           />
         </label>
+        )}
         {!logos ? (
           <div className="flex h-16 items-center justify-center text-muted-foreground">
             <Loader2Icon className="size-4 animate-spin" />
@@ -138,6 +148,7 @@ export function LogoPicker({
                         <button
                           type="button"
                           title={logo.label}
+                          disabled={!canEdit}
                           onClick={() => {
                             onPick(logo);
                             setOpen(false);
@@ -147,7 +158,7 @@ export function LogoPicker({
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img src={logo.previewUrl} alt={logo.label} className={cn("max-h-full max-w-full object-contain", key === "avatar" && "rounded-full")} />
                         </button>
-                        {logo.id && (
+                        {canEdit && logo.id && (
                           <button
                             type="button"
                             aria-label={`Remove ${logo.label}`}

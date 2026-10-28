@@ -10,6 +10,7 @@ import {
   type PostType,
 } from "@/lib/platform-field-schemas";
 import { Badge } from "@/components/ui/badge";
+import { useCanEditBrand } from "@/components/brand-access";
 import type { EnrichmentMedia } from "../enrichment-dialog";
 import {
   PLATFORM_FIELD_MAP,
@@ -118,6 +119,9 @@ export function ContentPreview({
   forceReadOnly = false,
   mediaOverride,
 }: ContentPreviewProps) {
+  // View-only users get the same mock, just not editable (no typing, no
+  // media add/remove, no CTA regenerate — all keyed off `editable`).
+  const canEdit = useCanEditBrand(item.brand);
   // Prefer the canonical `postType` ("x", "instagram_reel", …) — it's the
   // accounts-rollout key and matches the simulator map directly. Fall back
   // to the legacy `platform[]` resolver for older rows that haven't been
@@ -139,7 +143,7 @@ export function ContentPreview({
   const Simulator = SIMULATORS[platform];
   const fieldMap = PLATFORM_FIELD_MAP[platform];
   const data = resolvePreviewData(platform, item, media, liveContent);
-  const editable = !forceReadOnly && draftId !== null;
+  const editable = !forceReadOnly && canEdit && draftId !== null;
 
   return (
     <div className="rounded-lg border border-border bg-card">
@@ -153,7 +157,9 @@ export function ContentPreview({
             How this will look on {PLATFORM_LABEL[platform]}.
             {forceReadOnly
               ? " Exactly what will be sent."
-              : editable
+              : !canEdit
+                ? " View only."
+                : editable
                 ? " Type directly in the mock to edit the draft."
                 : " Read-only — no draft yet."}
           </p>

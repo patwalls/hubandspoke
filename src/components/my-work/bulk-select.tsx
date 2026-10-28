@@ -23,6 +23,9 @@ import { BulkKillDialog } from "@/components/dashboard/bulk-kill-dialog";
 import { CheckboxCell } from "@/components/dashboard/idea-queue-table";
 import { trackUsage } from "@/lib/usage/track";
 import { bulkMoveTargets, inBatches } from "@/lib/my-work/bulk";
+import { useEditableBrands } from "@/components/brand-access";
+
+const VIEW_ONLY_TITLE = "View only — you don't have edit access to every selected post's brand";
 
 /**
  * Bulk changes on My Work (rules in src/lib/my-work/bulk.ts): a checkbox on
@@ -118,6 +121,7 @@ function BulkBar({
 }) {
   const router = useRouter();
   const { selected } = useSelection();
+  const editable = useEditableBrands();
   const [busy, setBusy] = useState(false);
   const [killOpen, setKillOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -127,8 +131,12 @@ function BulkBar({
   const brands = [...selected.values()];
   const targets = bulkMoveTargets(brands, statusesByBrand);
   const posts = (n: number) => `${n} post${n === 1 ? "" : "s"}`;
+  // Bulk changes only when every selected row is on a brand the user can edit.
+  const canEdit = editable === "all" || brands.every((b) => editable.includes(b));
+  const lockedTitle = canEdit ? undefined : VIEW_ONLY_TITLE;
 
   async function run(mark: string, verb: string, fn: (id: string) => Promise<unknown>) {
+    if (!canEdit) return;
     setBusy(true);
     trackUsage(`my-work:${mark}`, brands[0]);
     try {
@@ -170,8 +178,8 @@ function BulkBar({
           </button>
           <DropdownMenu>
             <DropdownMenuTrigger
-              disabled={busy || targets.length === 0}
-              title={targets.length === 0 ? "These brands share no status to move to" : undefined}
+              disabled={busy || !canEdit || targets.length === 0}
+              title={lockedTitle ?? (targets.length === 0 ? "These brands share no status to move to" : undefined)}
               className="inline-flex items-center gap-1 rounded-full border border-input bg-background px-3 h-7 text-xs font-medium hover:bg-accent disabled:opacity-50"
             >
               Move to <ChevronDownIcon className="size-3.5" />
@@ -190,7 +198,8 @@ function BulkBar({
           <button
             type="button"
             onClick={() => setKillOpen(true)}
-            disabled={busy}
+            disabled={busy || !canEdit}
+            title={lockedTitle}
             className="inline-flex items-center rounded-full border border-input bg-background px-3 h-7 text-xs font-medium hover:bg-accent disabled:opacity-50"
           >
             Kill
@@ -198,7 +207,8 @@ function BulkBar({
           <button
             type="button"
             onClick={() => setDeleteOpen(true)}
-            disabled={busy}
+            disabled={busy || !canEdit}
+            title={lockedTitle}
             className="inline-flex items-center rounded-full bg-red-600 px-3 h-7 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50"
           >
             Delete

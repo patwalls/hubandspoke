@@ -9,6 +9,7 @@ import {
 import { getClippableFormats, getFormatNameToIdMap } from "@/lib/db/formats";
 import { auth } from "@/lib/auth";
 import { listNewsletterFormats } from "@/lib/services/newsletter-drafter/queries";
+import { isAdminNow } from "@/lib/brand-access";
 
 interface BrandQueueSourcePageProps {
   params: Promise<{ brand: string; source: string }>;
@@ -109,7 +110,7 @@ export default async function BrandQueueSourcePage({
         }))}
         formatNameToId={formatNameToId}
         showNewsletters={brand === "all" || newsletterFormats.length > 0}
-        isAdmin={session?.user?.role === "admin"}
+        isAdmin={await isAdminNow(session)}
       />
     </Suspense>
   );

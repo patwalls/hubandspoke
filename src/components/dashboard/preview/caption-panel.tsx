@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Loader2Icon, SparklesIcon } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { useCanEditBrand } from "@/components/brand-access";
 import { EditableField } from "./editable-field";
 import { SocialEmbedHeader } from "./social-embed-header";
 import type { SimulatorProps } from "./simulator-types";
@@ -229,6 +230,8 @@ function RegenerateCaptionButton({
   onRegenerated?: () => void;
 }) {
   const [busy, setBusy] = useState(false);
+  // Generating writes the draft (LLM call) — not offered to view-only users.
+  const canEdit = useCanEditBrand();
 
   async function handleClick() {
     if (busy) return;
@@ -277,6 +280,7 @@ function RegenerateCaptionButton({
     : hasDraft
       ? "Regenerate caption"
       : "Generate caption";
+  if (!canEdit) return null;
   return (
     <button
       type="button"

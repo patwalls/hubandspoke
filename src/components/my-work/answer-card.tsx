@@ -12,6 +12,7 @@ import {
   type Answer,
   type AnswerKind,
 } from "@/lib/my-work/answer";
+import { useCanEditBrand } from "@/components/brand-access";
 
 /**
  * The three answers on /my-work/answer/[id] (rules in
@@ -36,6 +37,7 @@ export function AnswerCard({
   sentToReviewBy: HandoffPerson | null;
   postUrl: string;
 }) {
+  const canEdit = useCanEditBrand(brand);
   const [kind, setKind] = useState<AnswerKind | null>(
     picked && answers.some((a) => a.kind === picked) ? picked : null,
   );
@@ -53,7 +55,7 @@ export function AnswerCard({
     kind === "approve" && sentToReviewBy && sentToReviewBy.id !== me ? firstName(sentToReviewBy.name) : null;
 
   async function save() {
-    if (!answer || !request) return;
+    if (!answer || !request || !canEdit) return;
     setBusy(true);
     setError(null);
     trackUsage(`my-work:answer:${answer.kind}`, brand);
@@ -136,7 +138,11 @@ export function AnswerCard({
         <Link href={postUrl} className="text-xs text-muted-foreground hover:text-foreground underline">
           Open the post first
         </Link>
-        <Button onClick={save} disabled={!request || busy}>
+        <Button
+          onClick={save}
+          disabled={!request || busy || !canEdit}
+          title={canEdit ? undefined : "View only — you don't have edit access to this brand"}
+        >
           {!answer
             ? "Pick an answer"
             : answer.kind === "approve"

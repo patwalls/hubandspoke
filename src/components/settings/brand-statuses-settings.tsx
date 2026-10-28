@@ -23,6 +23,9 @@ import {
   type StatusColorToken,
 } from "@/lib/badge-colors";
 import { cn } from "@/lib/utils";
+import { useCanEditBrand } from "@/components/brand-access";
+
+const VIEW_ONLY_TITLE = "View only — you don't have edit access to this brand";
 
 type Row = {
   id: string;
@@ -46,6 +49,7 @@ export function BrandStatusesSettings({ brand, brandLabel, initial }: Props) {
   const [rows, setRows] = useState<Row[]>(initial);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const canEdit = useCanEditBrand(brand);
 
   // Add-form state
   const [addingName, setAddingName] = useState("");
@@ -218,6 +222,7 @@ export function BrandStatusesSettings({ brand, brandLabel, initial }: Props) {
             isFirst={idx === 0}
             isLast={idx === rows.length - 1}
             disabled={busy}
+            viewOnly={!canEdit}
             onRename={(next) => handleRename(row, next)}
             onColor={(color) => handleColor(row, color)}
             onPipelineToggle={(next) => handlePipelineToggle(row, next)}
@@ -235,12 +240,17 @@ export function BrandStatusesSettings({ brand, brandLabel, initial }: Props) {
       <div className="rounded-md border border-dashed border-border p-3 space-y-2">
         <div className="text-xs font-medium text-foreground">Add status</div>
         <div className="flex flex-wrap items-center gap-2">
-          <ColorPicker value={addingColor} onChange={setAddingColor} />
+          <ColorPicker
+            value={addingColor}
+            onChange={setAddingColor}
+            disabled={!canEdit}
+          />
           <Input
             value={addingName}
             onChange={(e) => setAddingName(e.target.value)}
             placeholder="Status name"
             className="h-8 w-56 text-sm"
+            disabled={!canEdit}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault();
@@ -253,13 +263,15 @@ export function BrandStatusesSettings({ brand, brandLabel, initial }: Props) {
               type="checkbox"
               checked={addingPipeline}
               onChange={(e) => setAddingPipeline(e.target.checked)}
+              disabled={!canEdit}
             />
             Pipeline column
           </label>
           <Button
             size="sm"
             onClick={() => void handleAdd()}
-            disabled={busy || !addingName.trim()}
+            disabled={busy || !addingName.trim() || !canEdit}
+            title={canEdit ? undefined : VIEW_ONLY_TITLE}
           >
             <PlusIcon className="h-3.5 w-3.5" />
             Add
@@ -274,7 +286,8 @@ function StatusRow({
   row,
   isFirst,
   isLast,
-  disabled,
+  disabled: busy,
+  viewOnly = false,
   onRename,
   onColor,
   onPipelineToggle,
@@ -285,6 +298,8 @@ function StatusRow({
   isFirst: boolean;
   isLast: boolean;
   disabled: boolean;
+  /** Viewer can't edit this brand: every control renders disabled. */
+  viewOnly?: boolean;
   onRename: (name: string) => void;
   onColor: (c: StatusColorToken) => void;
   onPipelineToggle: (next: boolean) => void;
@@ -292,8 +307,10 @@ function StatusRow({
   onDelete: () => void;
 }) {
   const [draftName, setDraftName] = useState(row.name);
+  const disabled = busy || viewOnly;
 
   const lockedTip = row.isProtected ? "Used by the app — cannot be renamed or deleted" : "";
+  const viewOnlyTip = viewOnly ? VIEW_ONLY_TITLE : undefined;
 
   return (
     <div className="flex items-center gap-2 px-3 py-2">
@@ -303,6 +320,7 @@ function StatusRow({
           aria-label="Move up"
           onClick={() => onMove(-1)}
           disabled={disabled || isFirst}
+          title={viewOnlyTip}
           className="p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30"
         >
           <ChevronUpIcon className="h-3 w-3" />
@@ -312,13 +330,14 @@ function StatusRow({
           aria-label="Move down"
           onClick={() => onMove(1)}
           disabled={disabled || isLast}
+          title={viewOnlyTip}
           className="p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30"
         >
           <ChevronDownIcon className="h-3 w-3" />
         </button>
       </div>
 
-      <ColorPicker value={row.color} onChange={onColor} />
+      <ColorPicker value={row.color} onChange={onColor} disabled={viewOnly} />
 
       <span
         className={cn(
@@ -343,7 +362,7 @@ function StatusRow({
           }
         }}
         disabled={disabled || row.isProtected}
-        title={lockedTip}
+        title={lockedTip || viewOnlyTip}
         className="h-8 flex-1 text-sm"
       />
 
@@ -353,6 +372,7 @@ function StatusRow({
           checked={row.isPipelineColumn}
           onChange={(e) => onPipelineToggle(e.target.checked)}
           disabled={disabled}
+          title={viewOnlyTip}
         />
         Pipeline
       </label>
@@ -370,6 +390,7 @@ function StatusRow({
           aria-label="Delete status"
           onClick={onDelete}
           disabled={disabled}
+          title={viewOnlyTip}
           className="inline-flex items-center justify-center w-7 h-7 rounded text-muted-foreground hover:text-red-700 hover:bg-red-50 disabled:opacity-30"
         >
           <Trash2Icon className="h-3.5 w-3.5" />
@@ -382,17 +403,21 @@ function StatusRow({
 function ColorPicker({
   value,
   onChange,
+  disabled = false,
 }: {
   value: StatusColorToken;
   onChange: (c: StatusColorToken) => void;
+  disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
         aria-label="Pick color"
+        disabled={disabled}
+        title={disabled ? VIEW_ONLY_TITLE : undefined}
         className={cn(
-          "shrink-0 h-6 w-6 rounded border-2 cursor-pointer",
+          "shrink-0 h-6 w-6 rounded border-2 cursor-pointer disabled:cursor-not-allowed disabled:opacity-60",
           STATUS_COLOR_SWATCH[value]
         )}
       />

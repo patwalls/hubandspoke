@@ -63,6 +63,9 @@ const CommentEditor = dynamic(
 );
 import { statusClassWithPalette } from "@/lib/badge-colors";
 import { cn } from "@/lib/utils";
+import { useCanEditBrand } from "@/components/brand-access";
+
+const VIEW_ONLY_TITLE = "View only — you don't have edit access to this brand";
 
 // Activity-feed display helpers. Used by the per-event rendering to
 // keep rows scannable when the underlying payload would otherwise dump
@@ -741,6 +744,9 @@ function CommentFileLink({
 }
 
 export function ContentActivity({ contentId, brand, refreshKey = 0, statusPalette }: ContentActivityProps) {
+  // View-only users read the whole feed but can't post, edit, delete or
+  // resolve comments (the comments API 403s those).
+  const canEdit = useCanEditBrand(brand);
   const [items, setItems] = useState<ActivityItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [hasLoaded, setHasLoaded] = useState(false);
@@ -784,7 +790,7 @@ export function ContentActivity({ contentId, brand, refreshKey = 0, statusPalett
   const submit = useCallback(async () => {
     const body = draft;
     const atSeconds = draftAt;
-    if (isEditorEmpty(body) || posting) return;
+    if (isEditorEmpty(body) || posting || !canEdit) return;
     const tempId = `temp-${++tempCounter.current}`;
     const optimistic: CommentItem = {
       kind: "comment",
@@ -823,7 +829,7 @@ export function ContentActivity({ contentId, brand, refreshKey = 0, statusPalett
     } finally {
       setPosting(false);
     }
-  }, [draft, draftAt, posting, contentId, brand]);
+  }, [draft, draftAt, posting, contentId, brand, canEdit]);
 
   const startEdit = (c: CommentItem) => {
     setEditingId(c.id);
@@ -1052,6 +1058,7 @@ export function ContentActivity({ contentId, brand, refreshKey = 0, statusPalett
                   onSaveEdit={saveEdit}
                   onRemove={remove}
                   onResolve={setResolved}
+                  canEdit={canEdit}
                 />
               );
             }
@@ -1083,12 +1090,13 @@ export function ContentActivity({ contentId, brand, refreshKey = 0, statusPalett
           value={draft}
           onChange={setDraft}
           onSubmit={submit}
-          placeholder="Write a comment…"
+          placeholder={canEdit ? "Write a comment…" : "View only — you can't comment on this brand"}
           disabled={posting}
+          readOnly={!canEdit}
         />
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
-            <TimecodePin value={draftAt} onChange={setDraftAt} disabled={posting} />
+            <TimecodePin value={draftAt} onChange={setDraftAt} disabled={posting || !canEdit} />
             <p className="text-xs text-muted-foreground">
               <kbd className="font-mono">⌘</kbd>/<kbd className="font-mono">Ctrl</kbd> +{" "}
               <kbd className="font-mono">Enter</kbd> to post
@@ -1097,7 +1105,8 @@ export function ContentActivity({ contentId, brand, refreshKey = 0, statusPalett
           <Button
             type="button"
             onClick={submit}
-            disabled={posting || isEditorEmpty(draft)}
+            disabled={posting || isEditorEmpty(draft) || !canEdit}
+            title={canEdit ? undefined : VIEW_ONLY_TITLE}
             size="sm"
           >
             {posting ? "Posting…" : "Post comment"}
@@ -1120,6 +1129,8 @@ interface CommentRowProps {
   onSaveEdit: () => void;
   onRemove: (id: string) => void;
   onResolve: (c: CommentItem, resolved: boolean) => void;
+  /** False for view-only users: no Edit / Delete / Mark done. */
+  canEdit: boolean;
 }
 
 function CommentRow({
@@ -1134,6 +1145,7 @@ function CommentRow({
   onSaveEdit,
   onRemove,
   onResolve,
+  canEdit,
 }: CommentRowProps) {
   const avatarUrl = c.user?.avatarUrl ?? c.authorAvatarUrl;
   const name = commentDisplayName(c);
@@ -1175,7 +1187,7 @@ function CommentRow({
               {c.resolvedByName ? ` · ${c.resolvedByName.split(" ")[0]}` : ""}
             </span>
           )}
-          {editingId !== c.id && saved && (
+          {editingId !== c.id && saved && canEdit && (
             <span className="ml-auto flex items-center gap-2">
               {c.isMine && (
                 <span className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
