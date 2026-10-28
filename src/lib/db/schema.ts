@@ -6,6 +6,7 @@ import {
   date,
   boolean,
   integer,
+  real,
   bigint,
   decimal,
   timestamp,
@@ -1944,6 +1945,9 @@ export const contentComments = pgTable(
     // UI has something better than "Deleted user" to render.
     authorName: text("author_name"),
     authorAvatarUrl: text("author_avatar_url"),
+    // Review note pinned to a moment of the item's video (seconds from the
+    // start). Null = a plain comment. Set from the content page's player.
+    atSeconds: real("at_seconds"),
   },
   (table) => [
     index("idx_content_comments_item_created").on(

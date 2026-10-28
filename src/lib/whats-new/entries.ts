@@ -29,6 +29,16 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-10-28-comment-at-playhead",
+    shippedAt: "2026-10-28T12:45:00Z",
+    kind: "feature",
+    title: "Pin a comment to a moment in the video",
+    body:
+      "On a post's page, play or scrub the video, then click Pin to 0:12 under the comment box before you post. " +
+      "Your note shows a 0:12 chip, and clicking it plays the video from that moment, so nobody has to guess what \"near the top\" means.",
+    screen: "comments:timecode",
+  },
+  {
     id: "2026-10-28-edit-clip-chip",
     shippedAt: "2026-10-28T00:15:00Z",
     kind: "feature",

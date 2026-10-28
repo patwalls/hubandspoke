@@ -120,6 +120,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
               avatarUrl: user.avatarUrl,
             }
           : null,
+        atSeconds: updated.atSeconds,
         isMine: true,
       },
     });

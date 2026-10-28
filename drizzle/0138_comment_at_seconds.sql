@@ -1,0 +1,1 @@
+ALTER TABLE "content_comments" ADD COLUMN "at_seconds" real;

@@ -39,6 +39,8 @@ import {
 import { Button, buttonVariants } from "@/components/ui/button";
 import dynamic from "next/dynamic";
 import { isEditorEmpty } from "@/lib/comments/editor-empty";
+import { trackUsage } from "@/lib/usage/track";
+import { TimecodeChip, TimecodePin } from "./comment-timecode";
 
 // Dynamic: the editor drags the whole TipTap/ProseMirror bundle (~900 KB
 // chunk) — loading it lazily takes it off the detail page's critical path.
@@ -131,6 +133,8 @@ interface CommentItem {
   user: ActivityUser | null;
   authorName: string | null;
   authorAvatarUrl: string | null;
+  /** Review note pinned to this second of the video; null = plain comment. */
+  atSeconds: number | null;
   isMine: boolean;
 }
 
@@ -736,6 +740,7 @@ export function ContentActivity({ contentId, brand, refreshKey = 0, statusPalett
   const [hasLoaded, setHasLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  const [draftAt, setDraftAt] = useState<number | null>(null);
   const [posting, setPosting] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState("");
@@ -772,6 +777,7 @@ export function ContentActivity({ contentId, brand, refreshKey = 0, statusPalett
 
   const submit = useCallback(async () => {
     const body = draft;
+    const atSeconds = draftAt;
     if (isEditorEmpty(body) || posting) return;
     const tempId = `temp-${++tempCounter.current}`;
     const optimistic: CommentItem = {
@@ -783,16 +789,18 @@ export function ContentActivity({ contentId, brand, refreshKey = 0, statusPalett
       user: null,
       authorName: null,
       authorAvatarUrl: null,
+      atSeconds,
       isMine: true,
     };
     setItems((prev) => [...prev, optimistic]);
     setDraft("");
+    setDraftAt(null);
     setPosting(true);
     try {
       const res = await fetch(`/api/production-items/${contentId}/comments`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ body }),
+        body: JSON.stringify({ body, atSeconds }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = (await res.json()) as {
@@ -800,14 +808,16 @@ export function ContentActivity({ contentId, brand, refreshKey = 0, statusPalett
       };
       const real: CommentItem = { kind: "comment", ...data.comment };
       setItems((prev) => prev.map((c) => (c.id === tempId ? real : c)));
+      if (atSeconds !== null) trackUsage("comments:timecode", brand);
     } catch (e) {
       setItems((prev) => prev.filter((c) => c.id !== tempId));
       setDraft(body);
+      setDraftAt(atSeconds);
       setError(e instanceof Error ? e.message : "Failed to post comment");
     } finally {
       setPosting(false);
     }
-  }, [draft, posting, contentId]);
+  }, [draft, draftAt, posting, contentId, brand]);
 
   const startEdit = (c: CommentItem) => {
     setEditingId(c.id);
@@ -973,6 +983,7 @@ export function ContentActivity({ contentId, brand, refreshKey = 0, statusPalett
                 <CommentRow
                   key={item.id}
                   comment={item}
+                  brand={brand}
                   editingId={editingId}
                   editDraft={editDraft}
                   setEditDraft={setEditDraft}
@@ -1016,10 +1027,13 @@ export function ContentActivity({ contentId, brand, refreshKey = 0, statusPalett
           disabled={posting}
         />
         <div className="flex items-center justify-between gap-3">
-          <p className="text-xs text-muted-foreground">
-            <kbd className="font-mono">⌘</kbd>/<kbd className="font-mono">Ctrl</kbd> +{" "}
-            <kbd className="font-mono">Enter</kbd> to post
-          </p>
+          <div className="flex items-center gap-3 min-w-0">
+            <TimecodePin value={draftAt} onChange={setDraftAt} disabled={posting} />
+            <p className="text-xs text-muted-foreground">
+              <kbd className="font-mono">⌘</kbd>/<kbd className="font-mono">Ctrl</kbd> +{" "}
+              <kbd className="font-mono">Enter</kbd> to post
+            </p>
+          </div>
           <Button
             type="button"
             onClick={submit}
@@ -1036,6 +1050,7 @@ export function ContentActivity({ contentId, brand, refreshKey = 0, statusPalett
 
 interface CommentRowProps {
   comment: CommentItem;
+  brand: string;
   editingId: string | null;
   editDraft: string;
   setEditDraft: (v: string) => void;
@@ -1048,6 +1063,7 @@ interface CommentRowProps {
 
 function CommentRow({
   comment: c,
+  brand,
   editingId,
   editDraft,
   setEditDraft,
@@ -1126,6 +1142,15 @@ function CommentRow({
               >
                 Cancel
               </Button>
+            </div>
+          </div>
+        ) : c.atSeconds !== null && c.atSeconds !== undefined ? (
+          <div className="flex items-start">
+            <span className="pt-1 shrink-0">
+              <TimecodeChip atSeconds={c.atSeconds} brand={brand} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <CommentBody body={c.body} />
             </div>
           </div>
         ) : (

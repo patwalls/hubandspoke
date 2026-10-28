@@ -6,6 +6,7 @@ import { auth } from "@/lib/auth";
 import { enqueueNotification } from "@/lib/services/notifications";
 import { htmlToPlainText, sanitizeCommentHtml } from "@/lib/comments/sanitize";
 import { extractMentionUserIds } from "@/lib/comments/extract-mentions";
+import { formatTimecode, parseAtSeconds } from "@/lib/comments/timecode";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -32,6 +33,7 @@ function shape(row: {
       : null,
     authorName: row.comment.authorName,
     authorAvatarUrl: row.comment.authorAvatarUrl,
+    atSeconds: row.comment.atSeconds,
     isMine: !!currentUserId && row.comment.userId === currentUserId,
   };
 }
@@ -89,6 +91,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
         { status: 400 },
       );
     }
+    const atSeconds = parseAtSeconds(body?.atSeconds);
+    if (atSeconds === undefined) {
+      return NextResponse.json(
+        { error: "atSeconds must be a number of seconds" },
+        { status: 400 },
+      );
+    }
     const sanitized = sanitizeCommentHtml(raw);
     const plain = htmlToPlainText(sanitized);
     // Image-only / file-only comments are valid — `plain` is empty but
@@ -117,6 +126,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
         contentItemId: id,
         userId: session.user.id,
         body: sanitized,
+        atSeconds,
       })
       .returning();
 
@@ -128,7 +138,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     // Notify @-mentioned users first (higher priority than the generic comment
     // notification). Self-notification is filtered inside enqueueNotification.
-    const excerpt = plain.slice(0, 240);
+    const excerpt = (
+      atSeconds !== null ? `at ${formatTimecode(atSeconds)}: ${plain}` : plain
+    ).slice(0, 240);
     const authorName = user?.name || user?.email || null;
     const mentionIds = new Set(extractMentionUserIds(sanitized));
     for (const mentionedId of mentionIds) {
