@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireFeature } from "@/lib/auth-guards";
+import { requireBrandEdit, requireFeature } from "@/lib/auth-guards";
+import { brandOfProductionItem } from "@/lib/brand-access";
 import { applyCoverStyle } from "@/lib/services/design-editor/cover-styles";
 import { DesignItemNotFoundError, DesignUnsupportedError } from "@/lib/services/design-editor/session";
 
@@ -17,6 +18,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
   const guard = await requireFeature("designEditor");
   if (guard.response) return guard.response;
   const { id } = await context.params;
+  const brandGuard = await requireBrandEdit(await brandOfProductionItem(id));
+  if (brandGuard.response) return brandGuard.response;
   const body = (await request.json().catch(() => ({}))) as { styleId?: unknown; canvas?: { width?: unknown; height?: unknown }; currentHeadline?: unknown; instruction?: unknown };
   if (typeof body.styleId !== "string") return NextResponse.json({ error: "styleId required" }, { status: 400 });
   const canvas = typeof body.canvas?.width === "number" && typeof body.canvas?.height === "number" ? { width: body.canvas.width, height: body.canvas.height } : null;

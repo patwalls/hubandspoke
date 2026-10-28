@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { asc, eq } from "drizzle-orm";
-import { requireSession } from "@/lib/auth-guards";
+import { requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfProductionItem } from "@/lib/brand-access";
 import { db } from "@/lib/db";
 import { productionItems, productionItemMedia } from "@/lib/db/schema";
 import { removeMediaRowFromDraft } from "@/lib/services/draft-media";
@@ -23,11 +24,10 @@ interface RouteContext {
  * Refuses on a published item — same gate as the upload route.
  */
 export async function DELETE(_request: Request, context: RouteContext) {
-  const guard = await requireSession();
+  const { id, mediaId } = await context.params;
+  const guard = await requireBrandEdit(await brandOfProductionItem(id));
   if (guard.response) return guard.response;
   const actorUserId = guard.session.user.id as string;
-
-  const { id, mediaId } = await context.params;
 
   const [item] = await db
     .select({

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { requireBrandEdit } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
 import { brands } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
@@ -9,11 +9,9 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ slug: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
   const { slug } = await params;
+  const guard = await requireBrandEdit(slug);
+  if (guard.response) return guard.response;
   const existing = await fetchBrandBySlug(slug);
   if (!existing) {
     return NextResponse.json({ error: "Brand not found" }, { status: 404 });

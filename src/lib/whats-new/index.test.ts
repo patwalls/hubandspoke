@@ -41,9 +41,9 @@ describe("visibleTo", () => {
   });
 
   it("hides a flagged card from people without the flag", () => {
-    const entries = [card("f", "2026-10-20T00:00:00Z", { audience: { flag: "newsletterDrafter" } })];
+    const entries = [card("f", "2026-10-20T00:00:00Z", { audience: { flag: "newsletterTemplateAdmin" } })];
     expect(visibleTo(editor, entries)).toHaveLength(0);
-    expect(visibleTo({ email: "patrickswalls@gmail.com", role: "admin" }, entries)).toHaveLength(1);
+    expect(visibleTo({ email: "sam@starterstory.com", role: "admin" }, entries)).toHaveLength(1);
   });
 });
 

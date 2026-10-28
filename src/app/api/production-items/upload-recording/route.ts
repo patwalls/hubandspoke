@@ -14,7 +14,7 @@
 // for every clippable format on the brand.
 
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { requireBrandEdit } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
 import { normalizeFormatForWrite } from "@/lib/services/format-validation";
@@ -23,11 +23,6 @@ import { recordItemCreated } from "@/lib/services/item-created";
 import { todayLocalISO } from "@/lib/utils/dates";
 
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   let body: { title?: string; brand?: string; format?: string; accountId?: string; };
   try {
     body = await request.json();
@@ -46,6 +41,9 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const guard = await requireBrandEdit(brand);
+  if (guard.response) return guard.response;
+
   const formatCheck = await normalizeFormatForWrite(brand, body.format ?? null);
   if (!formatCheck.ok) {
     return NextResponse.json({ error: formatCheck.error }, { status: 400 });
@@ -55,7 +53,7 @@ export async function POST(request: NextRequest) {
   // Assign the uploading user as editor; fall back to brand/global default
   // so the item always has an owner even if called from a context without a user.
   const editorUserId =
-    session.user.id ??
+    guard.session.user.id ??
     (await resolveEditor({ brand, format: validatedFormat ?? null }));
 
   const [created] = await db
@@ -79,7 +77,7 @@ export async function POST(request: NextRequest) {
     await recordItemCreated(db, {
       itemId: created.id,
       source: "api:upload-recording",
-      actorUserId: session.user.id ?? null,
+      actorUserId: guard.session.user.id ?? null,
       format: validatedFormat ?? null,
       sourceType: "source_recording",
       postType: "youtube_long",

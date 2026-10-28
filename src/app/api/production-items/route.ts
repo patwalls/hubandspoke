@@ -9,7 +9,8 @@ import {
   users,
 } from "@/lib/db/schema";
 import { and, eq, inArray, isNull } from "drizzle-orm";
-import { auth } from "@/lib/auth";
+import { requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfAccount, brandOfProductionItem } from "@/lib/brand-access";
 import { estimateViewsFromLikes, shouldEstimate } from "@/lib/services/view-estimator";
 import {
   buildViewPredictorContext,
@@ -103,8 +104,6 @@ async function pushUtmCampaignToNotion(
  */
 export async function POST(request: NextRequest) {
   try {
-    const session = await auth();
-    const actorUserId = session?.user?.id ?? null;
     const body = await request.json();
     const {
       title,
@@ -130,6 +129,10 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+
+    const guard = await requireBrandEdit(brand);
+    if (guard.response) return guard.response;
+    const actorUserId = guard.session.user.id ?? null;
 
     const formatCheck = await normalizeFormatForWrite(brand, format);
     if (!formatCheck.ok) {
@@ -443,6 +446,15 @@ export async function PUT(request: NextRequest) {
         { error: "id is required" },
         { status: 400 }
       );
+    }
+
+    const guard = await requireBrandEdit(await brandOfProductionItem(id));
+    if (guard.response) return guard.response;
+    // Re-pointing the item at another account needs edit on that account's
+    // brand too (it may be a sibling brand's channel).
+    if (accountId) {
+      const accountGuard = await requireBrandEdit(await brandOfAccount(accountId));
+      if (accountGuard.response) return accountGuard.response;
     }
 
     // status='Published' and status='Scheduled' are reachable only through
@@ -777,8 +789,7 @@ export async function PUT(request: NextRequest) {
       }
     }
 
-    const session = await auth();
-    const actorUserId = session?.user?.id ?? null;
+    const actorUserId = guard.session.user.id ?? null;
 
     // Normalize kill reason: trim, empty → null, cap length. Only meaningful
     // when this PUT is flipping status to Killed; otherwise it's silently ignored.
@@ -1139,6 +1150,9 @@ export async function DELETE(request: NextRequest) {
         { status: 400 }
       );
     }
+
+    const guard = await requireBrandEdit(await brandOfProductionItem(id));
+    if (guard.response) return guard.response;
 
     await db
       .delete(productionItems)

@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { contentComments, users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { auth } from "@/lib/auth";
+import { requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfComment } from "@/lib/brand-access";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -17,11 +18,10 @@ interface RouteContext {
  */
 export async function POST(request: NextRequest, context: RouteContext) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
     const { id } = await context.params;
+    const guard = await requireBrandEdit(await brandOfComment(id));
+    if (guard.response) return guard.response;
+    const session = guard.session;
     const body = await request.json().catch(() => null);
     if (typeof body?.resolved !== "boolean") {
       return NextResponse.json(

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { and, asc, desc, eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
+import { requireBrandEdit } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
 import { brandStatuses } from "@/lib/db/schema";
 import { fetchBrandBySlug } from "@/lib/db/brands";
@@ -61,11 +62,6 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   try {
     const body = await request.json();
     const { brand, name, color, isPipelineColumn } = body as {
@@ -78,6 +74,8 @@ export async function POST(request: NextRequest) {
     if (!brand) {
       return NextResponse.json({ error: "Missing brand" }, { status: 400 });
     }
+    const guard = await requireBrandEdit(brand);
+    if (guard.response) return guard.response;
     const brandRow = await fetchBrandBySlug(brand);
     if (!brandRow) {
       return NextResponse.json({ error: "Unknown brand" }, { status: 400 });

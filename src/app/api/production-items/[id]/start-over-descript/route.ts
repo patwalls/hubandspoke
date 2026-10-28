@@ -8,7 +8,8 @@ import {
   productionItems,
   repurposeTriggers,
 } from "@/lib/db/schema";
-import { requireSession } from "@/lib/auth-guards";
+import { requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfProductionItem } from "@/lib/brand-access";
 import { formatNameToSlug } from "@/lib/db/formats";
 import { findAccountForBrandPlatform } from "@/lib/db/accounts";
 
@@ -37,10 +38,10 @@ interface RouteContext {
  *   6. Returns { clipIdeaId, formatSlug } so the UI can redirect.
  */
 export async function POST(_request: NextRequest, context: RouteContext) {
-  const guard = await requireSession();
+  const { id } = await context.params;
+  const guard = await requireBrandEdit(await brandOfProductionItem(id));
   if (guard.response) return guard.response;
   const actorUserId = guard.session.user.id as string;
-  const { id } = await context.params;
   try {
     return await runStartOver(id, actorUserId);
   } catch (err) {

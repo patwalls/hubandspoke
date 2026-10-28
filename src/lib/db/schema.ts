@@ -1823,8 +1823,9 @@ export const users = pgTable(
     // comment authors + assignments back to our user rows even when the email
     // isn't exposed to integrations (Notion redacts it for some accounts).
     notionUserId: text("notion_user_id").unique(),
-    // Brand UUIDs this user is associated with — purely informational, does
-    // not gate access. Edited in Settings → Users.
+    // Brand UUIDs this user can EDIT. For creators this grants change access
+    // (everyone can view every brand); admins can edit everything regardless.
+    // See src/lib/brand-access.ts. Edited in Settings → Members (admin-only).
     brandIds: jsonb("brand_ids").$type<string[]>().notNull().default([]),
     // Content workflow role — purely informational, no access gating.
     contentRole: text("content_role", {

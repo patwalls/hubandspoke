@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfProductionItem } from "@/lib/brand-access";
 import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
@@ -13,12 +14,9 @@ interface RouteContext {
 // detail page and the Retry button on /settings/sync-errors. Costs at most 1
 // SC credit per invocation.
 export async function POST(_request: NextRequest, context: RouteContext) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   const { id } = await context.params;
+  const guard = await requireBrandEdit(await brandOfProductionItem(id));
+  if (guard.response) return guard.response;
 
   try {
     const result = await refreshItemMetrics(id);

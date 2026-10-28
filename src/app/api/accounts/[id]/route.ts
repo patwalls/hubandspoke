@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { and, eq, isNull, ne, sql } from "drizzle-orm";
-import { auth } from "@/lib/auth";
+import { requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfAccount } from "@/lib/brand-access";
 import { db } from "@/lib/db";
 import { accounts, productionItems } from "@/lib/db/schema";
 import { getAccountById } from "@/lib/db/accounts";
@@ -31,11 +32,9 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
   const { id } = await params;
+  const guard = await requireBrandEdit(await brandOfAccount(id));
+  if (guard.response) return guard.response;
   const existing = await getAccountById(id);
   if (!existing) {
     return NextResponse.json({ error: "Account not found" }, { status: 404 });
@@ -135,11 +134,9 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
   const { id } = await params;
+  const guard = await requireBrandEdit(await brandOfAccount(id));
+  if (guard.response) return guard.response;
 
   const existing = await getAccountById(id);
   if (!existing) {

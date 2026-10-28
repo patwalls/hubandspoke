@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireSession } from "@/lib/auth-guards";
+import { requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfClipIdea } from "@/lib/brand-access";
 import {
   assignClipIdea,
   ClipIdeaAlreadyDecidedError,
@@ -13,10 +14,9 @@ interface RouteContext {
 }
 
 export async function POST(request: NextRequest, context: RouteContext) {
-  const guard = await requireSession();
-  if (guard.response) return guard.response;
-
   const { id } = await context.params;
+  const guard = await requireBrandEdit(await brandOfClipIdea(id));
+  if (guard.response) return guard.response;
   const body = await request.json().catch(() => ({}));
 
   const action = body?.action as string | undefined;

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { requireBrandEdit } from "@/lib/auth-guards";
 import { getAccountsForBrand } from "@/lib/db/accounts";
 import { inferAccountFromUrl } from "@/lib/infer-post-type";
 import { fetchPostMetadataFromUrl } from "@/lib/services/post-metadata";
@@ -14,11 +14,6 @@ import { recordScUsage } from "@/lib/services/sc-usage-log";
  * callers treat null fields as "user fills in manually" rather than an error.
  */
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   try {
     const body = await request.json();
     const url = typeof body.url === "string" ? body.url.trim() : "";
@@ -30,6 +25,10 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+
+    // Scrape Creators is a paid call — gate on edit access to the brand.
+    const guard = await requireBrandEdit(brand);
+    if (guard.response) return guard.response;
 
     // Validate the URL before anything else so we give a clean 400 instead
     // of leaking a parse error up through SC.

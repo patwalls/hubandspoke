@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { requireBrandEdit } from "@/lib/auth-guards";
 import { brands } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { fetchBrandBySlug, invalidateBrandCache } from "@/lib/db/brands";
@@ -57,6 +58,8 @@ export async function PUT(request: NextRequest) {
     if (!brand) {
       return NextResponse.json({ error: "Missing brand" }, { status: 400 });
     }
+    const guard = await requireBrandEdit(brand);
+    if (guard.response) return guard.response;
     const existing = await fetchBrandBySlug(brand);
     if (!existing) {
       return NextResponse.json({ error: "Unknown brand" }, { status: 400 });

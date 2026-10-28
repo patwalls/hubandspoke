@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
-import { requireFeature } from "@/lib/auth-guards";
+import { requireBrandEdit, requireFeature } from "@/lib/auth-guards";
+import { brandOfProductionItem } from "@/lib/brand-access";
 import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
 import { listFrames, requestAutoFrames, requestFrameAt } from "@/lib/services/design-editor/frames";
@@ -31,6 +32,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
   const guard = await requireFeature("designEditor");
   if (guard.response) return guard.response;
   const { id } = await context.params;
+  const brandGuard = await requireBrandEdit(await brandOfProductionItem(id));
+  if (brandGuard.response) return brandGuard.response;
   const sourceId = await sourceIdFor(id);
   if (!sourceId) return NextResponse.json({ error: "Item not found" }, { status: 404 });
   const body = (await request.json().catch(() => ({}))) as { atSec?: unknown; force?: unknown };

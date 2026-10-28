@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireFeature } from "@/lib/auth-guards";
+import { requireBrandEdit, requireFeature } from "@/lib/auth-guards";
+import { brandOfProductionItem } from "@/lib/brand-access";
 import { parseDesignDoc } from "@/lib/design-editor/doc";
 import {
   DesignItemNotFoundError,
@@ -35,6 +36,8 @@ export async function PUT(request: NextRequest, context: RouteContext) {
   const guard = await requireFeature("designEditor");
   if (guard.response) return guard.response;
   const { id } = await context.params;
+  const brandGuard = await requireBrandEdit(await brandOfProductionItem(id));
+  if (brandGuard.response) return brandGuard.response;
   const body = (await request.json().catch(() => null)) as { revision?: unknown; doc?: unknown } | null;
   if (!body || !Number.isInteger(body.revision)) return NextResponse.json({ error: "revision is required" }, { status: 400 });
   const parsed = parseDesignDoc(body.doc);

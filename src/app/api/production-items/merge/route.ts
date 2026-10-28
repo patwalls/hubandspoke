@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { mergeProductionItems } from "@/lib/services/merge-production-items";
-import { requireSession } from "@/lib/auth-guards";
+import { requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfProductionItem } from "@/lib/brand-access";
 
 interface MergeRequest {
   primaryId: string;
@@ -32,10 +33,6 @@ interface MergeRequest {
  * }
  */
 export async function POST(request: NextRequest) {
-  const guard = await requireSession();
-  if (guard.response) return guard.response;
-  const userId = guard.session.user.id;
-
   try {
     const body = (await request.json()) as MergeRequest;
     const { primaryId, secondaryId } = body;
@@ -47,6 +44,14 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+
+    // Gate on both brands — the merge rewrites the primary and deletes the
+    // secondary, so the caller needs edit access to each.
+    const primaryGuard = await requireBrandEdit(await brandOfProductionItem(primaryId));
+    if (primaryGuard.response) return primaryGuard.response;
+    const secondaryGuard = await requireBrandEdit(await brandOfProductionItem(secondaryId));
+    if (secondaryGuard.response) return secondaryGuard.response;
+    const userId = primaryGuard.session.user.id;
 
     // Perform the merge
     const result = await mergeProductionItems(

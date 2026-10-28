@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireFeature } from "@/lib/auth-guards";
+import { requireFeature, requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfFormat } from "@/lib/brand-access";
 import { parseDesignDoc } from "@/lib/design-editor/doc";
 import { isDesignPresetId } from "@/lib/design-editor/templates";
 import { clearFormatTemplate, createFormatTemplateFromPreset, loadFormatTemplateById, saveFormatTemplate } from "@/lib/services/design-editor/format-template";
@@ -27,6 +28,8 @@ export async function PUT(request: NextRequest, context: RouteContext) {
   const guard = await requireFeature("designEditor");
   if (guard.response) return guard.response;
   const { id } = await context.params;
+  const brandGuard = await requireBrandEdit(await brandOfFormat(id));
+  if (brandGuard.response) return brandGuard.response;
   const body = (await request.json().catch(() => ({}))) as { doc?: unknown };
   const parsed = parseDesignDoc(body.doc);
   if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
@@ -39,6 +42,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
   const guard = await requireFeature("designEditor");
   if (guard.response) return guard.response;
   const { id } = await context.params;
+  const brandGuard = await requireBrandEdit(await brandOfFormat(id));
+  if (brandGuard.response) return brandGuard.response;
   const body = (await request.json().catch(() => ({}))) as { preset?: unknown };
   if (!isDesignPresetId(body.preset)) return NextResponse.json({ error: "Unknown preset" }, { status: 400 });
   const doc = await createFormatTemplateFromPreset(id, body.preset);
@@ -51,6 +56,8 @@ export async function DELETE(_request: NextRequest, context: RouteContext) {
   const guard = await requireFeature("designEditor");
   if (guard.response) return guard.response;
   const { id } = await context.params;
+  const brandGuard = await requireBrandEdit(await brandOfFormat(id));
+  if (brandGuard.response) return brandGuard.response;
   await clearFormatTemplate(id);
   return NextResponse.json({ ok: true });
 }

@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { productionItems, productionItemMedia } from "@/lib/db/schema";
-import { requireSession } from "@/lib/auth-guards";
+import { requireBrandEdit, requireSession } from "@/lib/auth-guards";
+import { brandOfProductionItem } from "@/lib/brand-access";
 import { getPresignedGetUrl } from "@/lib/s3";
 import { resolveCleanSourceMedia } from "@/lib/services/clean-media-resolver";
 import {
@@ -71,10 +72,10 @@ export async function GET(_request: NextRequest, context: RouteContext) {
 }
 
 export async function POST(_request: NextRequest, context: RouteContext) {
-  const guard = await requireSession();
+  const { id } = await context.params;
+  const guard = await requireBrandEdit(await brandOfProductionItem(id));
   if (guard.response) return guard.response;
   const actorUserId = (guard.session.user.id as string | undefined) ?? null;
-  const { id } = await context.params;
 
   const [item] = await db
     .select({ id: productionItems.id, status: productionItems.status })

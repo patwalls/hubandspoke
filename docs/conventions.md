@@ -251,6 +251,30 @@ no percentage rollout, table, or admin UI on purpose.
    without touching call sites; `clipEditor` and `designEditor` are in that
    state as of 2026-10-07, pending cleanup.
 
+## Permissions — every mutating route gates on its brand
+
+Two roles: **admin** changes everything; **creator** views every brand but
+changes only the brands in `users.brand_ids` (`src/lib/brand-access.ts`).
+"Change" is anything that writes or costs money — edits, status moves,
+exports, uploads, enqueuing paid work (Descript, LLM drafts, renders).
+
+1. **Every new POST/PUT/PATCH/DELETE handler gates on the server**, before
+   any side effect, with the brand of the record it touches:
+   ```ts
+   const guard = await requireBrandEdit(await brandOfProductionItem(id));
+   if (guard.response) return guard.response;
+   ```
+   Resolvers exist for production items, formats, clip ideas, newsletter
+   drafts, accounts and brand UUIDs; add one to `brand-access.ts` for a new
+   entity rather than inlining a lookup. Brand from the body → parse, then
+   gate. Touches several records → gate on each brand.
+2. **Global changes** (no single brand — brands, users, invites, global
+   libraries, global syncs) use `requireAdmin()`.
+3. **Personal-only actions** (my notifications, what's-new seen, my email
+   prefs, usage telemetry) need no gate.
+4. GET handlers are not gated — creators can view everything.
+5. Hiding a button is not the gate; the 403 is.
+
 ## Removing a feature
 
 1. Mark the feature `Planned-removal` in `docs/features.md` with a short note

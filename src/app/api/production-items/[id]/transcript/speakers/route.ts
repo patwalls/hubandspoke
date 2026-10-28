@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq, sql } from "drizzle-orm";
-import { requireSession } from "@/lib/auth-guards";
+import { requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfProductionItem } from "@/lib/brand-access";
 import { db } from "@/lib/db";
 import { transcripts } from "@/lib/db/schema";
 import { applyNames } from "@/lib/diarization/finalize";
@@ -22,9 +23,9 @@ const SKIP_MESSAGES: Record<string, string> = {
 /** Detect (or re-detect) speakers. Queues a background job — a 15-minute
  *  video takes roughly 7 minutes — and returns immediately. */
 export async function POST(_request: NextRequest, context: RouteContext) {
-  const guard = await requireSession();
-  if (guard.response) return guard.response;
   const { id } = await context.params;
+  const guard = await requireBrandEdit(await brandOfProductionItem(id));
+  if (guard.response) return guard.response;
 
   const result = await maybeEnqueueDiarize(id, { force: true, ignoreDuration: true });
   if (!result.enqueued) {
@@ -43,9 +44,9 @@ export async function POST(_request: NextRequest, context: RouteContext) {
  * is what prompts and exports print), so those are rewritten here too.
  */
 export async function PATCH(request: NextRequest, context: RouteContext) {
-  const guard = await requireSession();
-  if (guard.response) return guard.response;
   const { id } = await context.params;
+  const guard = await requireBrandEdit(await brandOfProductionItem(id));
+  if (guard.response) return guard.response;
 
   const body = (await request.json().catch(() => null)) as {
     speakerId?: unknown;

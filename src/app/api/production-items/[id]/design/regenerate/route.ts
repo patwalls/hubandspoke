@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireFeature } from "@/lib/auth-guards";
+import { requireBrandEdit, requireFeature } from "@/lib/auth-guards";
+import { brandOfProductionItem } from "@/lib/brand-access";
 import { DesignUnsupportedError, requestDesignRegenerate } from "@/lib/services/design-editor/session";
 
 interface RouteContext {
@@ -14,6 +15,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
   const guard = await requireFeature("designEditor");
   if (guard.response) return guard.response;
   const { id } = await context.params;
+  const brandGuard = await requireBrandEdit(await brandOfProductionItem(id));
+  if (brandGuard.response) return brandGuard.response;
   const body = (await request.json().catch(() => ({}))) as { instruction?: unknown };
   const instruction = typeof body.instruction === "string" ? body.instruction.trim().slice(0, 1000) || null : null;
   try {

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { invalidateReportCaches } from "@/lib/invalidate-report-caches";
 import { and, eq } from "drizzle-orm";
-import { requireSession } from "@/lib/auth-guards";
+import { requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfAccount, brandOfProductionItem } from "@/lib/brand-access";
 import { db } from "@/lib/db";
 import { accounts, contentEvents, productionItems, users } from "@/lib/db/schema";
 import { resolveEditor } from "@/lib/services/assignees";
@@ -83,10 +84,10 @@ interface RouteContext {
  * from + a link back to the source.
  */
 export async function POST(request: NextRequest, context: RouteContext) {
-  const guard = await requireSession();
-  if (guard.response) return guard.response;
-
   const { id } = await context.params;
+  const sourceBrand = await brandOfProductionItem(id);
+  const guard = await requireBrandEdit(sourceBrand);
+  if (guard.response) return guard.response;
 
   let body: unknown;
   try {
@@ -124,6 +125,14 @@ export async function POST(request: NextRequest, context: RouteContext) {
       { error: "targetAccountId is required" },
       { status: 400 }
     );
+  }
+
+  // The new row lives on the source's brand but publishes to the target
+  // account — gate on the target account's brand too when it differs.
+  const targetBrand = await brandOfAccount(targetAccountId);
+  if (targetBrand && targetBrand !== sourceBrand) {
+    const targetGuard = await requireBrandEdit(targetBrand);
+    if (targetGuard.response) return targetGuard.response;
   }
 
   const [target] = await db

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { requireFeature } from "@/lib/auth-guards";
+import { requireBrandEdit, requireFeature } from "@/lib/auth-guards";
+import { brandOfFormat } from "@/lib/brand-access";
 import { enqueue } from "@/jobs/enqueue";
 import {
   createNewsletterDraft,
@@ -32,6 +33,8 @@ export async function POST(request: NextRequest) {
   if (guard.response) return guard.response;
   const parsed = CreateBody.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "formatId is required" }, { status: 400 });
+  const brandGuard = await requireBrandEdit(await brandOfFormat(parsed.data.formatId));
+  if (brandGuard.response) return brandGuard.response;
   const created = await createNewsletterDraft({
     formatId: parsed.data.formatId,
     days: parsed.data.days,

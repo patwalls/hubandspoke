@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
-import { auth } from "@/lib/auth";
+import { requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfProductionItem } from "@/lib/brand-access";
 import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
 import { bucketName, buildKey, getPresignedPutUrl } from "@/lib/s3";
@@ -8,11 +9,6 @@ import { bucketName, buildKey, getPresignedPutUrl } from "@/lib/s3";
 const MAX_BYTES = 5 * 1024 * 1024 * 1024; // 5 GB
 
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   let body: {
     itemId?: string;
     fileName?: string;
@@ -36,6 +32,8 @@ export async function POST(request: NextRequest) {
       { status: 400 }
     );
   }
+  const guard = await requireBrandEdit(await brandOfProductionItem(itemId));
+  if (guard.response) return guard.response;
   if (fileSize > MAX_BYTES) {
     return NextResponse.json(
       { error: `File too large (max ${MAX_BYTES} bytes)` },

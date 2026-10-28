@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
-import { requireSession } from "@/lib/auth-guards";
+import { requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfProductionItem } from "@/lib/brand-access";
 import { invalidateQueueCaches } from "@/lib/invalidate-report-caches";
 import { db } from "@/lib/db";
 import { contentEvents, formats, productionItems } from "@/lib/db/schema";
@@ -22,11 +23,11 @@ interface RouteContext {
  * (null) from "Kill this idea" (a written reason) — mirrors repost-dismiss.
  */
 export async function POST(request: NextRequest, context: RouteContext) {
-  const guard = await requireSession();
+  const { id } = await context.params;
+  const guard = await requireBrandEdit(await brandOfProductionItem(id));
   if (guard.response) return guard.response;
   const actorUserId = guard.session.user.id as string;
 
-  const { id } = await context.params;
 
   let body: { targetFormatId?: unknown; reason?: unknown };
   try {

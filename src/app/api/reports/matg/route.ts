@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfProductionItem } from "@/lib/brand-access";
 import { productionItems, formats, accounts, brands } from "@/lib/db/schema";
 import { and, eq, gte, inArray, lte, isNotNull, isNull, sql } from "drizzle-orm";
 import {
@@ -25,6 +27,8 @@ export async function PATCH(request: NextRequest) {
     if (!itemId) {
       return NextResponse.json({ error: "itemId required" }, { status: 400 });
     }
+    const guard = await requireBrandEdit(await brandOfProductionItem(itemId));
+    if (guard.response) return guard.response;
 
     await db
       .update(productionItems)

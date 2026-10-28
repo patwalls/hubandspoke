@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireSession } from "@/lib/auth-guards";
+import { requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfProductionItem } from "@/lib/brand-access";
 import { regenerateCtaForItem } from "@/lib/services/draft-algorithm/regenerate-cta";
 import { syncLinkMetricsForItem } from "@/lib/services/link-metrics-sync";
 
@@ -28,12 +29,12 @@ export const maxDuration = 60;
  *   502 `{ error }` when the Opus call itself errored.
  */
 export async function POST(_request: NextRequest, context: RouteContext) {
-  const guard = await requireSession();
+  const { id } = await context.params;
+  const guard = await requireBrandEdit(await brandOfProductionItem(id));
   if (guard.response) return guard.response;
   const actorUserId = (guard.session.user.id as string | undefined) ?? null;
 
   try {
-    const { id } = await context.params;
     const result = await Promise.race([
       regenerateCtaForItem({ productionItemId: id, actorUserId }),
       new Promise<never>((_, reject) =>

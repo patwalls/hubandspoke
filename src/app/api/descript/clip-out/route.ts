@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
-import { auth } from "@/lib/auth";
+import { requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfFormat, brandOfProductionItem } from "@/lib/brand-access";
 import { db } from "@/lib/db";
 import { productionItems, formats, repurposeTriggers } from "@/lib/db/schema";
 import { invokeDescriptAgent } from "@/lib/descript";
@@ -12,11 +13,6 @@ import { getChannelsForFormats } from "@/lib/format-channels";
 import { enqueue } from "@/jobs/enqueue";
 
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   let body: { itemId?: string; targetFormatId?: string };
   try {
     body = await request.json();
@@ -31,6 +27,10 @@ export async function POST(request: NextRequest) {
       { error: "itemId and targetFormatId required" },
       { status: 400 }
     );
+  }
+  for (const brand of new Set([await brandOfProductionItem(itemId), await brandOfFormat(targetFormatId)])) {
+    const guard = await requireBrandEdit(brand);
+    if (guard.response) return guard.response;
   }
 
   const [item] = await db

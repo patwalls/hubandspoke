@@ -3,7 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { and, eq, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { formats, productionItems } from "@/lib/db/schema";
-import { requireSession } from "@/lib/auth-guards";
+import { requireBrandEdit } from "@/lib/auth-guards";
 import { buildForkUserText } from "../draft-skill-prompt";
 
 const MODEL = "claude-haiku-5-5";
@@ -162,9 +162,6 @@ You will be given the brand's existing format names + a few sibling format Skill
 OUTPUT: call submit_format_draft exactly once. Never plain text.`;
 
 export async function POST(request: NextRequest) {
-  const guard = await requireSession();
-  if (guard.response) return guard.response;
-
   let body: DraftSkillBody;
   try {
     body = (await request.json()) as DraftSkillBody;
@@ -203,6 +200,8 @@ export async function POST(request: NextRequest) {
       { status: 400 },
     );
   }
+  const guard = await requireBrandEdit(brand);
+  if (guard.response) return guard.response;
 
   // Validate image attachments. Reject early so a 5MB-per-image enforced
   // upstream doesn't surprise Anthropic with a 400.

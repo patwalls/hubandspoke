@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireFeature } from "@/lib/auth-guards";
+import { requireFeature, requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfNewsletterDraft } from "@/lib/brand-access";
 import { uploadScreenshot } from "@/lib/services/newsletter-drafter/screenshots";
 
 interface RouteContext {
@@ -11,6 +12,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
   const guard = await requireFeature("newsletterDrafter");
   if (guard.response) return guard.response;
   const { id } = await context.params;
+  const brandGuard = await requireBrandEdit(await brandOfNewsletterDraft(id));
+  if (brandGuard.response) return brandGuard.response;
   const form = await request.formData().catch(() => null);
   const markKey = form?.get("markKey");
   const file = form?.get("file");

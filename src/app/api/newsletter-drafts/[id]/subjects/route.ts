@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireFeature } from "@/lib/auth-guards";
+import { requireFeature, requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfNewsletterDraft } from "@/lib/brand-access";
 import { getNewsletterDraft } from "@/lib/services/newsletter-drafter/queries";
 import { suggestSubjectLines } from "@/lib/services/newsletter-drafter/subjects";
 
@@ -12,6 +13,8 @@ export async function POST(_request: NextRequest, context: RouteContext) {
   const guard = await requireFeature("newsletterDrafter");
   if (guard.response) return guard.response;
   const { id } = await context.params;
+  const brandGuard = await requireBrandEdit(await brandOfNewsletterDraft(id));
+  if (brandGuard.response) return brandGuard.response;
   const r = await suggestSubjectLines(id);
   if (!r.ok) {
     const status = r.failure === "not_found" ? 404 : r.failure === "not_ready" ? 409 : 502;

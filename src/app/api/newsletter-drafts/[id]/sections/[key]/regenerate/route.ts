@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
-import { requireFeature } from "@/lib/auth-guards";
+import { requireFeature, requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfNewsletterDraft } from "@/lib/brand-access";
 import { db } from "@/lib/db";
 import { newsletterDrafts } from "@/lib/db/schema";
 import { enqueue } from "@/jobs/enqueue";
@@ -21,6 +22,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
   const guard = await requireFeature("newsletterDrafter");
   if (guard.response) return guard.response;
   const { id, key } = await context.params;
+  const brandGuard = await requireBrandEdit(await brandOfNewsletterDraft(id));
+  if (brandGuard.response) return brandGuard.response;
   const parsed = z.object({
       instruction: z.string().max(8000).nullable().optional(),
       newStory: z.boolean().optional(),

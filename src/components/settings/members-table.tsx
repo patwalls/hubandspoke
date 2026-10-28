@@ -170,7 +170,11 @@ function EditMemberDialog({
           </div>
 
           <div className="space-y-2">
-            <Label>Channels</Label>
+            <Label>Brands they can edit</Label>
+            <p className="text-xs text-muted-foreground">
+              Everyone can view every brand. Creators can only make changes on
+              the brands checked here; admins can edit all brands.
+            </p>
             <div className="space-y-1 max-h-48 overflow-y-auto rounded-md border border-input bg-background px-3 py-2">
               {brands.length === 0 && (
                 <p className="text-xs text-muted-foreground py-1">No brands found.</p>
@@ -309,7 +313,7 @@ export function MembersTable({
               <TableHead>Email</TableHead>
               <TableHead>Permissions</TableHead>
               <TableHead>Role</TableHead>
-              <TableHead>Channels</TableHead>
+              <TableHead>Can edit</TableHead>
               <TableHead>Joined</TableHead>
               <TableHead
                 className="text-center"

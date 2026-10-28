@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { asc, eq } from "drizzle-orm";
-import { requireSession } from "@/lib/auth-guards";
+import { requireAdmin, requireSession } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
 import { descriptLayoutPacks } from "@/lib/db/schema";
 import { probeDescriptLayoutPack } from "@/lib/descript";
@@ -24,7 +24,8 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  const guard = await requireSession();
+  // Layout packs are one shared list across every brand → admins only.
+  const guard = await requireAdmin();
   if (guard.response) return guard.response;
 
   let body: { name?: unknown; url?: unknown };

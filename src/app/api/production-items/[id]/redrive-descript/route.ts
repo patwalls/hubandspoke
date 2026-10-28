@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { desc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { productionItems, repurposeTriggers } from "@/lib/db/schema";
-import { requireSession } from "@/lib/auth-guards";
+import { requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfProductionItem } from "@/lib/brand-access";
 import { enqueue } from "@/jobs/enqueue";
 
 interface RouteContext {
@@ -29,9 +30,9 @@ interface RouteContext {
  * the caller should kill the row first and re-promote the clip-idea.
  */
 export async function POST(_request: NextRequest, context: RouteContext) {
-  const guard = await requireSession();
-  if (guard.response) return guard.response;
   const { id } = await context.params;
+  const guard = await requireBrandEdit(await brandOfProductionItem(id));
+  if (guard.response) return guard.response;
   try {
     return await runRedrive(id);
   } catch (err) {

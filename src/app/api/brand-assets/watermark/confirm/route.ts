@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { requireBrandEdit } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
 import { brandWatermarks } from "@/lib/db/schema";
 import { fetchBrandBySlug } from "@/lib/db/brands";
@@ -9,11 +9,6 @@ const PREFIX = (process.env.HUBANDSPOKE_S3_PREFIX || "hubandspoke/uploads")
   .replace(/\/+$/, "");
 
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   let body: { brand?: string; key?: string; fileName?: string; fileSize?: number };
   try {
     body = await request.json();
@@ -29,6 +24,9 @@ export async function POST(request: NextRequest) {
       { status: 400 }
     );
   }
+
+  const guard = await requireBrandEdit(brandSlug);
+  if (guard.response) return guard.response;
 
   const expectedPrefix = `${PREFIX}/brand-watermarks/${brandSlug}/`;
   if (!key.startsWith(expectedPrefix)) {

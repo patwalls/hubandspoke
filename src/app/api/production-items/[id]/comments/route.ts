@@ -3,6 +3,8 @@ import { db } from "@/lib/db";
 import { contentComments, productionItems, users } from "@/lib/db/schema";
 import { and, asc, eq, isNotNull, sql } from "drizzle-orm";
 import { auth } from "@/lib/auth";
+import { requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfProductionItem } from "@/lib/brand-access";
 import { enqueueNotification } from "@/lib/services/notifications";
 import { htmlToPlainText, sanitizeCommentHtml } from "@/lib/comments/sanitize";
 import { extractMentionUserIds } from "@/lib/comments/extract-mentions";
@@ -77,11 +79,13 @@ export async function GET(_request: NextRequest, context: RouteContext) {
 
 export async function POST(request: NextRequest, context: RouteContext) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const { id } = await context.params;
+    const guard = await requireBrandEdit(await brandOfProductionItem(id));
+    if (guard.response) return guard.response;
+    const session = guard.session;
+    if (!session.user.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
-    const { id } = await context.params;
 
     const body = await request.json();
     const raw = typeof body?.body === "string" ? body.body : "";

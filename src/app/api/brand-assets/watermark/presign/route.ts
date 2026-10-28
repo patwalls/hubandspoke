@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { requireBrandEdit } from "@/lib/auth-guards";
 import { fetchBrandBySlug } from "@/lib/db/brands";
 import { getPresignedPutUrl } from "@/lib/s3";
 
@@ -12,11 +12,6 @@ const ALLOWED_RE =
   /^(application\/(zip|x-zip-compressed|octet-stream)|image\/(png|jpe?g|gif|webp|svg\+xml))$/;
 
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   let body: {
     brand?: string;
     fileName?: string;
@@ -37,6 +32,8 @@ export async function POST(request: NextRequest) {
       { status: 400 }
     );
   }
+  const guard = await requireBrandEdit(brandSlug);
+  if (guard.response) return guard.response;
   if (fileSize > MAX_BYTES) {
     return NextResponse.json(
       { error: `File too large (max ${MAX_BYTES / 1024 / 1024} MB)` },

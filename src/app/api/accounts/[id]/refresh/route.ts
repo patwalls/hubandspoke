@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfAccount } from "@/lib/brand-access";
 import { enqueue } from "@/jobs/enqueue";
 import { getAccountById } from "@/lib/db/accounts";
 import { refreshAccount } from "@/lib/services/account-refresh";
@@ -16,11 +17,9 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
   const { id } = await params;
+  const guard = await requireBrandEdit(await brandOfAccount(id));
+  if (guard.response) return guard.response;
   const account = await getAccountById(id);
   if (!account) {
     return NextResponse.json({ error: "Account not found" }, { status: 404 });

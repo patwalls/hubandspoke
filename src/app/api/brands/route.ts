@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { requireAdmin } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
 import { brands } from "@/lib/db/schema";
 import { getBrands, invalidateBrandCache } from "@/lib/db/brands";
@@ -16,10 +17,8 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const guard = await requireAdmin();
+  if (guard.response) return guard.response;
 
   try {
     const body = await request.json();

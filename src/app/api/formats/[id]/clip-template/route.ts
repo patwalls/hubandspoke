@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
-import { requireFeature } from "@/lib/auth-guards";
+import { requireFeature, requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfFormat } from "@/lib/brand-access";
 import { db } from "@/lib/db";
 import { formats } from "@/lib/db/schema";
 import { clipLookSchema } from "@/lib/clip-editor/doc";
@@ -29,6 +30,8 @@ export async function PUT(request: NextRequest, context: RouteContext) {
   const guard = await requireFeature("clipEditor");
   if (guard.response) return guard.response;
   const { id } = await context.params;
+  const brandGuard = await requireBrandEdit(await brandOfFormat(id));
+  if (brandGuard.response) return brandGuard.response;
   const body = (await request.json().catch(() => ({}))) as { look?: unknown };
   const parsed = clipLookSchema.safeParse(body.look);
   if (!parsed.success) return NextResponse.json({ error: "Invalid look" }, { status: 400 });
@@ -41,6 +44,8 @@ export async function DELETE(_request: NextRequest, context: RouteContext) {
   const guard = await requireFeature("clipEditor");
   if (guard.response) return guard.response;
   const { id } = await context.params;
+  const brandGuard = await requireBrandEdit(await brandOfFormat(id));
+  if (brandGuard.response) return brandGuard.response;
   await db.update(formats).set({ clipTemplate: null, clipTemplateUpdatedAt: null }).where(eq(formats.id, id));
   return NextResponse.json({ ok: true });
 }

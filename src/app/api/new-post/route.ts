@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireFeature } from "@/lib/auth-guards";
+import { requireBrandEdit, requireFeature } from "@/lib/auth-guards";
 import { isFeatureEnabled } from "@/lib/feature-flags";
 import { invalidateReportCaches } from "@/lib/invalidate-report-caches";
 import { createNewPost, listNewPostFormats, listNewPostPillars, NewPostError } from "@/lib/services/new-post";
@@ -31,6 +31,8 @@ export async function POST(request: NextRequest) {
   if (!body || typeof body.kind !== "string" || typeof body.brand !== "string" || typeof body.pillarId !== "string") {
     return NextResponse.json({ error: "kind, brand and pillarId are required" }, { status: 400 });
   }
+  const brandGuard = await requireBrandEdit(body.brand);
+  if (brandGuard.response) return brandGuard.response;
   const flags = { designEditor: isFeatureEnabled("designEditor", guard.session.user), clipEditor: isFeatureEnabled("clipEditor", guard.session.user) };
   try {
     const made = await createNewPost({

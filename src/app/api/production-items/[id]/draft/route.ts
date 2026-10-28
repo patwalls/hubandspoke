@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireSession } from "@/lib/auth-guards";
+import { requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfProductionItem } from "@/lib/brand-access";
 import { runDraftAlgorithm } from "@/lib/services/draft-algorithm/run";
 
 interface RouteContext {
@@ -26,11 +27,11 @@ export const maxDuration = 60;
  *   unsupported post type) so the caller can surface a friendly toast.
  */
 export async function POST(request: NextRequest, context: RouteContext) {
-  const guard = await requireSession();
+  const { id } = await context.params;
+  const guard = await requireBrandEdit(await brandOfProductionItem(id));
   if (guard.response) return guard.response;
   const actorUserId = guard.session.user.id ?? null;
 
-  const { id } = await context.params;
   const body = (await request.json().catch(() => ({}))) as {
     force?: boolean;
     userInitiated?: boolean;

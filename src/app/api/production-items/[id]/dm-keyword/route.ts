@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireSession } from "@/lib/auth-guards";
+import { requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfProductionItem } from "@/lib/brand-access";
 import { attachDmKeyword } from "@/lib/services/dm-keyword";
 import { ShortLinksApiError } from "@/lib/services/short-links";
 import { RebrandlyApiError } from "@/lib/services/rebrandly";
@@ -18,9 +19,9 @@ interface RouteContext {
  * Returns the resolved chain; the item's `short_link_slug` is set.
  */
 export async function POST(request: NextRequest, context: RouteContext) {
-  const guard = await requireSession();
-  if (guard.response) return guard.response;
   const { id } = await context.params;
+  const guard = await requireBrandEdit(await brandOfProductionItem(id));
+  if (guard.response) return guard.response;
   const body = (await request.json().catch(() => ({}))) as { keywordSlug?: unknown; destinationUrl?: unknown };
   try {
     return NextResponse.json(await attachDmKeyword({ itemId: id, keywordSlug: String(body.keywordSlug ?? ""), destinationUrl: String(body.destinationUrl ?? "").trim() }));

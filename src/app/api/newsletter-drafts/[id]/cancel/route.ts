@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { requireFeature } from "@/lib/auth-guards";
+import { requireFeature, requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfNewsletterDraft } from "@/lib/brand-access";
 import { cancelDraftRun, cancelSectionRun } from "@/lib/services/newsletter-drafter/cancel";
 
 interface RouteContext {
@@ -18,6 +19,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
   const guard = await requireFeature("newsletterDrafter");
   if (guard.response) return guard.response;
   const { id } = await context.params;
+  const brandGuard = await requireBrandEdit(await brandOfNewsletterDraft(id));
+  if (brandGuard.response) return brandGuard.response;
   const parsed = Body.safeParse(await request.json().catch(() => ({})));
   if (!parsed.success) return NextResponse.json({ error: "Invalid body" }, { status: 400 });
   const cancelled = parsed.data.section ? await cancelSectionRun(id, parsed.data.section) : await cancelDraftRun(id);

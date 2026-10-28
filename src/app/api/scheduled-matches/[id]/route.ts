@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { and, eq, ne } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { scheduledMatchSuggestions } from "@/lib/db/schema";
-import { requireSession } from "@/lib/auth-guards";
+import { requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfProductionItem } from "@/lib/brand-access";
 import { reconcileScheduledIntoPublished } from "@/lib/services/merge-production-items";
 
 interface RouteContext {
@@ -20,10 +21,6 @@ interface RouteContext {
  *   matcher won't re-propose this pair.
  */
 export async function POST(request: NextRequest, context: RouteContext) {
-  const guard = await requireSession();
-  if (guard.response) return guard.response;
-  const actorUserId = (guard.session.user.id as string | undefined) ?? null;
-
   const { id } = await context.params;
   const body = (await request.json().catch(() => ({}))) as {
     action?: unknown;
@@ -50,6 +47,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
   if (!suggestion) {
     return NextResponse.json({ error: "Suggestion not found" }, { status: 404 });
   }
+  // Confirming rewrites both items (the candidate is absorbed), so the
+  // caller needs edit access to each item's brand.
+  const guard = await requireBrandEdit(await brandOfProductionItem(suggestion.scheduledItemId));
+  if (guard.response) return guard.response;
+  const candidateGuard = await requireBrandEdit(await brandOfProductionItem(suggestion.candidateItemId));
+  if (candidateGuard.response) return candidateGuard.response;
+  const actorUserId = (guard.session.user.id as string | undefined) ?? null;
   if (suggestion.status !== "pending") {
     return NextResponse.json(
       { error: `Suggestion already ${suggestion.status}` },

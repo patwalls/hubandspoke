@@ -71,7 +71,7 @@ describe("resolveFeatureFlags", () => {
     expect(resolveFeatureFlags({ email: "sam@example.com" }, {})).toEqual({
       clipEditor: true,
       designEditor: true,
-      newsletterDrafter: false,
+      newsletterDrafter: true,
       newsletterTemplateAdmin: false,
       myWorkDigest: true,
     });

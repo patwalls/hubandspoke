@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
-import { requireFeature } from "@/lib/auth-guards";
+import { requireFeature, requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfClipIdea } from "@/lib/brand-access";
 import { db } from "@/lib/db";
 import { clipIdeas, formats, productionItems } from "@/lib/db/schema";
 import { clipLookSchema } from "@/lib/clip-editor/doc";
@@ -19,6 +20,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
   const guard = await requireFeature("clipEditor");
   if (guard.response) return guard.response;
   const { id } = await context.params;
+  const brandGuard = await requireBrandEdit(await brandOfClipIdea(id));
+  if (brandGuard.response) return brandGuard.response;
   const body = (await request.json().catch(() => ({}))) as { look?: unknown };
   const parsed = clipLookSchema.safeParse(body.look);
   if (!parsed.success) return NextResponse.json({ error: "Invalid look" }, { status: 400 });

@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
-import { requireSession } from "@/lib/auth-guards";
+import { requireBrandEdit, requireSession } from "@/lib/auth-guards";
+import { brandOfProductionItem } from "@/lib/brand-access";
 import { enqueue } from "@/jobs/enqueue";
 import {
   buildTikTokDraftPreview,
@@ -56,10 +57,10 @@ export async function GET(_request: NextRequest, context: RouteContext) {
 }
 
 export async function POST(request: NextRequest, context: RouteContext) {
-  const guard = await requireSession();
+  const { id } = await context.params;
+  const guard = await requireBrandEdit(await brandOfProductionItem(id));
   if (guard.response) return guard.response;
   const actorUserId = (guard.session.user.id as string | undefined) ?? null;
-  const { id } = await context.params;
 
   const body = (await request.json().catch(() => ({}))) as {
     mode?: unknown;

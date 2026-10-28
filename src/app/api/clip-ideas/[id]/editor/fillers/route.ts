@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireFeature } from "@/lib/auth-guards";
+import { requireFeature, requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfClipIdea } from "@/lib/brand-access";
 import { detectFillerWords } from "@/lib/services/clip-editor/detect-fillers";
 import { loadClipEditorSession } from "@/lib/services/clip-editor/session";
 import { isWordInRange } from "@/lib/clip-editor/words";
@@ -20,6 +21,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
   const guard = await requireFeature("clipEditor");
   if (guard.response) return guard.response;
   const { id } = await context.params;
+  const brandGuard = await requireBrandEdit(await brandOfClipIdea(id));
+  if (brandGuard.response) return brandGuard.response;
 
   const body = (await request.json().catch(() => null)) as {
     ranges?: Array<{ startSec?: unknown; endSec?: unknown }>;

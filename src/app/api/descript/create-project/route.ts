@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
-import { auth } from "@/lib/auth";
+import { requireAdmin, requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfProductionItem } from "@/lib/brand-access";
 import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
 import {
@@ -32,11 +33,6 @@ async function persistDescriptProject(
 }
 
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   let body: {
     mode?: "url" | "s3";
     url?: string;
@@ -53,6 +49,9 @@ export async function POST(request: NextRequest) {
 
   const projectName = body.projectName?.trim() || "Imported video";
   const itemId = body.itemId?.trim();
+  // No item = a bare Descript import with no brand to check → admins only.
+  const guard = itemId ? await requireBrandEdit(await brandOfProductionItem(itemId)) : await requireAdmin();
+  if (guard.response) return guard.response;
   const mode = body.mode || (body.url ? "url" : body.s3Key ? "s3" : null);
 
   if (!mode) {

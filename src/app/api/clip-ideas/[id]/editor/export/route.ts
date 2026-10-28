@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireFeature } from "@/lib/auth-guards";
+import { requireFeature, requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfClipIdea } from "@/lib/brand-access";
 import {
   ClipEditEmptyError,
   ClipEditNotFoundError,
@@ -22,6 +23,8 @@ export async function POST(_request: NextRequest, context: RouteContext) {
   const guard = await requireFeature("clipEditor");
   if (guard.response) return guard.response;
   const { id } = await context.params;
+  const brandGuard = await requireBrandEdit(await brandOfClipIdea(id));
+  if (brandGuard.response) return brandGuard.response;
 
   try {
     const result = await exportClipEdit({

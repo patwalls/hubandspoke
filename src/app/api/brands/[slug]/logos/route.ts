@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireSession } from "@/lib/auth-guards";
+import { requireBrandEdit, requireSession } from "@/lib/auth-guards";
 import { fetchBrandBySlug } from "@/lib/db/brands";
 import { BrandLogoUploadError, listBrandLogos, uploadBrandLogo } from "@/lib/services/brand-logos";
 
@@ -19,9 +19,9 @@ export async function GET(_request: NextRequest, context: RouteContext) {
 
 /** POST multipart `file` — add a logo to the brand's library. */
 export async function POST(request: NextRequest, context: RouteContext) {
-  const guard = await requireSession();
-  if (guard.response) return guard.response;
   const { slug } = await context.params;
+  const guard = await requireBrandEdit(slug);
+  if (guard.response) return guard.response;
   if (!(await fetchBrandBySlug(slug))) return NextResponse.json({ error: "Brand not found" }, { status: 404 });
   const form = await request.formData().catch(() => null);
   const file = form?.get("file");

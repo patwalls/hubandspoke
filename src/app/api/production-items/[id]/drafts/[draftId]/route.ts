@@ -6,7 +6,8 @@ import {
   productionItems,
   type FormatFieldSchema,
 } from "@/lib/db/schema";
-import { requireSession } from "@/lib/auth-guards";
+import { requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfProductionItem } from "@/lib/brand-access";
 import {
   applyDraftPatch,
   NoCurrentDraftError,
@@ -39,11 +40,10 @@ interface RouteContext {
  * silently bifurcate the version chain, so we reject it.
  */
 export async function PUT(request: NextRequest, context: RouteContext) {
-  const guard = await requireSession();
+  const { id, draftId } = await context.params;
+  const guard = await requireBrandEdit(await brandOfProductionItem(id));
   if (guard.response) return guard.response;
   const actorUserId = guard.session.user.id as string;
-
-  const { id, draftId } = await context.params;
 
   const body = await request.json().catch(() => null);
   const patch =

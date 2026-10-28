@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { invalidateReportCaches } from "@/lib/invalidate-report-caches";
 import { eq } from "drizzle-orm";
 import * as Sentry from "@sentry/nextjs";
-import { requireSession } from "@/lib/auth-guards";
+import { requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfProductionItem } from "@/lib/brand-access";
 import { db } from "@/lib/db";
 import { contentEvents, productionItems } from "@/lib/db/schema";
 import { resolveEditor } from "@/lib/services/assignees";
@@ -60,11 +61,11 @@ type AcceptedStatus = (typeof ACCEPTED_STATUSES)[number];
  * activity feed shows the lineage.
  */
 export async function POST(request: Request, context: RouteContext) {
-  const guard = await requireSession();
+  const { id } = await context.params;
+  const guard = await requireBrandEdit(await brandOfProductionItem(id));
   if (guard.response) return guard.response;
   const actorUserId = guard.session.user.id as string;
 
-  const { id } = await context.params;
 
   // Parse optional body. Empty body is fine — keeps v1 callers working.
   const body = (await request.json().catch(() => ({}))) as {

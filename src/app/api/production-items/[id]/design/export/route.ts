@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireFeature } from "@/lib/auth-guards";
+import { requireBrandEdit, requireFeature } from "@/lib/auth-guards";
+import { brandOfProductionItem } from "@/lib/brand-access";
 import { DesignNotFoundError, exportDesign } from "@/lib/services/design-editor/export";
 
 interface RouteContext {
@@ -10,6 +11,8 @@ export async function POST(_request: NextRequest, context: RouteContext) {
   const guard = await requireFeature("designEditor");
   if (guard.response) return guard.response;
   const { id } = await context.params;
+  const brandGuard = await requireBrandEdit(await brandOfProductionItem(id));
+  if (brandGuard.response) return brandGuard.response;
   try {
     return NextResponse.json({ ok: true, ...(await exportDesign({ productionItemId: id, actorUserId: guard.session.user.id as string })) });
   } catch (err) {

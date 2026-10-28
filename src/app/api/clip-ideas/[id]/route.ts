@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
-import { requireSession } from "@/lib/auth-guards";
+import { requireBrandEdit, requireSession } from "@/lib/auth-guards";
+import { brandOfClipIdea } from "@/lib/brand-access";
 import { db } from "@/lib/db";
 import { titleAfterHookChange } from "@/lib/services/title-after-hook-change";
 import {
@@ -100,10 +101,9 @@ export async function GET(_request: NextRequest, context: RouteContext) {
 }
 
 export async function PATCH(request: NextRequest, context: RouteContext) {
-  const guard = await requireSession();
-  if (guard.response) return guard.response;
-
   const { id } = await context.params;
+  const guard = await requireBrandEdit(await brandOfClipIdea(id));
+  if (guard.response) return guard.response;
   const body = (await request.json().catch(() => ({}))) as {
     hook?: unknown;
     hookSegments?: unknown;

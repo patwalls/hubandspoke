@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { asc, eq } from "drizzle-orm";
-import { requireSession } from "@/lib/auth-guards";
+import { requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfProductionItem } from "@/lib/brand-access";
 import { db } from "@/lib/db";
 import { productionItems, productionItemMedia } from "@/lib/db/schema";
 import { getPresignedGetUrl, headObject } from "@/lib/s3";
@@ -44,11 +45,10 @@ const PRESIGN_GET_TTL = 60 * 60; // 1h, matches detail GET
  * immediately without a full item refetch.
  */
 export async function POST(request: Request, context: RouteContext) {
-  const guard = await requireSession();
+  const { id } = await context.params;
+  const guard = await requireBrandEdit(await brandOfProductionItem(id));
   if (guard.response) return guard.response;
   const actorUserId = guard.session.user.id as string;
-
-  const { id } = await context.params;
 
   let body: { uploads?: unknown };
   try {

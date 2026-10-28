@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
-import { requireSession } from "@/lib/auth-guards";
+import { requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfProductionItem } from "@/lib/brand-access";
 import { db } from "@/lib/db";
 import { productionItems, productionItemMedia } from "@/lib/db/schema";
 import { bucketName, buildKey, getPresignedPutUrl } from "@/lib/s3";
@@ -47,10 +48,9 @@ interface PresignResponseFile {
  * reflect what's actually published.
  */
 export async function POST(request: Request, context: RouteContext) {
-  const guard = await requireSession();
-  if (guard.response) return guard.response;
-
   const { id } = await context.params;
+  const guard = await requireBrandEdit(await brandOfProductionItem(id));
+  if (guard.response) return guard.response;
 
   let body: { files?: unknown };
   try {

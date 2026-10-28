@@ -1,17 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
-import { auth } from "@/lib/auth";
+import { requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfProductionItem } from "@/lib/brand-access";
 import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
 import { headObject } from "@/lib/s3";
 import { maybeEnqueueWhisperTranscribe } from "@/lib/services/transcribe-after-upload";
 
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   let body: {
     itemId?: string;
     key?: string;
@@ -37,6 +33,9 @@ export async function POST(request: NextRequest) {
       { status: 400 }
     );
   }
+
+  const guard = await requireBrandEdit(await brandOfProductionItem(itemId));
+  if (guard.response) return guard.response;
 
   // Verify the object actually exists in storage (defends against client lying).
   const head = await headObject(key, bucket);

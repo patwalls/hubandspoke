@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { desc, eq } from "drizzle-orm";
-import { requireFeature } from "@/lib/auth-guards";
+import { requireFeature, requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfFormat } from "@/lib/brand-access";
 import { db } from "@/lib/db";
 import { formats, newsletterTemplateProposals } from "@/lib/db/schema";
 import { enqueue } from "@/jobs/enqueue";
@@ -41,6 +42,8 @@ export async function POST(_request: NextRequest, context: RouteContext) {
   const guard = await requireFeature("newsletterDrafter");
   if (guard.response) return guard.response;
   const { id } = await context.params;
+  const brandGuard = await requireBrandEdit(await brandOfFormat(id));
+  if (brandGuard.response) return brandGuard.response;
   const [f] = await db.select({ name: formats.name, saved: formats.newsletterTemplate }).from(formats).where(eq(formats.id, id)).limit(1);
   if (!f) return NextResponse.json({ error: "Not found" }, { status: 404 });
   const current = templateFor(f.name, f.saved);
@@ -60,6 +63,8 @@ export async function DELETE(_request: NextRequest, context: RouteContext) {
   const guard = await requireFeature("newsletterDrafter");
   if (guard.response) return guard.response;
   const { id } = await context.params;
+  const brandGuard = await requireBrandEdit(await brandOfFormat(id));
+  if (brandGuard.response) return brandGuard.response;
   const cur = await latest(id);
   if (cur) await db.delete(newsletterTemplateProposals).where(eq(newsletterTemplateProposals.id, cur.id));
   return NextResponse.json({ proposal: null });

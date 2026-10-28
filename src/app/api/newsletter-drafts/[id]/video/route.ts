@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { requireFeature } from "@/lib/auth-guards";
+import { requireFeature, requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfNewsletterDraft } from "@/lib/brand-access";
 import { getNewsletterDraft } from "@/lib/services/newsletter-drafter/queries";
 import { listSlotVideoOptions, setSlotVideo } from "@/lib/services/newsletter-drafter/slots";
 
@@ -23,6 +24,8 @@ export async function PUT(request: NextRequest, context: RouteContext) {
   const guard = await requireFeature("newsletterDrafter");
   if (guard.response) return guard.response;
   const { id } = await context.params;
+  const brandGuard = await requireBrandEdit(await brandOfNewsletterDraft(id));
+  if (brandGuard.response) return brandGuard.response;
   const parsed = z.object({ itemId: z.string().uuid() }).safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "itemId is required" }, { status: 400 });
   const r = await setSlotVideo(id, parsed.data.itemId);

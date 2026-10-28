@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { and, eq, sql } from "drizzle-orm";
-import { auth } from "@/lib/auth";
+import { requireBrandEdit } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
 import { brands, brandStatuses, productionItems } from "@/lib/db/schema";
 import { isStatusColorToken } from "@/lib/badge-colors";
@@ -33,16 +33,13 @@ async function loadStatusWithBrandSlug(
 }
 
 export async function PATCH(request: NextRequest, { params }: RouteParams) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   const { id } = await params;
   const existing = await loadStatusWithBrandSlug(id);
   if (!existing) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
+  const guard = await requireBrandEdit(existing.brandSlug);
+  if (guard.response) return guard.response;
 
   try {
     const body = await request.json();
@@ -146,16 +143,13 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 }
 
 export async function DELETE(request: NextRequest, { params }: RouteParams) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   const { id } = await params;
   const existing = await loadStatusWithBrandSlug(id);
   if (!existing) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
+  const guard = await requireBrandEdit(existing.brandSlug);
+  if (guard.response) return guard.response;
   if (existing.isProtected) {
     return NextResponse.json(
       { error: "Cannot delete a protected status" },

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { requireBrandEdit } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
 import { accounts } from "@/lib/db/schema";
 import { fetchBrandBySlug } from "@/lib/db/brands";
@@ -32,10 +33,6 @@ const VALID_PLATFORMS = new Set([
 ]);
 
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
 
   try {
     const body = await request.json();
@@ -53,6 +50,8 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+    const guard = await requireBrandEdit(brandSlug);
+    if (guard.response) return guard.response;
     if (!VALID_PLATFORMS.has(platform)) {
       return NextResponse.json(
         { error: `Unknown platform: ${platform}` },

@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { contentEvents, productionItems } from "@/lib/db/schema";
-import { requireSession } from "@/lib/auth-guards";
+import { requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfProductionItem } from "@/lib/brand-access";
 import {
   recordContentChanges,
   type ContentChange,
@@ -40,11 +41,11 @@ interface RouteContext {
  *     (recordContentChanges).
  */
 export async function POST(request: NextRequest, context: RouteContext) {
-  const guard = await requireSession();
+  const { id } = await context.params;
+  const guard = await requireBrandEdit(await brandOfProductionItem(id));
   if (guard.response) return guard.response;
   const actorUserId = (guard.session.user.id as string | undefined) ?? null;
 
-  const { id } = await context.params;
 
   const body = (await request.json().catch(() => ({}))) as {
     mode?: unknown;

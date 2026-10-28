@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { invalidateReportCaches } from "@/lib/invalidate-report-caches";
 import { eq } from "drizzle-orm";
-import { requireSession } from "@/lib/auth-guards";
+import { requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfProductionItem } from "@/lib/brand-access";
 import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
@@ -26,10 +27,9 @@ interface RouteContext {
  * `repostedFromItemId` would dangle the FK invariant).
  */
 export async function POST(_request: Request, context: RouteContext) {
-  const guard = await requireSession();
-  if (guard.response) return guard.response;
-
   const { id } = await context.params;
+  const guard = await requireBrandEdit(await brandOfProductionItem(id));
+  if (guard.response) return guard.response;
 
   const [source] = await db
     .select()

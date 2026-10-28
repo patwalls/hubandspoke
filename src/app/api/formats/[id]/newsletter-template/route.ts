@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
-import { requireFeature } from "@/lib/auth-guards";
+import { requireFeature, requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfFormat } from "@/lib/brand-access";
 import { db } from "@/lib/db";
 import { formats } from "@/lib/db/schema";
 import { isFeatureEnabled } from "@/lib/feature-flags";
@@ -51,6 +52,8 @@ export async function PUT(request: NextRequest, context: RouteContext) {
   const guard = await requireFeature("newsletterDrafter");
   if (guard.response) return guard.response;
   const { id } = await context.params;
+  const brandGuard = await requireBrandEdit(await brandOfFormat(id));
+  if (brandGuard.response) return brandGuard.response;
   const parsed = newsletterTemplateSchema.safeParse((await request.json().catch(() => null))?.template);
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.issues.map((i) => `${i.path.join(".") || "template"}: ${i.message}`).join("; ") }, { status: 400 });
@@ -69,6 +72,8 @@ export async function DELETE(_request: NextRequest, context: RouteContext) {
   const guard = await requireFeature("newsletterDrafter");
   if (guard.response) return guard.response;
   const { id } = await context.params;
+  const brandGuard = await requireBrandEdit(await brandOfFormat(id));
+  if (brandGuard.response) return brandGuard.response;
   const [row] = await db.update(formats).set({ newsletterTemplate: null }).where(eq(formats.id, id)).returning({ name: formats.name });
   if (!row) return NextResponse.json({ error: "Not found" }, { status: 404 });
   return NextResponse.json({ template: templateFor(row.name, null), isDefault: true });

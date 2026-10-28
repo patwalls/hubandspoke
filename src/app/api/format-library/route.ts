@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { requireBrandEdit } from "@/lib/auth-guards";
 import { formats, brands, productionItems, formatChannels } from "@/lib/db/schema";
 import { eq, ne, and, inArray, isNotNull, desc } from "drizzle-orm";
 import {
@@ -249,6 +250,8 @@ export async function POST(request: NextRequest) {
     if (!sourceFormatId || !destinationBrand) {
       return NextResponse.json({ error: "sourceFormatId and destinationBrand are required" }, { status: 400 });
     }
+    const guard = await requireBrandEdit(destinationBrand);
+    if (guard.response) return guard.response;
 
     const [source] = await db
       .select()

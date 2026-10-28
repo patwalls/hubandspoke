@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireSession } from "@/lib/auth-guards";
+import { requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfProductionItem } from "@/lib/brand-access";
 import {
   reprocessProductionItemInDescript,
   ReprocessMissingClipIdeaError,
@@ -21,10 +22,10 @@ const VALID_MODES: ReprocessMode[] = [
 ];
 
 export async function POST(request: NextRequest, context: RouteContext) {
-  const guard = await requireSession();
+  const { id } = await context.params;
+  const guard = await requireBrandEdit(await brandOfProductionItem(id));
   if (guard.response) return guard.response;
 
-  const { id } = await context.params;
   const actorUserId = guard.session.user.id as string;
   const mode = request.nextUrl.searchParams.get("mode") as ReprocessMode | null;
 

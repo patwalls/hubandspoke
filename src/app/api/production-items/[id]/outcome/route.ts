@@ -6,7 +6,8 @@ import {
   crossPostDecisions,
   productionItems,
 } from "@/lib/db/schema";
-import { auth } from "@/lib/auth";
+import { requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfProductionItem } from "@/lib/brand-access";
 import { invalidateReportCaches } from "@/lib/invalidate-report-caches";
 
 // Accept / kill a production item (primarily used by the cross-post feed).
@@ -30,8 +31,9 @@ export async function POST(
     return NextResponse.json({ error: "Missing id" }, { status: 400 });
   }
 
-  const session = await auth();
-  const actorUserId = session?.user?.id ?? null;
+  const guard = await requireBrandEdit(await brandOfProductionItem(id));
+  if (guard.response) return guard.response;
+  const actorUserId = guard.session.user.id ?? null;
 
   let body: { action?: unknown; reason?: unknown };
   try {

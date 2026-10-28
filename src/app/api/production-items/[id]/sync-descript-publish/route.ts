@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
-import { requireSession } from "@/lib/auth-guards";
+import { requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfProductionItem } from "@/lib/brand-access";
 import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
 import { enqueue } from "@/jobs/enqueue";
@@ -28,10 +29,9 @@ interface RouteContext {
  * reflects the rendering state.
  */
 export async function POST(request: Request, context: RouteContext) {
-  const guard = await requireSession();
-  if (guard.response) return guard.response;
-
   const { id } = await context.params;
+  const guard = await requireBrandEdit(await brandOfProductionItem(id));
+  if (guard.response) return guard.response;
 
   const body = (await request.json().catch(() => ({}))) as { force?: unknown };
   const force = body.force === true;

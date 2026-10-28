@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
-import { requireFeature } from "@/lib/auth-guards";
+import { requireFeature, requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfFormat } from "@/lib/brand-access";
 import { db } from "@/lib/db";
 import { designTemplateImports, formats } from "@/lib/db/schema";
 import { bucketName, buildKey, putObject } from "@/lib/s3";
@@ -18,6 +19,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
   const guard = await requireFeature("designEditor");
   if (guard.response) return guard.response;
   const { id } = await context.params;
+  const brandGuard = await requireBrandEdit(await brandOfFormat(id));
+  if (brandGuard.response) return brandGuard.response;
   const [format] = await db.select({ id: formats.id }).from(formats).where(eq(formats.id, id)).limit(1);
   if (!format) return NextResponse.json({ error: "Format not found" }, { status: 404 });
   const form = await request.formData().catch(() => null);

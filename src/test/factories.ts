@@ -72,7 +72,8 @@ type CleanupTable =
   | "clipIdeas"
   | "accounts"
   | "productionItemMedia"
-  | "contentDrafts";
+  | "contentDrafts"
+  | "users";
 const created: Array<{ table: CleanupTable; id: string }> = [];
 
 afterEach(async () => {
@@ -108,6 +109,8 @@ afterEach(async () => {
           .where(eq(productionItemMedia.id, row.id));
       } else if (row.table === "contentDrafts") {
         await db.delete(contentDrafts).where(eq(contentDrafts.id, row.id));
+      } else if (row.table === "users") {
+        await db.delete(users).where(eq(users.id, row.id));
       }
     } catch (err) {
       console.error(
@@ -187,6 +190,40 @@ export async function getTestAccountId(opts: {
     cachedTestAccountId = row.id;
   }
   return row.id;
+}
+
+export interface CreateTestUserOptions {
+  role?: "admin" | "creator";
+  /** Brand slugs (resolved to `brand_ids` UUIDs) this user can edit. */
+  brands?: string[];
+}
+
+/**
+ * Insert a throwaway `users` row (no password — can't sign in). Defaults to a
+ * creator with no brands. Auto-cleans in afterEach.
+ */
+export async function createTestUser(
+  opts: CreateTestUserOptions = {},
+): Promise<typeof users.$inferSelect> {
+  const slugs = opts.brands ?? [];
+  const brandRows = slugs.length
+    ? await db.select({ id: brands.id, slug: brands.slug }).from(brands)
+    : [];
+  const brandIds = slugs.map((slug) => {
+    const row = brandRows.find((b) => b.slug === slug);
+    if (!row) throw new Error(`No brand '${slug}' in DB — seed it or pick another`);
+    return row.id;
+  });
+  const [row] = await db
+    .insert(users)
+    .values({
+      email: `test-${randomSuffix()}@local.test`,
+      role: opts.role ?? "creator",
+      brandIds,
+    })
+    .returning();
+  trackCleanup("users", row.id);
+  return row;
 }
 
 export interface CreateTestAccountOptions {

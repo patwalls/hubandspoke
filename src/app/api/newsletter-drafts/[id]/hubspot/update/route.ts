@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
-import { requireFeature } from "@/lib/auth-guards";
+import { requireBrandEdit, requireFeature } from "@/lib/auth-guards";
+import { brandOfNewsletterDraft } from "@/lib/brand-access";
 import { db } from "@/lib/db";
 import { newsletterDrafts } from "@/lib/db/schema";
 import { enqueue } from "@/jobs/enqueue";
@@ -22,6 +23,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
   const guard = await requireFeature("newsletterDrafter");
   if (guard.response) return guard.response;
   const { id } = await context.params;
+  const brandGuard = await requireBrandEdit(await brandOfNewsletterDraft(id));
+  if (brandGuard.response) return brandGuard.response;
   const { force } = ((await request.json().catch(() => ({}))) ?? {}) as { force?: boolean };
   const [row] = await db
     .select({ status: newsletterDrafts.status, hubspotEmailId: newsletterDrafts.hubspotEmailId, hubspotStatus: newsletterDrafts.hubspotStatus, updatedAt: newsletterDrafts.updatedAt })

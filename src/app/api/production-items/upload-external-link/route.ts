@@ -13,7 +13,7 @@
 // call SC again, to avoid burning a second credit.
 
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { requireBrandEdit } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
 import { and, eq, isNull, ne } from "drizzle-orm";
@@ -29,11 +29,6 @@ function extractYoutubeId(url: string): string | null {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   let body: {
     youtubeUrl?: string;
     title?: string;
@@ -59,6 +54,9 @@ export async function POST(request: NextRequest) {
       { status: 400 },
     );
   }
+
+  const guard = await requireBrandEdit(brand);
+  if (guard.response) return guard.response;
 
   const youtubeId = extractYoutubeId(youtubeUrl);
   if (!youtubeId) {
@@ -86,7 +84,7 @@ export async function POST(request: NextRequest) {
     const validatedFormat = formatCheck.value;
 
     const editorUserId =
-      session.user.id ??
+      guard.session.user.id ??
       (await resolveEditor({ brand, format: validatedFormat ?? null }));
 
     const publishedDate = body.publishedDate ?? todayLocalISO();
@@ -117,7 +115,7 @@ export async function POST(request: NextRequest) {
       await recordItemCreated(db, {
         itemId: created.id,
         source: "api:upload-external-link",
-        actorUserId: session.user.id ?? null,
+        actorUserId: guard.session.user.id ?? null,
         format: validatedFormat ?? null,
         sourceType: "source_recording",
         postType: "youtube_long",

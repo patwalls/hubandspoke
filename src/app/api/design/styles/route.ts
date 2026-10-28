@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireFeature } from "@/lib/auth-guards";
+import { requireBrandEdit, requireFeature } from "@/lib/auth-guards";
+import { brandOfProductionItem } from "@/lib/brand-access";
 import { ensureCoverStyle, listCoverStyles } from "@/lib/services/design-editor/cover-styles";
 import { DesignUnsupportedError } from "@/lib/services/design-editor/session";
 
@@ -26,6 +27,8 @@ export async function POST(request: NextRequest) {
   if (guard.response) return guard.response;
   const body = (await request.json().catch(() => ({}))) as { productionItemId?: unknown };
   if (typeof body.productionItemId !== "string") return NextResponse.json({ error: "productionItemId required" }, { status: 400 });
+  const brandGuard = await requireBrandEdit(await brandOfProductionItem(body.productionItemId));
+  if (brandGuard.response) return brandGuard.response;
   try {
     const state = await ensureCoverStyle(body.productionItemId);
     return NextResponse.json(state, { status: state.status === "pending" ? 202 : 200 });

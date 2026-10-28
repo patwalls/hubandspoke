@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfFormat } from "@/lib/brand-access";
 import {
   descriptLayoutPacks,
   formats,
@@ -167,6 +169,8 @@ export async function POST(request: NextRequest) {
     };
 
     const resolvedBrand = brand || "starter-story";
+    const guard = await requireBrandEdit(resolvedBrand);
+    if (guard.response) return guard.response;
 
     if (parentFormatId) {
       const [parent] = await db
@@ -256,6 +260,8 @@ export async function PUT(request: NextRequest) {
     if (!id) {
       return NextResponse.json({ error: "id is required" }, { status: 400 });
     }
+    const guard = await requireBrandEdit(await brandOfFormat(id));
+    if (guard.response) return guard.response;
 
     // Validate parent when the patch actually touches parentFormatId. Missing
     // key = don't touch the column (partial-patch semantics for autosave).
@@ -414,6 +420,8 @@ export async function PUT(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   try {
     const { id } = await request.json();
+    const guard = await requireBrandEdit(await brandOfFormat(id));
+    if (guard.response) return guard.response;
 
     const [format] = await db
       .select({ name: formats.name, brand: formats.brand })

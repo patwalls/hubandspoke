@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireFeature } from "@/lib/auth-guards";
+import { requireFeature, requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfClipIdea } from "@/lib/brand-access";
 import { parseDoc } from "@/lib/clip-editor/doc";
 import {
   ClipEditorIdeaNotFoundError,
@@ -44,6 +45,8 @@ export async function PUT(request: NextRequest, context: RouteContext) {
   const guard = await requireFeature("clipEditor");
   if (guard.response) return guard.response;
   const { id } = await context.params;
+  const brandGuard = await requireBrandEdit(await brandOfClipIdea(id));
+  if (brandGuard.response) return brandGuard.response;
 
   const body = (await request.json().catch(() => null)) as {
     revision?: unknown;

@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { contentComments, productionItems, users } from "@/lib/db/schema";
 import { and, eq } from "drizzle-orm";
-import { auth } from "@/lib/auth";
+import { requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfComment } from "@/lib/brand-access";
 import { htmlToPlainText, sanitizeCommentHtml } from "@/lib/comments/sanitize";
 import { extractMentionUserIds } from "@/lib/comments/extract-mentions";
 import { enqueueNotification } from "@/lib/services/notifications";
@@ -13,13 +14,16 @@ interface RouteContext {
 
 const MAX_BODY = 5000;
 
+/** Brand of the production item the comment sits on (null = not found). */
 export async function PATCH(request: NextRequest, context: RouteContext) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const { id } = await context.params;
+    const guard = await requireBrandEdit(await brandOfComment(id));
+    if (guard.response) return guard.response;
+    const session = guard.session;
+    if (!session.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
-    const { id } = await context.params;
 
     const body = await request.json();
     const raw = typeof body?.body === "string" ? body.body : "";
@@ -135,11 +139,13 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 
 export async function DELETE(_request: NextRequest, context: RouteContext) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const { id } = await context.params;
+    const guard = await requireBrandEdit(await brandOfComment(id));
+    if (guard.response) return guard.response;
+    const session = guard.session;
+    if (!session.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
-    const { id } = await context.params;
 
     const deleted = await db
       .delete(contentComments)

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { requireBrandEdit } from "@/lib/auth-guards";
+import { brandSlugById } from "@/lib/brand-access";
 import { db } from "@/lib/db";
 import { brandWatermarks } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
@@ -9,11 +10,6 @@ export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   const { id } = await params;
 
   const [wm] = await db
@@ -25,6 +21,9 @@ export async function DELETE(
   if (!wm) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
+
+  const guard = await requireBrandEdit(await brandSlugById(wm.brandId));
+  if (guard.response) return guard.response;
 
   // Remove from S3 then from the DB.
   try {

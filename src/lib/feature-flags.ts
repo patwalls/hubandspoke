@@ -67,6 +67,11 @@ const FLAGS = {
   newsletterDrafter: {
     emails: ["sam@starterstory.com", "patrickswalls@gmail.com", "gus@starterstory.com"],
     envVar: "FEATURE_NEWSLETTER_DRAFTER_EMAILS",
+    // Rolled out to every account (2026-10-28) alongside brand permissions —
+    // edits are now gated per brand, so the flag no longer needs to. The
+    // allowlist above is kept only so flipping this back off restores the
+    // original pilot users.
+    everyone: true,
   },
   /**
    * Newsletter template admins: can unlock a locked newsletter template

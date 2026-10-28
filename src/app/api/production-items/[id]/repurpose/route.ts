@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { invalidateReportCaches } from "@/lib/invalidate-report-caches";
 import { eq } from "drizzle-orm";
-import { requireSession } from "@/lib/auth-guards";
+import { requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfProductionItem } from "@/lib/brand-access";
 import { db } from "@/lib/db";
 import {
   contentEvents,
@@ -50,11 +51,11 @@ interface RouteContext {
  * Draft Algorithm (the newsletter editor drafts on demand).
  */
 export async function POST(request: NextRequest, context: RouteContext) {
-  const guard = await requireSession();
+  const { id } = await context.params;
+  const guard = await requireBrandEdit(await brandOfProductionItem(id));
   if (guard.response) return guard.response;
   const actorUserId = guard.session.user.id as string;
 
-  const { id } = await context.params;
 
   let body: { targetFormatId?: unknown; editorUserId?: unknown };
   try {

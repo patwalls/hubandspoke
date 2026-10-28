@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireFeature } from "@/lib/auth-guards";
+import { requireBrandEdit, requireFeature } from "@/lib/auth-guards";
+import { brandOfFormat, brandOfProductionItem } from "@/lib/brand-access";
 import { invalidateReportCaches } from "@/lib/invalidate-report-caches";
 import { DesignItemCreateError, findOrCreateDesignItem } from "@/lib/services/design-editor/create-item";
 
@@ -11,6 +12,10 @@ export async function POST(request: NextRequest) {
   const body = (await request.json().catch(() => null)) as { pillarId?: unknown; targetFormatId?: unknown } | null;
   if (!body || typeof body.pillarId !== "string" || typeof body.targetFormatId !== "string") {
     return NextResponse.json({ error: "pillarId and targetFormatId are required" }, { status: 400 });
+  }
+  for (const brand of new Set([await brandOfProductionItem(body.pillarId), await brandOfFormat(body.targetFormatId)])) {
+    const brandGuard = await requireBrandEdit(brand);
+    if (brandGuard.response) return brandGuard.response;
   }
   try {
     const created = await findOrCreateDesignItem({ pillarId: body.pillarId, targetFormatId: body.targetFormatId, actorUserId: guard.session.user.id as string });

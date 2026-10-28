@@ -6,7 +6,8 @@ import {
   PLATFORM_FIELD_SCHEMAS,
   type PostType,
 } from "@/lib/platform-field-schemas";
-import { requireSession } from "@/lib/auth-guards";
+import { requireBrandEdit } from "@/lib/auth-guards";
+import { brandOfProductionItem } from "@/lib/brand-access";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -32,11 +33,10 @@ interface RouteContext {
  * Returns: `{ draftId: string, created: boolean }`.
  */
 export async function POST(_request: NextRequest, context: RouteContext) {
-  const guard = await requireSession();
+  const { id } = await context.params;
+  const guard = await requireBrandEdit(await brandOfProductionItem(id));
   if (guard.response) return guard.response;
   const session = guard.session;
-
-  const { id } = await context.params;
 
   const [item] = await db
     .select({
