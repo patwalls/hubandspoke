@@ -261,6 +261,13 @@ export function PublishScheduleDialog({
                 placeholder="https://x.com/…"
                 value={link}
                 onChange={(e) => setLink(e.target.value)}
+                onKeyDown={(e) => {
+                  // Paste + Enter publishes, same as the Publish tab's rows.
+                  if (e.key === "Enter" && !saveDisabled) {
+                    e.preventDefault();
+                    void handleSave();
+                  }
+                }}
                 autoFocus
                 aria-invalid={!!mismatch}
               />

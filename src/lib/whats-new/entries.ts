@@ -29,6 +29,17 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-10-29-paste-to-publish",
+    shippedAt: "2026-10-29T10:00:00Z",
+    kind: "feature",
+    title: "Paste the live link anywhere to publish",
+    body:
+      "On a post that's ready to publish, just paste its live link anywhere on the page: the Publish dialog opens with the link filled in, and Enter publishes it. " +
+      "No more clicking Publish or Schedule and then the link box first.",
+    href: "/[brand]/production",
+    screen: "/[brand]/content/[id]",
+  },
+  {
     id: "2026-10-29-publish-no-duplicates",
     shippedAt: "2026-10-29T01:30:00Z",
     kind: "fix",
