@@ -29,6 +29,17 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-10-29-publish-no-duplicates",
+    shippedAt: "2026-10-29T01:30:00Z",
+    kind: "fix",
+    title: "Publishing a link no longer leaves a duplicate post",
+    body:
+      "When the app had already pulled the live post in from the account, publishing its link used to leave two copies, and its views counted twice. " +
+      "Now the copy folds into your post, which keeps its editor, comments and history. A link from another account's post is stopped with a note saying where it lives.",
+    href: "/[brand]/production",
+    screen: "/[brand]/content/[id]",
+  },
+  {
     id: "2026-10-28-answer-from-email",
     shippedAt: "2026-10-28T20:00:00Z",
     kind: "feature",

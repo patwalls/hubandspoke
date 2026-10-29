@@ -22,7 +22,7 @@ import { normalizeFormatForWrite } from "@/lib/services/format-validation";
 import { findCrossAccountDuplicate } from "@/lib/services/production-items-dedup";
 import { resolveSourceTypeForFormat } from "@/lib/services/source-type-resolver";
 import { isNotionAuthoritative } from "@/lib/platform";
-import { extractContentId, extractContentIdFromUrl } from "@/lib/platform-url";
+import { derivePlatformContentId } from "@/lib/platform-url";
 import { validatePublishedLinkPlatform } from "@/lib/published-link-validation";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 import { enqueue } from "@/jobs/enqueue";
@@ -249,12 +249,7 @@ export async function POST(request: NextRequest) {
     // host-inferred extraction so a row whose post_type isn't set yet
     // (cross-post / repost drafts) still picks up the code from the URL.
     const platformContentId =
-      youtubeId ??
-      extractContentId(postType, publishedLink) ??
-      (publishedLink
-        ? extractContentIdFromUrl(publishedLink)?.contentId ?? null
-        : null) ??
-      null;
+      youtubeId ?? derivePlatformContentId(postType, publishedLink);
 
     // Cross-account duplicate guard. Surfaces the existing item id so the
     // client can deep-link the operator to it instead of creating a second
@@ -539,12 +534,7 @@ export async function PUT(request: NextRequest) {
       // isn't set yet (cross-post / repost drafts where the URL is pasted
       // before tagging) still pick up the dedup key from the URL alone —
       // otherwise a NULL content_id silently bypasses every dedup check.
-      updateData.platformContentId =
-        extractContentId(pt, publishedLink) ??
-        (publishedLink
-          ? extractContentIdFromUrl(publishedLink)?.contentId ?? null
-          : null) ??
-        null;
+      updateData.platformContentId = derivePlatformContentId(pt, publishedLink);
     }
     if (publishedDate !== undefined) updateData.publishedDate = publishedDate;
     if (bodyPublishedAt !== undefined) {

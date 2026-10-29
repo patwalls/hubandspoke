@@ -10,6 +10,10 @@ import {
 } from "@/lib/services/content-revisions";
 import { scheduleVelocitySnapshots } from "@/jobs/tasks/capture-velocity-snapshot";
 import { validatePublishedLinkPlatform } from "@/lib/published-link-validation";
+import { derivePlatformContentId } from "@/lib/platform-url";
+import { findCrossAccountDuplicate } from "@/lib/services/production-items-dedup";
+import { publishDuplicateAction } from "@/lib/services/publish-duplicate";
+import { mergeProductionItems } from "@/lib/services/merge-production-items";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -72,6 +76,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
       expectedPublishAt: productionItems.expectedPublishAt,
       scheduledNoDate: productionItems.scheduledNoDate,
       postType: productionItems.postType,
+      accountId: productionItems.accountId,
+      platformContentId: productionItems.platformContentId,
     })
     .from(productionItems)
     .where(eq(productionItems.id, id))
@@ -112,6 +118,39 @@ export async function POST(request: NextRequest, context: RouteContext) {
     if (linkMismatch) {
       return NextResponse.json({ error: linkMismatch }, { status: 400 });
     }
+    // Store the dedup key with the link, as the generic PUT does. Until
+    // 2026-10-29 this route left it null, so the account sync re-added the
+    // live post as a second row (double-counted views). If the sync got
+    // there first, fold its row into this one; another account's row means
+    // the link or the account is wrong.
+    const contentId = derivePlatformContentId(existing.postType, linkRaw);
+    const action = publishDuplicateAction(
+      existing.accountId,
+      await findCrossAccountDuplicate({ platformContentId: contentId, excludeId: id }),
+    );
+    if (action.kind === "conflict") {
+      return NextResponse.json(
+        {
+          error: `This link is already tracked on @${action.duplicate.accountHandle ?? "another account"}. Open that item instead, or fix the link.`,
+          code: "DUPLICATE_URL",
+          existingItemId: action.duplicate.id,
+          existingAccountHandle: action.duplicate.accountHandle,
+        },
+        { status: 409 },
+      );
+    }
+    if (action.kind === "merge") {
+      const merged = await mergeProductionItems(id, action.duplicateId, actorUserId, {
+        forceKeeperId: id,
+      });
+      if (!merged.success) {
+        return NextResponse.json({ error: merged.message }, { status: 500 });
+      }
+    }
+    if (action.kind !== "skip-key" && contentId !== existing.platformContentId) {
+      updates.platformContentId = contentId;
+    }
+
     nextStatus = "Published";
     updates.status = "Published";
     updates.publishedLink = linkRaw;

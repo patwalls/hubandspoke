@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseLinkedInAccountInput } from "./platform-url";
+import { derivePlatformContentId, parseLinkedInAccountInput } from "./platform-url";
 
 describe("parseLinkedInAccountInput", () => {
   it("parses a full company URL into slug + canonical company url", () => {
@@ -73,5 +73,24 @@ describe("parseLinkedInAccountInput", () => {
 
   it("errors on empty input", () => {
     expect(parseLinkedInAccountInput("   ").ok).toBe(false);
+  });
+});
+
+describe("derivePlatformContentId", () => {
+  it("reads the id with the post type's shape", () => {
+    expect(
+      derivePlatformContentId("instagram_reel", "https://www.instagram.com/reel/ABC123/?igsh=x"),
+    ).toBe("ABC123");
+  });
+
+  it("falls back to the host when the post type isn't set", () => {
+    expect(derivePlatformContentId(null, "https://x.com/someone/status/1234567890")).toBe(
+      "1234567890",
+    );
+  });
+
+  it("is null for a link it can't read, or no link", () => {
+    expect(derivePlatformContentId("newsletter", "https://example.com/issue-12")).toBeNull();
+    expect(derivePlatformContentId("instagram_reel", null)).toBeNull();
   });
 });

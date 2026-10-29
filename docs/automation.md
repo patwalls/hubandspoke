@@ -505,6 +505,16 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
   `POST /api/production-items` return `409 { error: "DUPLICATE_URL",
   existingItemId, existingAccountHandle }` so the UI can deep-link the
   operator to the existing item. The DB index is the safety net for races.
+  Every route that writes `published_link` stores the key with it via
+  `derivePlatformContentId()` (`src/lib/platform-url.ts`) — a null key bypasses
+  both indexes and the next sync re-adds the post. The publish route
+  (`POST /api/production-items/[id]/publish`) skipped it until 2026-10-29;
+  now, per `publishDuplicateAction()` (`src/lib/services/publish-duplicate.ts`),
+  a same-account row the sync already made is folded into the item being
+  published (`mergeProductionItems`, item kept, like schedule-reconcile), a
+  row on another account gets `409` with the account handle, and an item
+  with no account publishes without the key. Rows duplicated before the fix
+  stay until merged (`scripts/backfill-find-duplicates.mjs`).
   URL-based uniqueness is intentionally *not* enforced — placeholder URLs
   (homepage, "Twitter Post", reused Klaviyo links) appear thousands of
   times in legitimate rows; `scripts/backfill-find-duplicates.mjs` surfaces
