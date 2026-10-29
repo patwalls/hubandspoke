@@ -73,6 +73,8 @@ test("publish folds the synced copy of the post into the planned item", async ({
     await dialog.getByLabel("Published link").fill(`https://www.instagram.com/reel/${otherCode}/`);
     await dialog.getByRole("button", { name: "Publish", exact: true }).click();
     await expect(page.getByText(`already tracked on @e2e_theirs_${stamp}`)).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Publish", exact: true })).toBeEnabled();
+    await page.waitForTimeout(800); // let the toast finish sliding in
     if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT });
     const [untouched] = await sql`SELECT status, published_link FROM production_items WHERE id = ${mine}`;
     expect(untouched.status).toBe("Ready To Publish");
