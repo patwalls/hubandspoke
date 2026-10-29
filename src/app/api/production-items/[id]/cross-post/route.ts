@@ -20,6 +20,7 @@ import { enqueue } from "@/jobs/enqueue";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 import { isNotionAuthoritative } from "@/lib/platform";
 import { PLATFORM_FIELD_MAP, type PostType } from "@/lib/platform-field-schemas";
+import { loadSourceCaption } from "@/lib/services/source-caption";
 
 // Cross-post targets that get the same media-mirror + draft-seed treatment
 // as reposts. Without this the simulator on the redirect page lands in
@@ -290,9 +291,12 @@ export async function POST(request: NextRequest, context: RouteContext) {
   // shouldn't hold a Postgres tx open. Strips a leading date-anchored
   // opener (e.g. "8 years ago today:") so a cross-post of an aged repost
   // doesn't carry the stale lead-in. Fail-soft (returns input on error).
+  // A clip's content_body is its clip-idea notes, not its caption — copy the
+  // caption the editor wrote instead (src/lib/source-caption.ts).
+  const sourceCaption = await loadSourceCaption(source);
   const seededBody = CROSS_POST_SEEDED_TARGETS.has(targetPostType as PostType)
-    ? await stripDateOpenerWithLLM(source.contentBody)
-    : source.contentBody;
+    ? await stripDateOpenerWithLLM(sourceCaption)
+    : sourceCaption;
 
   // Wrap the insert + seed in a transaction so a partial failure (e.g.
   // mid-mirror media insert) doesn't leave a half-created cross-post.

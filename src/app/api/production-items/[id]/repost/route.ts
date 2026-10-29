@@ -10,6 +10,7 @@ import { resolveEditor } from "@/lib/services/assignees";
 import { buildRepostValues } from "@/lib/services/repost-values";
 import { recordItemCreated } from "@/lib/services/item-created";
 import { seedRepostContent } from "@/lib/services/repost-seed";
+import { loadSourceCaption } from "@/lib/services/source-caption";
 import { stripDateOpenerWithLLM } from "@/lib/services/repost-text-cleanup";
 import { hasAnyCarouselRow } from "@/lib/services/media-introspection";
 import { resolveCleanSourceMedia } from "@/lib/services/clean-media-resolver";
@@ -257,9 +258,12 @@ export async function POST(request: Request, context: RouteContext) {
   // transaction open across a network round-trip. Strips a leading date-
   // anchored opener ("8 years ago today:" etc.) so reposted-from-repost
   // bodies don't carry stale dated leads. Fail-soft.
+  // A clip's content_body is its clip-idea notes, not its caption — copy the
+  // caption the editor wrote instead (src/lib/source-caption.ts).
+  const sourceCaption = await loadSourceCaption(source);
   const seededBody = SEEDED_POST_TYPES.has(source.postType as PostType)
-    ? await stripDateOpenerWithLLM(source.contentBody)
-    : source.contentBody;
+    ? await stripDateOpenerWithLLM(sourceCaption)
+    : sourceCaption;
 
   // One transaction so we never leave a half-seeded repost. The seed step
   // is sub-50ms (≤4 small INSERTs), invisible next to the redirect.

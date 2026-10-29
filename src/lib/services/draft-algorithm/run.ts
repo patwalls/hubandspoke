@@ -1,3 +1,4 @@
+import { loadSourceCaption } from "@/lib/services/source-caption";
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
@@ -277,14 +278,19 @@ async function reseedRepostDraft(args: {
   }
 
   const [source] = await db
-    .select({ contentBody: productionItems.contentBody })
+    .select({
+      id: productionItems.id,
+      contentBody: productionItems.contentBody,
+      postType: productionItems.postType,
+    })
     .from(productionItems)
     .where(eq(productionItems.id, repostedFromItemId))
     .limit(1);
   if (!source) {
     return { status: "skipped", reason: "no_source_for_reseed" };
   }
-  const rawBody = source.contentBody?.trim() ?? "";
+  // Never re-seed a clip's clip-idea notes as the caption.
+  const rawBody = (await loadSourceCaption(source))?.trim() ?? "";
   if (rawBody.length === 0) {
     return { status: "skipped", reason: "source_body_empty" };
   }
