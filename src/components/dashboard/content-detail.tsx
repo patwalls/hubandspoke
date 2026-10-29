@@ -130,6 +130,7 @@ import { recordVisit } from "@/lib/hooks/use-recent-items";
 import { startVisibleInterval } from "@/lib/visible-interval";
 import { validatePublishedLinkPlatform } from "@/lib/published-link-validation";
 import { trackUsage } from "@/lib/usage/track";
+import { acceptsPastedLink, isPagePaste, pastedPostLink } from "@/lib/paste-to-publish";
 import { HandoffButton } from "./handoff-button";
 import { leavePublishedConfirm } from "@/lib/status/leave-published";
 import { CrossPostPasteLinks } from "./cross-post-paste-links";
@@ -1388,6 +1389,29 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
       cancelled = true;
     };
   }, [publishDialogOpen, readyPillarId, brand]);
+  // Paste-to-publish: a post link pasted anywhere on a not-yet-published
+  // item (outside a text field or dialog) opens the Publish dialog with the
+  // link filled in — the editor's next key is Enter.
+  const [pastedLink, setPastedLink] = useState<string | null>(null);
+  const pasteStatus = data?.item?.status ?? null;
+  const pasteReady = !!data?.item && canEdit && acceptsPastedLink(pasteStatus);
+  useEffect(() => {
+    if (!pasteReady || publishDialogOpen) return;
+    const onPaste = (e: ClipboardEvent) => {
+      if (!isPagePaste(e.target as HTMLElement | null)) return;
+      const link = pastedPostLink(e.clipboardData?.getData("text/plain"));
+      if (!link) return;
+      e.preventDefault();
+      setPastedLink(link);
+      setPublishDialogOpen(true);
+      trackUsage("publish:paste-anywhere");
+    };
+    document.addEventListener("paste", onPaste);
+    return () => document.removeEventListener("paste", onPaste);
+  }, [pasteReady, publishDialogOpen]);
+  useEffect(() => {
+    if (!publishDialogOpen) setPastedLink(null);
+  }, [publishDialogOpen]);
   // TikTok draft-to-inbox (Zernio) confirm dialog. Only offered for tiktok
   // items; sends the video to the creator's TikTok inbox as a draft.
   const [tiktokDialogOpen, setTiktokDialogOpen] = useState(false);
@@ -3246,7 +3270,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                   ? VIEW_ONLY_TITLE
                   : item.postType === "tiktok"
                   ? "Publish this video to your TikTok inbox now, or schedule it"
-                  : "Mark this post as published (paste the live link) or schedule it for later"
+                  : "Mark this post as published (paste the live link) or schedule it for later. Tip: paste the live link anywhere on this page"
               }
             >
               <UploadIcon className="size-3.5" /> Publish or Schedule
@@ -4862,7 +4886,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
         open={publishDialogOpen}
         onOpenChange={setPublishDialogOpen}
         itemId={item.id}
-        initialLink={item.publishedLink ?? null}
+        initialLink={pastedLink ?? item.publishedLink ?? null}
         initialPublishedDate={item.publishedDate ?? null}
         initialExpectedPublishAt={item.expectedPublishAt ?? null}
         initialNoDate={item.scheduledNoDate ?? false}
