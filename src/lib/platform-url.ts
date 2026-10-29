@@ -175,6 +175,26 @@ export function extractContentIdFromUrl(
 }
 
 /**
+ * The dedup key (`production_items.platform_content_id`) for a published
+ * link: the post type's shape first, then whatever the host says, so a row
+ * whose post type isn't set yet still gets one. Every route that writes
+ * `published_link` must store this alongside it: a null key bypasses both
+ * unique indexes, and the next account sync adds the same post as a second
+ * row (the publish route skipped it until 2026-10-29).
+ */
+export function derivePlatformContentId(
+  postTypeOrPlatform: string | null | undefined,
+  url: string | null | undefined
+): string | null {
+  if (!url) return null;
+  return (
+    extractContentId(postTypeOrPlatform, url) ??
+    extractContentIdFromUrl(url)?.contentId ??
+    null
+  );
+}
+
+/**
  * Normalize whatever a user pastes into the "Handle" field for a LinkedIn
  * account into a stored `(handle, url)` pair.
  *

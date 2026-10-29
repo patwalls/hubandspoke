@@ -4,6 +4,7 @@ import { and, eq, isNull, ne } from "drizzle-orm";
 
 export type DuplicateMatch = {
   id: string;
+  accountId: string | null;
   accountHandle: string | null;
   platformContentId: string | null;
   publishedLink: string | null;
@@ -42,6 +43,7 @@ export async function findCrossAccountDuplicate(opts: {
   const [row] = await db
     .select({
       id: productionItems.id,
+      accountId: productionItems.accountId,
       accountHandle: accounts.handle,
       platformContentId: productionItems.platformContentId,
       publishedLink: productionItems.publishedLink,
