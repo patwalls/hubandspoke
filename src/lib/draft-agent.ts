@@ -14,6 +14,10 @@ import {
   renderPriorCrossPostExamples,
   type PriorCrossPostExample,
 } from "@/lib/services/draft-algorithm/prior-cross-post-examples";
+import {
+  renderEditorRewrites,
+  type EditorRewriteExample,
+} from "@/lib/services/draft-algorithm/editor-rewrites";
 import { findInterestingTimestamps } from "@/lib/services/draft-algorithm/timestamp-finder";
 
 // Opus for copywriting judgment. Short-form copy rewards nuance more than
@@ -121,7 +125,11 @@ const MODEL = "claude-opus-5-5";
 // EXTRAS to the editorial block, with a rule that verbatim pulls come from
 // the clip. Drafting now happens when the in-app editor opens, not at
 // export, so this is what the editor's Post tab shows.
-export const PROMPT_VERSION = 15;
+// v16 (2026-10-29): WHAT EDITORS CHANGED. About a third of published AI
+// drafts were rewritten by an editor first, often the same fix each time.
+// The per-call payload now carries the latest (draft → published) pairs for
+// the brand + format (editor-rewrites.ts) so those fixes happen up front.
+export const PROMPT_VERSION = 16;
 export const GENERATED_BY = `${MODEL}:v${PROMPT_VERSION}`;
 
 const SYSTEM_PROMPT = `You write platform-specific draft copy for a production team that turns long-form YouTube interviews into posts across X/Twitter, Instagram, LinkedIn, and YouTube.
@@ -369,6 +377,11 @@ export interface GenerateDraftArgs {
    *  before the substrate. Loader at `src/lib/services/draft-algorithm/run.ts`
    *  builds this from the production_items + clip_ideas + pillar rows. */
   editorialContext?: EditorialContext | null;
+  /** v16: the team's latest (AI draft → editor's published version) pairs
+   *  for this brand + format. Rendered as ## WHAT EDITORS CHANGED so the
+   *  agent makes the fixes editors keep making by hand. Loader:
+   *  `src/lib/services/draft-algorithm/editor-rewrites.ts`. */
+  editorRewrites?: EditorRewriteExample[];
 }
 
 /** The action the agent picks for media attachment on this draft. The
@@ -1058,9 +1071,15 @@ export async function generateDraft(
 
   const editorialContextBlock = renderEditorialContextBlock(args.editorialContext);
 
+  // v16: what editors keep changing in this format's drafts.
+  const editorRewritesBlock = args.editorRewrites
+    ? renderEditorRewrites(args.editorRewrites, args.item.format ?? null)
+    : null;
+
   const perCallPayload = [
     ctaContextBlock,
     priorPairsBlock,
+    editorRewritesBlock,
     editorialContextBlock,
     substrateBlock,
     ``,

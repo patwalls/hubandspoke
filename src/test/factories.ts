@@ -340,6 +340,8 @@ export interface CreateTestContentDraftOptions {
   content?: ContentDraftContent;
   version?: number;
   isCurrent?: boolean;
+  /** "draft-algo:…" for an AI draft, "user:edit" for an editor's save. */
+  generatedBy?: string;
 }
 
 /**
@@ -357,7 +359,7 @@ export async function createTestContentDraft(
       isCurrent: opts.isCurrent ?? true,
       content: opts.content ?? {},
       fieldSchemaSnapshot: { version: 1, fields: [] },
-      generatedBy: "vitest",
+      generatedBy: opts.generatedBy ?? "vitest",
     })
     .returning();
   trackCleanup("contentDrafts", row.id);

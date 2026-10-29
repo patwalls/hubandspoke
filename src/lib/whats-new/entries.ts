@@ -29,6 +29,16 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-10-29-drafts-learn-edits",
+    shippedAt: "2026-10-29T22:30:00Z",
+    kind: "feature",
+    title: "AI drafts learn from your edits",
+    body:
+      "When you rewrite an AI draft before publishing, the next draft in that format now sees what you changed and does it from the start, so the fixes you keep making by hand should show up less.",
+    href: "/[brand]/production",
+    screen: "/[brand]/content/[id]",
+  },
+  {
     id: "2026-10-29-cross-post-clip-caption",
     shippedAt: "2026-10-29T14:20:00Z",
     kind: "fix",

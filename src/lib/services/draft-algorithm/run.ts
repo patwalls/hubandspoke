@@ -38,6 +38,7 @@ import { buildCompositionName } from "@/lib/services/descript-composition";
 import { stripDateOpenerWithLLM } from "@/lib/services/repost-text-cleanup";
 import { getTopPerformingCaptions } from "./exemplars";
 import { loadPriorCrossPostExamples } from "./prior-cross-post-examples";
+import { loadEditorRewrites } from "./editor-rewrites";
 import { generateTrackedCta } from "./tracked-cta";
 import {
   runDescriptStepForDerivative,
@@ -939,6 +940,17 @@ export async function runDraftAlgorithm(
         })
       : [];
 
+  // v16: the latest drafts editors rewrote before publishing, same brand +
+  // format. Fail-soft: a lookup error never sinks the draft.
+  const editorRewrites = await loadEditorRewrites({
+    brand: item.brand,
+    format: item.format ?? null,
+    excludeId: productionItemId,
+  }).catch((err) => {
+    console.warn(`draft-algorithm editor-rewrites failed item=${productionItemId}`, err);
+    return [];
+  });
+
   const result = await generateDraft({
     item: {
       id: item.id,
@@ -958,6 +970,7 @@ export async function runDraftAlgorithm(
     cta: undefined,
     priorCrossPostExamples,
     editorialContext,
+    editorRewrites,
   });
 
   // v2 smart tracked CTA: draft the reply CTA from the freshly-generated body,
