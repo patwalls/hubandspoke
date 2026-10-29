@@ -2158,6 +2158,17 @@ is Sentry's fallback default — see HUBANDSPOKE-M for the incident that
 prompted this. Override locally by setting `DYNO=local` if you need to test
 Sentry capture.
 
+**Span budget (2026-10-29):** the org's Team plan reserves **5M spans a month**,
+shared with starter-story and slope; at 100% new spans drop (errors are unaffected).
+Web traces 10% (`sentry.{server,edge}.config.ts`, `instrumentation-client.ts`); the
+worker traces 100% but only creates spans around LLM calls (~2k/day). Hubandspoke
+is ~0.8M/month in all, so it is not the lever. When Sentry emails a span alert,
+rank projects first — accepted spans by project:
+`GET /api/0/organizations/pat-walls/stats_v2/?field=sum(quantity)&groupBy=project&category=span&outcome=accepted&statsPeriod=3d`,
+then `span.op` within the top one (`/events/?dataset=spans&field=span.op&field=count_sample()`).
+The 2026-10-29 alert was starter-story's sentry-rails 5.23 upgrade adding a
+`cache.get` span per cache read (fixed in patwalls/starter-story#537).
+
 ### Worker liveness (2026-05-15)
 
 The worker dyno can silently wedge: the Node process stays alive (Heroku
