@@ -29,6 +29,16 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-10-29-cross-post-clip-caption",
+    shippedAt: "2026-10-29T14:20:00Z",
+    kind: "fix",
+    title: "Cross-posts of a clip start with the clip's caption",
+    body:
+      "Cross-posting a clip (to TikTok, for example) used to fill the caption with the clip's notes (Source, Timestamp, Angle, Why). It now starts from the caption written on the clip, so there's nothing to delete before you post.",
+    href: "/[brand]/production",
+    screen: "/[brand]/content/[id]?tab=cross-post",
+  },
+  {
     id: "2026-10-29-paste-to-publish",
     shippedAt: "2026-10-29T10:00:00Z",
     kind: "feature",
