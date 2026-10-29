@@ -8,7 +8,7 @@
 import { FONTS } from "@/lib/clip-editor/fonts";
 import type { DesignArrowElement, DesignElement, DesignPage, DesignStatCardElement, DesignTextElement, Rgba } from "./doc";
 import { arrowSvg } from "./arrow";
-import { coverGeometry, layoutDesignText } from "./layout";
+import { coverGeometry, layoutDesignText, softenLook } from "./layout";
 import { layoutChannel, type ChannelInfo } from "./channel";
 import { layoutStatCard, sparklineSvg, svgDataUrl } from "./stat-card";
 
@@ -179,7 +179,7 @@ function elementNodes(el: DesignElement, images: ResolvedImages, channels: Resol
   if (!img) return [];
   // Same trick as the stage: a clipping box with the picture positioned
   // inside it by coverGeometry — satori has no object-position.
-  const g = coverGeometry({ width: img.width, height: img.height }, { w: el.w, h: el.h }, el.crop, el.fit);
+  const { geometry: g, filter } = softenLook(coverGeometry({ width: img.width, height: img.height }, { w: el.w, h: el.h }, el.crop, el.fit), el.soften);
   return [
     {
       type: "div",
@@ -202,7 +202,7 @@ function elementNodes(el: DesignElement, images: ResolvedImages, channels: Resol
             src: img.src,
             width: g.width,
             height: g.height,
-            style: { position: "absolute", left: g.left, top: g.top, width: g.width, height: g.height },
+            style: { position: "absolute", left: g.left, top: g.top, width: g.width, height: g.height, ...(filter ? { filter } : {}) },
           },
         },
       },

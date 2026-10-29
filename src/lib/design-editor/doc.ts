@@ -132,6 +132,10 @@ const imageElementSchema = z.object({
   fit: z.enum(["cover", "contain"]),
   radius: px.min(0),
   crop: cropSchema.default(DEFAULT_CROP),
+  /** 0–100: soften the background layer of a "split into layers" photo so
+   *  the person pops — Canva's Sharpness/Clarity turned down, a light blur
+   *  plus less contrast (layout.ts → `softenLook`). Absent/0 = untouched. */
+  soften: z.number().min(0).max(100).optional(),
 });
 export type DesignImageElement = z.infer<typeof imageElementSchema>;
 

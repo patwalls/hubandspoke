@@ -255,6 +255,9 @@ export function Inspector({ doc, mode, images, frames, photos, source, brand, on
             </>
           )}
           <Slider label="Rounded corners" value={el.radius} min={0} max={200} step={2} format={(v) => `${v}`} onChange={(v) => patch<DesignImageElement | DesignVideoElement>((e) => ({ ...e, radius: v }), "radius")} />
+          {el.type === "image" && (
+            <Slider label="Soften" value={el.soften ?? 0} min={0} max={100} step={1} format={(v) => (v === 0 ? "Off" : `${v}`)} onChange={(v) => patch<DesignImageElement>((e) => ({ ...e, soften: v === 0 ? undefined : v }), "soften")} />
+          )}
           {el.type === "image" && (onCutout || onSplit) && !photos.photos.some((p) => p.kind === "cutout" && imageSourceKey(p.src) === imageSourceKey(el.src)) && (
             <div className="flex flex-col gap-1">
               <span className="text-[11px] font-medium text-muted-foreground">Remove background</span>

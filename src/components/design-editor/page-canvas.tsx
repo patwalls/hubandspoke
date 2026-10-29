@@ -21,7 +21,7 @@ import { layoutStatCard, sparklineSvg, svgDataUrl } from "@/lib/design-editor/st
 import { arrowBendPoint, arrowEnds, arrowFromEnds, arrowSvg, bendFromPoint, snapAngle } from "@/lib/design-editor/arrow";
 import { pageVideo } from "@/lib/design-editor/doc";
 import { activeCue, buildDesignCaptionCues, layoutCaptionCue } from "@/lib/design-editor/captions";
-import { coverGeometry, cropForOffset, layoutDesignText, textEditorMetrics } from "@/lib/design-editor/layout";
+import { coverGeometry, cropForOffset, layoutDesignText, softenLook, textEditorMetrics } from "@/lib/design-editor/layout";
 import { elementSnapTargets, snapMove, snapResize, snapThreshold, type SnapGuide } from "@/lib/editor/snap";
 import { commands, useDesign } from "./store";
 
@@ -514,7 +514,9 @@ function ImageView({ el, imageUrl, base, hover, editing, onNaturalSize, onPointe
   onNaturalSize: (size: { width: number; height: number }) => void; onPointerDown: (e: ReactPointerEvent) => void; onDoubleClick: () => void; onZoom: (zoom: number) => void; onDoneAdjust: () => void;
 }) {
   const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
-  const g = natural ? coverGeometry(natural, { w: el.w, h: el.h }, el.crop, el.fit) : null;
+  const look = natural ? softenLook(coverGeometry(natural, { w: el.w, h: el.h }, el.crop, el.fit), el.soften) : null;
+  const g = look?.geometry ?? null;
+  const filter = look?.filter;
   return (
     <div className={cn(hover, editing && "outline outline-[4px] outline-amber-400")} onPointerDown={onPointerDown} onDoubleClick={onDoubleClick} style={{ ...base, borderRadius: el.radius, overflow: "hidden", cursor: editing ? "grab" : base.cursor }}>
       {imageUrl ? (
@@ -529,7 +531,7 @@ function ImageView({ el, imageUrl, base, hover, editing, onNaturalSize, onPointe
             onNaturalSize(size);
           }}
           className="pointer-events-none absolute max-w-none"
-          style={g ? { left: g.left, top: g.top, width: g.width, height: g.height } : { left: 0, top: 0, width: el.w, height: el.h, objectFit: el.fit }}
+          style={g ? { left: g.left, top: g.top, width: g.width, height: g.height, filter } : { left: 0, top: 0, width: el.w, height: el.h, objectFit: el.fit, filter }}
         />
       ) : (
         <div className="flex h-full w-full items-center justify-center bg-muted text-[28px] text-muted-foreground">image</div>

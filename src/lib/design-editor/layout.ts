@@ -208,6 +208,31 @@ export function coverGeometry(
   return { left, top, width, height };
 }
 
+/** At soften 100: blur radius (canvas px) and contrast. Deliberately mild —
+ *  shapes stay readable, only fine detail and punch go (Canva's Sharpness
+ *  and Clarity at -100), so the person in front pops without a halo. */
+const SOFTEN_MAX_BLUR_PX = 4;
+const SOFTEN_MIN_CONTRAST = 0.85;
+
+/** The CSS filter for a picture's `soften` (0–100) and where the picture
+ *  sits: `g` grown by twice the blur radius on every side, so the blur's
+ *  see-through fringe falls outside the clipping box instead of fading the
+ *  picture's edges. Stage and exporter both use it. */
+export function softenLook(
+  g: { left: number; top: number; width: number; height: number },
+  soften: number | undefined,
+): { geometry: { left: number; top: number; width: number; height: number }; filter: string | undefined } {
+  if (!soften) return { geometry: g, filter: undefined };
+  const t = Math.min(100, soften) / 100;
+  const blurPx = Math.round(t * SOFTEN_MAX_BLUR_PX * 10) / 10;
+  const contrast = Math.round((1 - t * (1 - SOFTEN_MIN_CONTRAST)) * 100) / 100;
+  const b = blurPx * 2;
+  return {
+    geometry: { left: g.left - b, top: g.top - b, width: g.width + 2 * b, height: g.height + 2 * b },
+    filter: `blur(${blurPx}px) contrast(${contrast})`,
+  };
+}
+
 /** Inverse of `coverGeometry`'s pan: the crop that puts the picture at
  *  (left, top) — how dragging inside a picture becomes a focal point. */
 export function cropForOffset(
