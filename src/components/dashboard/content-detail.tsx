@@ -4897,6 +4897,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
             ? { href: `/${brand}/publish?focus=${item.id}`, others: pillarReadyCount - 1 }
             : null
         }
+        pasteTip={pasteReady && !pastedLink}
         onSuccess={() => {
           void load();
         }}

@@ -3,7 +3,7 @@ import postgres from "postgres";
 
 // Pasting a post link anywhere on a Ready To Publish item's page opens the
 // Publish dialog with the link filled in, and Enter publishes. A paste into
-// a text field stays that field's.
+// a text field stays that field's. Opened by hand, the dialog says so.
 async function pasteOn(page: Page, selector: string, text: string) {
   await page.evaluate(
     ([sel, t]) => {
@@ -42,6 +42,14 @@ test("a link pasted on the page opens Publish pre-filled; Enter publishes", asyn
     const dialog = page.getByRole("dialog", { name: "Publish or Schedule" });
     const link = `https://www.instagram.com/reel/e2e${stamp}/`;
 
+    // Opened by hand, the dialog teaches the shortcut under the empty link field.
+    await page.getByRole("button", { name: "Publish or Schedule" }).first().click();
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByTestId("publish-paste-tip")).toBeVisible();
+    if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT });
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+
     // Plain text and pastes into a field don't open anything.
     await pasteOn(page, "body", "not a link");
     const field = page.locator("textarea").first();
@@ -55,7 +63,7 @@ test("a link pasted on the page opens Publish pre-filled; Enter publishes", asyn
     const box = dialog.getByLabel("Published link");
     await expect(box).toHaveValue(link);
     await expect(box).toBeFocused();
-    if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT });
+    await expect(dialog.getByTestId("publish-paste-tip")).toBeHidden();
 
     await box.press("Enter");
     await expect(dialog).toBeHidden();

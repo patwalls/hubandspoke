@@ -60,6 +60,10 @@ interface Props {
   /** Other posts from the same video waiting in Ready To Publish: the
    *  dialog offers the Publish tab, where they all take a paste + Enter. */
   publishTab?: { href: string; others: number } | null;
+  /** The page takes a pasted link (content page, not yet published) and the
+   *  dialog was opened by hand: say so under the link field, where the
+   *  editor is about to paste it. */
+  pasteTip?: boolean;
   /** The item's brand slug, for the edit-access check. Defaults to the
    *  brand in the URL (pass it on /all, where the URL has none). */
   brand?: string | null;
@@ -93,6 +97,7 @@ export function PublishScheduleDialog({
   postType,
   onSuccess,
   publishTab,
+  pasteTip,
   brand,
 }: Props) {
   const canEdit = useCanEditBrand(brand);
@@ -278,6 +283,14 @@ export function PublishScheduleDialog({
                 >
                   <AlertTriangle className="size-3 shrink-0" />
                   {mismatch}
+                </p>
+              ) : pasteTip && !link ? (
+                <p
+                  className="text-[11px] text-muted-foreground"
+                  data-testid="publish-paste-tip"
+                >
+                  Shortcut: next time, paste the live link anywhere on this
+                  page — this opens with it filled in, and Enter publishes.
                 </p>
               ) : (
                 <p className="text-[11px] text-muted-foreground">
