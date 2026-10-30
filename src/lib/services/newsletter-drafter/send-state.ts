@@ -92,6 +92,7 @@ export async function syncNewsletterSendState(draftId: string, deps: SendSyncDep
       beehiivPostId: newsletterDrafts.beehiivPostId,
       status: productionItems.status,
       expectedPublishAt: productionItems.expectedPublishAt,
+      platformContentId: productionItems.platformContentId,
     })
     .from(newsletterDrafts)
     .innerJoin(productionItems, eq(productionItems.id, newsletterDrafts.productionItemId))
@@ -123,6 +124,8 @@ export async function syncNewsletterSendState(draftId: string, deps: SendSyncDep
       publishedAt: state.sendAt ?? now,
       publishedDate: easternDate(state.sendAt ?? now),
       publishedLink: state.link ?? (d.hubspotEmailId ? emailEditUrl(d.hubspotEmailId) : null),
+      // The stats syncs find an issue by this id (hubspot-stats.ts / beehiiv-stats.ts).
+      platformContentId: d.platformContentId ?? d.hubspotEmailId ?? d.beehiivPostId,
       scheduleNeedsAttentionAt: null,
     });
     return "published";

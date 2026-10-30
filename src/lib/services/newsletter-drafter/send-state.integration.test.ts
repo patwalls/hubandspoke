@@ -48,7 +48,7 @@ describe("syncNewsletterSendState", () => {
     const { d, scheduled } = deps({ phase: "sent", sendAt, link: "https://x.beehiiv.com/p/a" });
     expect(await syncNewsletterSendState(e.draftId, d)).toBe("published");
     const item = await itemOf(e.itemId);
-    expect(item).toMatchObject({ status: "Published", publishedLink: "https://x.beehiiv.com/p/a", publishedDate: "2026-10-25" });
+    expect(item).toMatchObject({ status: "Published", publishedLink: "https://x.beehiiv.com/p/a", publishedDate: "2026-10-25", platformContentId: "post_1" }); // the stats syncs find it by this id
     expect(item.publishedAt?.toISOString()).toBe(sendAt.toISOString());
     expect(scheduled).toEqual([]);
     const events = await db.select().from(contentEvents).where(eq(contentEvents.contentItemId, e.itemId));

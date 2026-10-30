@@ -62,7 +62,7 @@ function apiKey(): string {
 
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 const PUB = FUTUREPEDIA_PUBLICATION_ID.replace(/-/g, "\\-");
-/** Post / template HTML we may ask for (never `stats` on lists, never subscriber data). */
+/** Post / template HTML we may ask for (never subscriber data). `stats` is allowed on ONE post's read only (below), never on lists. */
 const CONTENT_EXPANDS = ["free_web_content", "free_email_content"];
 const PAGING = { limit: /^\d{1,3}$/, page: /^\d{1,4}$/ };
 
@@ -89,8 +89,8 @@ const ALLOWED_CALLS: ReadonlyArray<{ method: string; path: RegExp; query: Record
   {
     method: "GET",
     path: new RegExp(`^/publications/${PUB}/posts/post_${UUID}$`),
-    query: { expand: [...CONTENT_EXPANDS, "recipients"], "expand[]": [...CONTENT_EXPANDS, "recipients"] },
-    why: "read one Futurepedia edition",
+    query: { expand: [...CONTENT_EXPANDS, "recipients", "stats"], "expand[]": [...CONTENT_EXPANDS, "recipients", "stats"] },
+    why: "read one Futurepedia edition (and, with stats, a sent edition's opens/clicks for its content page — aggregate counts only)",
   },
   { method: "GET", path: new RegExp(`^/publications/${PUB}/post_templates$`), query: PAGING, why: "list the Kevin / Saj post templates" },
   {
@@ -336,9 +336,31 @@ export async function listFuturepediaPosts(opts: {
   );
 }
 
-export async function getFuturepediaPost(postId: string, expand: ("free_web_content" | "free_email_content" | "recipients")[] = []): Promise<BeehiivPost> {
+export async function getFuturepediaPost(postId: string, expand: ("free_web_content" | "free_email_content" | "recipients" | "stats")[] = []): Promise<BeehiivPost> {
   const r = await beehiivGet<{ data: BeehiivPost }>(`/publications/${FUTUREPEDIA_PUBLICATION_ID}/posts/${postId}${qs({ expand })}`);
   return r.data;
+}
+
+export interface BeehiivPostStats {
+  /** Delivered: the open-rate denominator. */
+  delivered: number;
+  /** Unique opens (people, not repeat opens). */
+  opens: number;
+  /** Unique clicks. */
+  clicks: number;
+  unsubscribes: number;
+}
+
+/**
+ * A sent edition's aggregate numbers (read-only; one post, counts only — never
+ * who opened or clicked), or null while it has none (a draft or just sent).
+ * Mirrors HubSpot's getHubspotEmailStats: unique opens → views, unique clicks.
+ */
+export async function getFuturepediaPostStats(postId: string): Promise<BeehiivPostStats | null> {
+  const p = (await getFuturepediaPost(postId, ["stats"])) as BeehiivPost & { stats?: { email?: Record<string, number> } };
+  const e = p.stats?.email;
+  if (!e || !e.delivered) return null;
+  return { delivered: e.delivered, opens: e.unique_opens ?? 0, clicks: e.unique_clicks ?? 0, unsubscribes: e.unsubscribes ?? 0 };
 }
 
 export async function listFuturepediaPostTemplates(): Promise<{ id: string; name: string; [k: string]: unknown }[]> {

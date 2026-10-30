@@ -43,6 +43,7 @@ import {
 } from "./metrics-provider";
 import { estimateViewsFromLikes } from "./view-estimator";
 import { hubspotEmailIdOf, syncHubspotNewsletterStats } from "./newsletter-drafter/hubspot-stats";
+import { beehiivPostIdOf, syncBeehiivNewsletterStats } from "./newsletter-drafter/beehiiv-stats";
 
 // Opportunistic publish-date backfill for refreshItemMetrics. Returns SET
 // fragments that COALESCE-write publishedDate / publishedAt: existing values
@@ -262,6 +263,22 @@ export async function refreshItemMetrics(itemId: string): Promise<RefreshItemRes
       likes: null,
       comments: null,
       ...(stats ? {} : { note: "HubSpot has no stats for this email yet" }),
+      creditsUsed: 0,
+    };
+  }
+
+  // --- Futurepedia beehiiv newsletter (unique opens → views, clicks; no SC credit) ---
+  const beehiivPostId = beehiivPostIdOf(item);
+  if (beehiivPostId) {
+    const stats = await syncBeehiivNewsletterStats(itemId, beehiivPostId);
+    return {
+      itemId,
+      updated: !!stats,
+      platform: "newsletter",
+      views: stats?.opens ?? null,
+      likes: null,
+      comments: null,
+      ...(stats ? {} : { note: "beehiiv has no stats for this post yet" }),
       creditsUsed: 0,
     };
   }
