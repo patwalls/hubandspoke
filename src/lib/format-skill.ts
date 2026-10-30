@@ -85,6 +85,21 @@ export function applyStarterTemplate(existing: string): string {
  *  whole Skill, so the rule applies to every draft from then on. */
 export const EDITOR_RULES_HEADING = "## House rules (from editor rewrites)";
 
+/** A rule counts as accepted once its text is in the Skill — "Add to
+ *  Skill" appends it verbatim, and people may change its case. */
+export function ruleIsInSkill(rule: string, skill: string | null | undefined): boolean {
+  return (skill ?? "").toLowerCase().includes(rule.trim().toLowerCase());
+}
+
+/** The format's editor rules the team hasn't added to the Skill yet — what
+ *  the Formats list counts so people see which formats have something new. */
+export function pendingEditorRules(
+  rules: { rules: string[] } | null | undefined,
+  skill: string | null | undefined,
+): string[] {
+  return (rules?.rules ?? []).filter((rule) => !ruleIsInSkill(rule, skill));
+}
+
 /**
  * Append one rule as a bullet under EDITOR_RULES_HEADING, creating the
  * section at the end of the Skill the first time. Unchanged when the rule
@@ -92,7 +107,7 @@ export const EDITOR_RULES_HEADING = "## House rules (from editor rewrites)";
  */
 export function addRuleToSkill(existing: string, rule: string): string {
   const bullet = `- ${rule.trim()}`;
-  if (existing.toLowerCase().includes(rule.trim().toLowerCase())) return existing;
+  if (ruleIsInSkill(rule, existing)) return existing;
   const lines = existing.split("\n");
   const at = lines.findIndex((l) => l.trim().toLowerCase() === EDITOR_RULES_HEADING.toLowerCase());
   if (at === -1) {

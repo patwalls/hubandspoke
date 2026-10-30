@@ -50,3 +50,43 @@ test("format page shows editor rules and adds one to the Skill", async ({ page }
     await sql.end();
   }
 });
+
+// The way in: the Formats list flags formats with rules not yet in the Skill
+// ("2 edit rules"), and the chip opens the format page at the panel.
+test("formats list flags formats with new editor rules", async ({ page }) => {
+  const sql = postgres(process.env.DATABASE_URL!, { max: 1 });
+  try {
+    const stamp = Date.now();
+    const rules = {
+      rules: ["Swap em dashes for a plain period.", "End on the takeaway, not a summary.", "Lead with the founder's name."],
+      pairCount: 7,
+      generatedAt: new Date().toISOString(),
+      model: "e2e",
+    };
+    const name = `E2E List Rules ${stamp}`;
+    // One rule is already in the Skill, so two are new.
+    const [format] = await sql`
+      INSERT INTO formats (name, brand, instructions, editor_rules)
+      VALUES (${name}, 'starter-story', ${"## House rules\n- Lead with the founder's name."}, ${sql.json(rules)})
+      RETURNING id`;
+    await sql`
+      INSERT INTO formats (name, brand, instructions)
+      VALUES (${`E2E No Rules ${stamp}`}, 'starter-story', 'plain')`;
+
+    await page.goto(`/starter-story/formats`);
+    const row = page.getByRole("row").filter({ hasText: name });
+    const chip = row.getByTestId("format-editor-rules-chip");
+    await expect(chip).toHaveText("2 edit rules");
+    await expect(
+      page.getByRole("row").filter({ hasText: `E2E No Rules ${stamp}` }).getByTestId("format-editor-rules-chip"),
+    ).toHaveCount(0);
+
+    if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT });
+
+    await chip.click();
+    await expect(page).toHaveURL(new RegExp(`/starter-story/formats/${format.id}#editor-rules$`));
+    await expect(page.getByTestId("format-editor-rules")).toBeVisible();
+  } finally {
+    await sql.end();
+  }
+});
