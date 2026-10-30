@@ -20,6 +20,7 @@ import { maybeAlertScCreditsExhausted } from "@/lib/services/sc-credits-watch";
 import { maybeAlertDescriptCreditsExhausted } from "@/lib/services/descript-credits-watch";
 import { maybeAlertYtArchiveBehind } from "@/lib/services/yt-archive-watch";
 import { maybeAlertClipIdeaDrought } from "@/lib/services/clip-idea-drought-watch";
+import { refreshEditorRules } from "@/lib/services/draft-algorithm/editor-rules";
 import { platformSupportsLatest } from "@/lib/services/account-content-sync";
 import { getScorecardData } from "@/lib/services/scorecard";
 import { sendDailyScorecardEmail, sendMyWorkDigestEmail } from "@/lib/email";
@@ -542,6 +543,23 @@ export const clipIdeaDroughtWatchTask: Task = async (_payload, helpers) => {
     );
     throw err;
   }
+};
+
+/**
+ * Daily 14:00 UTC, weekly per format: re-derive each format's "what editors
+ * keep changing" rules from its recent draft → published rewrites (one Haiku
+ * call per format with stale rules and ≥ 4 rewrites in 60 days; ~10 formats
+ * today, so ~10 calls a week). Writes
+ * `formats.editor_rules` only; a person adds a rule to the Skill from the
+ * format page. Idempotent — a rerun just rewrites the same rows.
+ */
+export const formatEditorRulesTask: Task = async (_payload, helpers) => {
+  const start = Date.now();
+  helpers.logger.info("format-editor-rules start");
+  const s = await refreshEditorRules({ log: (msg) => helpers.logger.warn(msg) });
+  helpers.logger.info(
+    `format-editor-rules ok formats=${s.formats} updated=${s.updated} skipped=${s.skipped} failed=${s.failed} (${Date.now() - start}ms)`,
+  );
 };
 
 /**

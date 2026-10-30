@@ -1,0 +1,1 @@
+ALTER TABLE "formats" ADD COLUMN "editor_rules" jsonb;

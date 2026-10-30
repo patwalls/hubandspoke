@@ -1317,6 +1317,14 @@ export const descriptLayoutPacks = pgTable("descript_layout_packs", {
     .notNull(),
 });
 
+export interface FormatEditorRules {
+  rules: string[];
+  /** How many (draft → published) rewrites the rules were read from. */
+  pairCount: number;
+  generatedAt: string;
+  model: string;
+}
+
 export const formats = pgTable(
   "formats",
   {
@@ -1359,6 +1367,12 @@ export const formats = pgTable(
     // format's template"); never holds cuts or a specific source.
     clipTemplate: jsonb("clip_template").$type<ClipLook>(),
     clipTemplateUpdatedAt: timestamp("clip_template_updated_at", { withTimezone: true }),
+    // What editors keep changing in this format's drafts, as 3–5 writing
+    // rules (drafts-learn M4). Written weekly by the `format-editor-rules`
+    // cron (src/lib/services/draft-algorithm/editor-rules.ts) from recent
+    // (draft → published) rewrites; shown on the format page, where a
+    // person can add a rule to the Skill. Never edits `instructions` itself.
+    editorRules: jsonb("editor_rules").$type<FormatEditorRules>(),
     // Marks this format as a clippable format for its brand: clip-idea
     // generation can target it, and the Descript clip pipeline (four
     // "Create in Descript" flows) is enabled here. **Multiple per brand

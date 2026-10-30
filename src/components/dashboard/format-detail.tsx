@@ -54,11 +54,13 @@ import {
   type Platform,
 } from "@/lib/platforms";
 import type { PostType } from "@/lib/platform-field-schemas";
-import { applyStarterTemplate } from "@/lib/format-skill";
+import { addRuleToSkill, applyStarterTemplate } from "@/lib/format-skill";
 import { recordVisit } from "@/lib/hooks/use-recent-items";
 import { useCanEditBrand } from "@/components/brand-access";
 import { FormatTemplatesSection } from "@/components/design-editor/format-templates-section";
 import { NewsletterTemplateSection } from "@/components/dashboard/newsletter-template-section";
+import { FormatEditorRulesSection } from "@/components/dashboard/format-editor-rules";
+import type { FormatEditorRules } from "@/lib/db/schema";
 import { FormatStatusBadge } from "./format-status-badge";
 import { defaultCtaStrategy, usesCtaOffer } from "@/lib/cta-offer-brands";
 import type { FormatProvenStatus } from "@/lib/services/format-proven-shared";
@@ -116,6 +118,7 @@ interface FormatRow {
   ctaFixedUrl?: string | null;
   proven?: boolean;
   provenStatus?: FormatProvenStatus | null;
+  editorRules?: FormatEditorRules | null;
 }
 
 interface DescriptLayoutPack {
@@ -1700,6 +1703,19 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
               </p>
             </div>
           </PropertyRowSolo>
+
+          <FormatEditorRulesSection
+            rules={data.format.editorRules}
+            instructions={instructions}
+            canEdit={canEdit}
+            brand={brand}
+            onAdd={(rule) => {
+              const next = addRuleToSkill(instructions, rule);
+              if (next === instructions) return;
+              setInstructions(next);
+              void persistField({ instructions: next });
+            }}
+          />
 
           {/* Descript pack panel removed 2026-05-11. Pack prompt was folded
               into the format Skill above — `formats.instructions` is now the
