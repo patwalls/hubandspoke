@@ -69,7 +69,12 @@ test("an AI draft shows which editor rewrites it learned from", async ({ page })
     await expect(page.getByText("Jane Doe, who built a $40K/mo Excel app, says ship ugly.")).toBeVisible();
     await expect(page.getByText("Nicole built 4 apps, doing about $150K/month each!")).toBeVisible();
     await expect(page.getByText(/^Copied caption/)).toBeVisible();
-    if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT });
+    if (process.env.E2E_SHOT) {
+      // The What's new handler's "Got it" can close the popover; reopen it for the shot.
+      if (!(await page.getByText(/^Copied caption/).isVisible())) await chip.click();
+      await expect(page.getByText(/^Copied caption/)).toBeVisible();
+      await page.screenshot({ path: process.env.E2E_SHOT });
+    }
   } finally {
     await sql.end();
   }
