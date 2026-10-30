@@ -30,7 +30,7 @@ export interface WhatsNewEntry {
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
     id: "2026-10-30-format-editor-rules",
-    shippedAt: "2026-10-30T15:30:00Z",
+    shippedAt: "2026-10-30T15:05:00Z",
     kind: "feature",
     title: "See what editors keep changing in each format",
     body:
