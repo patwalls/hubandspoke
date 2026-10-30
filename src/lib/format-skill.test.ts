@@ -8,6 +8,8 @@ import {
   extractDescriptSection,
   extractExtrasSchema,
   injectLayoutPackInstruction,
+  pendingEditorRules,
+  ruleIsInSkill,
 } from "./format-skill";
 
 // `formats.instructions` (the Skill) is structured for two audiences:
@@ -422,5 +424,30 @@ describe("addRuleToSkill", () => {
   it("is a no-op when the rule is already in the Skill (double click)", () => {
     const once = addRuleToSkill("Body", "Split the hook into two lines.");
     expect(addRuleToSkill(once, "split the hook into two lines.")).toBe(once);
+  });
+});
+
+const rules = (list: string[]) => ({ rules: list });
+
+describe("pendingEditorRules", () => {
+  it("is empty before the job has written rules", () => {
+    expect(pendingEditorRules(null, "anything")).toEqual([]);
+    expect(pendingEditorRules(undefined, null)).toEqual([]);
+  });
+
+  it("drops rules already in the Skill, ignoring case", () => {
+    const r = rules(["Swap em dashes for a period.", "End on the takeaway."]);
+    const skill = "Voice: plain.\n- swap em dashes for a period.";
+    expect(pendingEditorRules(r, skill)).toEqual(["End on the takeaway."]);
+  });
+
+  it("counts every rule when the format has no Skill yet", () => {
+    expect(pendingEditorRules(rules(["A rule."]), null)).toEqual(["A rule."]);
+  });
+});
+
+describe("ruleIsInSkill", () => {
+  it("needs the whole rule, not a fragment of it", () => {
+    expect(ruleIsInSkill("End on the takeaway.", "End on")).toBe(false);
   });
 });

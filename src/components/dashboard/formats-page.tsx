@@ -54,6 +54,9 @@ import {
 import { ChevronDownIcon } from "lucide-react";
 import { useCanEditBrand } from "@/components/brand-access";
 import type { FormatProvenStatus } from "@/lib/services/format-proven-shared";
+import type { FormatEditorRules } from "@/lib/db/schema";
+import { pendingEditorRules } from "@/lib/format-skill";
+import { trackUsage } from "@/lib/usage/track";
 
 interface AssignableUser {
   id: string;
@@ -74,6 +77,7 @@ interface FormatRow {
   totalPublished: number;
   proven?: boolean;
   provenStatus?: FormatProvenStatus | null;
+  editorRules?: FormatEditorRules | null;
 }
 
 type SortKey = "name" | "viewThreshold" | "totalViews" | "totalPublished" | "proven";
@@ -686,6 +690,21 @@ export function FormatsPageContent({ brand }: { brand: string }) {
                       >
                         {isPillar ? "Pillar" : "Derivative"}
                       </span>
+                      {(() => {
+                        const pending = pendingEditorRules(f.editorRules, f.instructions).length;
+                        if (pending === 0) return null;
+                        return (
+                          <Link
+                            href={`/${brand}/formats/${f.id}#editor-rules`}
+                            onClick={() => trackUsage("formats:editor-rules:list", brand)}
+                            title="What editors keep changing in this format's AI drafts"
+                            className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0 bg-amber-50 text-amber-800 hover:bg-amber-100"
+                            data-testid="format-editor-rules-chip"
+                          >
+                            {pending} edit {pending === 1 ? "rule" : "rules"}
+                          </Link>
+                        );
+                      })()}
                     </span>
                   </TableCell>
                   <TableCell>

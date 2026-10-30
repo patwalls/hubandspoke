@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { CheckIcon, PlusIcon } from "lucide-react";
 import type { FormatEditorRules } from "@/lib/db/schema";
 import { trackUsage } from "@/lib/usage/track";
+import { ruleIsInSkill } from "@/lib/format-skill";
 import { PropertyRowSolo } from "./property-row";
 
 /**
@@ -32,7 +33,6 @@ export function FormatEditorRulesSection({
   }, [shown, brand]);
   if (!shown) return null;
 
-  const inSkill = (rule: string) => instructions.toLowerCase().includes(rule.toLowerCase());
   const updated = new Date(rules.generatedAt).toLocaleDateString(undefined, {
     month: "short",
     day: "numeric",
@@ -40,7 +40,7 @@ export function FormatEditorRulesSection({
 
   return (
     <PropertyRowSolo>
-      <div className="px-3 py-3 space-y-2" data-testid="format-editor-rules">
+      <div id="editor-rules" className="px-3 py-3 space-y-2 scroll-mt-20" data-testid="format-editor-rules">
         <div className="flex items-baseline justify-between gap-2">
           <span className="text-sm text-muted-foreground">What editors keep changing</span>
           <span className="text-xs text-muted-foreground">
@@ -49,7 +49,7 @@ export function FormatEditorRulesSection({
         </div>
         <ul className="space-y-1.5">
           {rules.rules.map((rule) => {
-            const added = inSkill(rule);
+            const added = ruleIsInSkill(rule, instructions);
             return (
               <li key={rule} className="flex items-start justify-between gap-3 rounded-md border bg-muted/30 px-2.5 py-1.5">
                 <span className="text-sm">{rule}</span>

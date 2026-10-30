@@ -29,6 +29,16 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-10-30-format-editor-rules",
+    shippedAt: "2026-10-30T15:05:00Z",
+    kind: "feature",
+    title: "See what editors keep changing in each format",
+    body:
+      "Formats now list what editors keep fixing in that format's AI drafts (a line split, a different opener, a fresh comment keyword). Look for \"edit rules\" on the Formats page, then add a rule to the Skill in one click so every draft follows it.",
+    href: "/[brand]/formats",
+    screen: "formats:editor-rules",
+  },
+  {
     id: "2026-10-30-drafts-learn-cross-posts",
     shippedAt: "2026-10-30T07:15:00Z",
     kind: "feature",
