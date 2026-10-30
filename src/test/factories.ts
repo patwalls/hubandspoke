@@ -322,12 +322,17 @@ export async function createTestMedia(
 export async function createTestTranscript(opts: {
   productionItemId: string;
   segments: Array<{ startSec: number; endSec: number; text: string }>;
+  /** Word timings (a Whisper row). Omit for a caption-scrape-shaped row. */
+  words?: Array<{ word: string; startSec: number; endSec: number }>;
+  source?: string;
 }): Promise<typeof transcripts.$inferSelect> {
   const [row] = await db
     .insert(transcripts)
     .values({
       productionItemId: opts.productionItemId,
+      ...(opts.source ? { source: opts.source } : {}),
       segments: opts.segments,
+      words: opts.words ?? null,
       fullText: opts.segments.map((s) => s.text).join(" "),
       durationSec: String(opts.segments.at(-1)?.endSec ?? 0),
     })

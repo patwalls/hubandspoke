@@ -20,6 +20,7 @@ import {
 } from "./worker-identity";
 import { RECONCILE_INTERVAL_MS, reconcileLocks } from "./lock-reconcile";
 import { workerLogger } from "./worker-logger";
+import { isBlockedError } from "./blocked";
 
 async function main() {
   // Own pool with explicit SSL — Heroku Postgres requires it, and
@@ -67,8 +68,13 @@ async function main() {
 
   // Permanent task failures (max attempts exhausted) → Sentry. Transient
   // errors that succeed on retry are intentionally not captured to keep
-  // signal high.
+  // signal high. A `blocked:` error is a state the UI already shows the
+  // editor (needs media / transcript), not an incident — log it, don't page.
   runner.events.on("job:failed", ({ job, error }) => {
+    if (isBlockedError(error)) {
+      console.warn(`[worker] ${job.task_identifier} job=${job.id} ${String(error).slice(0, 300)}`);
+      return;
+    }
     Sentry.captureException(error, {
       tags: { task: job.task_identifier, source: "graphile-worker" },
       extra: {

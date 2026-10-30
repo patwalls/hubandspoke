@@ -1362,9 +1362,9 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
 - **Durable avatars (2026-09-20):** after a successful refresh the task archives the platform avatar to S3 (`src/lib/services/account-avatar.ts` → `<prefix>/accounts/<id>/avatar-<hash>.<ext>`, skipped when the platform URL is unchanged) and rewrites `accounts.avatar_url` to `/api/media-proxy?key=<avatar_s3_key>` — same-origin and permanent, so the simulator/AccountBadge/channel element stop falling back to a monogram when Instagram's CDN link expires (they last days). `avatar_source_url` keeps the platform URL. Server-side fetchers (the design render) use `avatarFetchUrl` to presign. Backfill: `npx tsx scripts/backfill-account-avatars.ts --apply` archives what's still reachable and enqueues `account-refresh` for accounts whose URL already expired (ran on prod 2026-09-20).
 
 ### `transcribe-whisper` — Whisper transcription (ffmpeg + OpenAI)
-- **Trigger:** enqueued by `enrich-item` (when it sets `mediaS3Key`), by `youtube-download` (on success), by `POST /api/uploads/confirm` (user direct upload), and by `POST /api/production-items/[id]/transcript/fetch` (manual refetch). Operational kill switch: `WHISPER_TRANSCRIBE_LIVE=false` disables enqueue-side firing.
+- **Trigger:** enqueued by `enrich-item` (when it sets `mediaS3Key`), by `youtube-download` (on success), by `POST /api/uploads/confirm` (user direct upload), by `POST /api/production-items/[id]/transcript/fetch` (manual refetch), and by `descript-derivative-create` with `needWords: true` when a cross-post's source (or pillar) has only a caption-scrape transcript (HUBANDSPOKE-3E, 2026-10-30). Operational kill switch: `WHISPER_TRANSCRIBE_LIVE=false` disables enqueue-side firing.
 - **Files:** `src/jobs/tasks/transcribe-whisper.ts`, `src/lib/services/whisper-transcribe.ts`, `src/lib/services/transcribe-after-upload.ts` (`maybeEnqueueWhisperTranscribe`)
-- **Inputs:** `{ productionItemId, audioS3Key?, audioS3Bucket?, audioChunks? }`
+- **Inputs:** `{ productionItemId, audioS3Key?, audioS3Bucket?, audioChunks?, needWords? }` — `needWords` re-transcribes over a text-only row (an Instagram/TikTok caption scrape); only a row with `words` counts as done. Carried into phase 2.
 - **Outputs (by phase):**
   1. No `audioS3Key` → download archived S3 video, ffmpeg segment-extract mono 16kHz opus audio into 10-min chunks (`<prefix>/audio/<itemId>/<runId>-NNN.ogg`), upload each, re-enqueue with chunk manifest carried on payload
   2. `audioS3Key` set → for each chunk: fetch from S3, call OpenAI `whisper-1` with `verbose_json` + `timestamp_granularities: ["word", "segment"]` + an **item-aware prompt** (title + author names + description snippet) so Whisper biases proper nouns correctly. Offset chunk-local timestamps by `chunk.startSec`, merge, upsert `transcripts` row (source=`whisper`, model, segments, **words**, fullText, durationSec, language, audioS3Bucket, audioS3Key, audioChunks)
@@ -1520,13 +1520,13 @@ Regression guard: `src/lib/services/underlord-auto-fire.regression.test.ts` grep
 - **Status:** Auto-fire on cross-post/repost creation was disabled 2026-05-18 (cost ~$3.50/call). **Manual trigger re-enabled 2026-09-02:** `POST /api/production-items/[id]/descript-derivative-create` enqueues this task for a cross-post item when the operator clicks "Create in Descript" in the `DescriptStatusPill` popover. The route validates `sourceType === "cross_post"` and `repostedFromItemId` is set before enqueuing. Cross-post rules (from the format Skill's `### Cross Post Rules` section) are read by the task and passed as `crossPostRules` to `invokeRulesAwareDuplicate`, which tells Underlord to re-aspect (e.g. vertical Instagram Reel → horizontal for X/LinkedIn).
 - **Trigger (historical):** enqueued by `POST /api/production-items/[id]/cross-post` and `POST /api/production-items/[id]/repost` after the new derivative row is inserted. Each route hard-gated upfront on `checkRepostReadiness(source)`. **Manual escape (still live on cross-post):** `{ manual: true }` bypasses the readiness gate; the row is created empty for the operator to attach media themselves. Surfaced in `cross-post-triage-dialog.tsx` as the "I'll do it manually" button on the inline gate-failure banner.
 - **Files:** `src/jobs/tasks/descript-derivative-create.ts`, `src/lib/services/descript-derivative.ts` (helpers: `hasDescriptableMedia` / `hasDescriptableMediaForRepost`, `resolveImportTarget` / `resolveImportTargetForRepost`, `loadPillarForSource`, `coldImportPillar`)
-- **Inputs:** `{ derivativeItemId, sourceItemId, mode?: "repost" | "cross-post", attempt? }` — `mode` defaults to `cross-post` for back-compat with jobs enqueued before the field was added.
+- **Inputs:** `{ derivativeItemId, sourceItemId, mode?: "repost" | "cross-post", attempt?, wordsRequested? }` — `mode` defaults to `cross-post` for back-compat with jobs enqueued before the field was added.
 - **Outputs:** Inserts a `repurpose_triggers` row tagged `descript_import_path='derivative-copy'`, enqueues `descript-clip-resolve` to poll the duplicate-composition job. The new composition_id is written to the derivative when the resolver fires.
 - **Downstream:** `descript-clip-resolve` → `descript-publish-and-archive`
 - **Rules:**
   - **Cross-post mode** — pillar-aware. Target = pillar (or source-as-pillar when source has no upstream). Decision tree:
     1. Source has own composition → duplicate it via `invokeRulesAwareDuplicate` (applies Cross Post Rules from the source's format so Underlord re-aspects for the target platform).
-    2. Pillar has seed → transcript-anchored cut via `findAnchorInWords` + `cutSegmentWithRules`. Both source and target need word-level Whisper transcripts.
+    2. Pillar has seed → transcript-anchored cut via `findAnchorInWords` + `cutSegmentWithRules`. Both source and target need word-level Whisper transcripts. **A side with only a caption scrape but archived media** gets `transcribe-whisper { needWords: true }` (jobKey `transcribe-whisper:<id>`, asked once — `wordsRequested` on the payload) and the task re-polls every 180s on the shared `attempt` budget; no media, or budget spent → `blocked:needs_transcript` (HUBANDSPOKE-3E, 2026-10-30).
     3. Pillar has only `mediaS3Key` → `coldImportPillar(pillar.id)` + `descript-clip-resolve` for the pillar import + 60s self re-enqueue. Next pass picks up the freshly-stamped seed.
     4. Otherwise → `blocked:needs_pillar_media`.
   - **Repost mode (added 2026-05-16)** — same-platform / same-aspect. Pillar IGNORED even when present; target is always source-as-pillar via `resolveImportTargetForRepost`. Decision tree:
@@ -2019,7 +2019,7 @@ update both the code and this list.
 
 ### Idempotency
 Every task that has a "did this already happen?" check at the top:
-- `transcribe-whisper` — exits if a `transcripts` row with non-empty `fullText` exists
+- `transcribe-whisper` — exits if a `transcripts` row with non-empty `fullText` exists (with `needWords`: if the row has `words`)
 - `enrich-item` — exits if `enrichmentCompletedAt` set (unless `force`)
 - `youtube-download` — exits if `mediaS3Key` set (unless `force`)
 - `hook-fallback` — only writes if `hookExtractedAt IS NULL`
@@ -2162,7 +2162,9 @@ to GitHub (above); Sentry fires only for a CRIT that should page someone.
   - **Permanent task failures** (max attempts exhausted) via the
     `job:failed` event — tagged with `task` and `source: graphile-worker`.
     Transient errors that succeed on retry are intentionally **not** captured
-    to keep signal high.
+    to keep signal high. Neither are **`blocked:` errors** (`src/jobs/blocked.ts`,
+    2026-10-30, HUBANDSPOKE-3E): those are human-action states the status pill
+    already shows ("Needs transcript"), so the worker logs them instead of paging.
   - **Fatal worker crashes** (anything that escapes `main()`), with
     `Sentry.flush()` before exit so the event isn't lost on dyno restart.
 
