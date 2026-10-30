@@ -132,6 +132,7 @@ import { validatePublishedLinkPlatform } from "@/lib/published-link-validation";
 import { trackUsage } from "@/lib/usage/track";
 import { acceptsPastedLink, isPagePaste, pastedPostLink } from "@/lib/paste-to-publish";
 import { HandoffButton } from "./handoff-button";
+import { LearnedEditsChip } from "./learned-edits-chip";
 import { leavePublishedConfirm } from "@/lib/status/leave-published";
 import { CrossPostPasteLinks } from "./cross-post-paste-links";
 import { useCanEditBrand } from "@/components/brand-access";
@@ -3709,6 +3710,8 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
        * embed of the live post (Instagram iframe, X/TikTok widget, …). All
        * other states render no left pane and the form goes full-width. */}
       {isPrePublishInline ? (
+        <div className="space-y-2">
+        <LearnedEditsChip itemId={item.id} brand={brand} />
         <ContentPreview
           item={item}
           media={data.media ?? []}
@@ -3723,6 +3726,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
           descriptProcessingDetail={descriptProcessingDetail}
           draftAlgorithmRunning={draftAlgorithmRunning}
         />
+        </div>
       ) : isPublished ? (
         <PublishedEmbed item={item} />
       ) : hasArchivedVideo ? (
