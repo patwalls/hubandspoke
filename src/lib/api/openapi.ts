@@ -3,7 +3,7 @@
  * `GET /api/v1/openapi.json` (public, no secrets) so Postman, Zapier, custom
  * GPTs and code generators can import it.
  */
-import { API_ENDPOINTS, type ApiEndpoint, type ApiParam } from "./registry";
+import { API_ENDPOINTS, type ApiBodyField, type ApiEndpoint, type ApiParam } from "./registry";
 import { RATE_LIMIT_PER_MINUTE } from "./rate-limit";
 import { API_VERSION } from "./constants";
 
@@ -20,6 +20,26 @@ function schemaFor(p: ApiParam) {
   return schema;
 }
 
+function bodySchema(fields: ApiBodyField[]) {
+  const properties: Record<string, unknown> = {};
+  for (const f of fields) {
+    const schema: Record<string, unknown> =
+      f.type === "string[]" ? { type: "array", items: { type: "string", ...(f.enum ? { enum: [...f.enum] } : {}) } } : { type: f.type };
+    if (f.enum && f.type !== "string[]") schema.enum = [...f.enum];
+    schema.description = f.description;
+    if (f.example) schema.example = f.example;
+    properties[f.name] = schema;
+  }
+  return {
+    required: true,
+    content: {
+      "application/json": {
+        schema: { type: "object", properties, required: fields.filter((f) => f.required).map((f) => f.name) },
+      },
+    },
+  };
+}
+
 function operation(e: ApiEndpoint) {
   const content: Record<string, unknown> = {
     "application/json": { schema: { type: "object" }, example: e.example },
@@ -31,8 +51,9 @@ function operation(e: ApiEndpoint) {
   return {
     operationId: e.id.replace(/\./g, "_"),
     summary: e.summary,
-    description: e.description,
+    description: e.scope ? `${e.description}\n\nRequires an API key with the \`write\` scope.` : e.description,
     tags: [e.group],
+    ...(e.body?.length ? { requestBody: bodySchema(e.body) } : {}),
     parameters: e.params.map((p) => ({
       name: p.name,
       in: p.in,
@@ -45,6 +66,7 @@ function operation(e: ApiEndpoint) {
       "200": { description: "OK", content },
       "400": { $ref: "#/components/responses/InvalidRequest" },
       "401": { $ref: "#/components/responses/Unauthorized" },
+      ...(e.scope ? { "403": { $ref: "#/components/responses/Forbidden" } } : {}),
       "404": { $ref: "#/components/responses/NotFound" },
       "429": { $ref: "#/components/responses/RateLimited" },
     },
@@ -78,6 +100,8 @@ export function buildOpenApiDocument(baseUrl: string) {
         `Rate limit: ${RATE_LIMIT_PER_MINUTE} requests per minute per key (see the X-RateLimit-* headers).`,
         "Lists are wrapped in `{ data: [...] }`; paginated lists add `has_more` and `next_cursor`.",
         "Errors are `{ error: { type, message } }` with a matching HTTP status.",
+        "Changing things (PATCH /content/{id}, POST /content, comments, clip ideas, webhooks) needs a key created with the `write` scope; the key's owner must be allowed to edit that brand in the app.",
+        "Webhooks: subscribe a URL to content.created / content.status_changed / content.published / transcript.ready; deliveries are signed with X-HubSpoke-Signature.",
         "",
         `An MCP server for AI assistants lives at ${baseUrl}/api/v1/mcp (same key).`,
       ].join("\n"),
@@ -89,6 +113,8 @@ export function buildOpenApiDocument(baseUrl: string) {
       { name: "Content" },
       { name: "Transcripts & media" },
       { name: "Workspace" },
+      { name: "Changes" },
+      { name: "Webhooks" },
     ],
     paths,
     components: {
@@ -122,6 +148,7 @@ export function buildOpenApiDocument(baseUrl: string) {
       responses: {
         InvalidRequest: errorResponse("A parameter is missing or malformed.", "invalid_request", "One or more query parameters are invalid."),
         Unauthorized: errorResponse("Missing, invalid, revoked or expired API key.", "unauthorized", "Invalid API key."),
+        Forbidden: errorResponse("The key lacks the `write` scope, or its owner can't change this brand.", "forbidden", "This API key is read-only."),
         NotFound: errorResponse("No such record, or it was deleted.", "not_found", "No content item with that id."),
         RateLimited: errorResponse("Too many requests this minute.", "rate_limited", `Rate limit is ${RATE_LIMIT_PER_MINUTE} requests per minute per key.`),
       },

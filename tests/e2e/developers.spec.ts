@@ -23,7 +23,7 @@ test("create a key, use it on REST + MCP, revoke it", async ({ page, baseURL }) 
   await expect(page.getByRole("heading", { name: "API keys", level: 2 })).toBeVisible();
 
   const name = `e2e ${Date.now()}`;
-  await page.getByRole("button", { name: "Create key" }).click();
+  await page.locator("#keys").getByRole("button", { name: "Create key" }).click();
   await page.getByLabel("Name").fill(name);
   await page.getByRole("dialog").getByRole("button", { name: "Create key" }).click();
 
@@ -88,7 +88,7 @@ test("create a key, use it on REST + MCP, revoke it", async ({ page, baseURL }) 
 
   // Activity shows what we just did (logged after the response; give it a beat).
   await page.locator("#activity").scrollIntoViewIfNeeded();
-  await page.getByRole("button", { name: "Refresh" }).click();
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
   await expect(page.locator("#activity")).toContainText("/v1/me", { timeout: 10_000 });
   await expect(page.locator("#activity")).toContainText("whoami");
 
@@ -113,4 +113,73 @@ test("the reference's Try it runs an endpoint with the session", async ({ page }
   await brands.getByRole("button", { name: "Send request" }).click();
   await expect(brands.getByText("200")).toBeVisible({ timeout: 15_000 });
   await expect(brands.locator("pre").last()).toContainText('"slug"');
+});
+
+test("a write key can manage webhooks; a read-only key cannot", async ({ page, baseURL }) => {
+  await page.goto("/developers");
+  await dismissWhatsNew(page);
+
+  // Read-only key (default).
+  const roName = `e2e ro ${Date.now()}`;
+  await page.locator("#keys").getByRole("button", { name: "Create key" }).click();
+  await page.getByLabel("Name").fill(roName);
+  await page.getByRole("dialog").getByRole("button", { name: "Create key" }).click();
+  const roKey = (await page.getByRole("dialog").locator("pre code").innerText()).trim();
+  await page.getByRole("dialog").getByRole("button", { name: "Done" }).click();
+
+  // Write key.
+  const rwName = `e2e rw ${Date.now()}`;
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page.locator("#keys").getByRole("button", { name: "Create key" }).click();
+  await page.getByLabel("Name").fill(rwName);
+  await page.getByRole("dialog").getByText("Can make changes").click();
+  await page.getByRole("dialog").getByRole("button", { name: "Create key" }).click();
+  const rwKey = (await page.getByRole("dialog").locator("pre code").innerText()).trim();
+  await page.getByRole("dialog").getByRole("button", { name: "Done" }).click();
+  await expect(page.locator("#keys").getByRole("row", { name: new RegExp(rwName) })).toContainText("read + write");
+  await expect(page.locator("#keys").getByRole("row", { name: new RegExp(roName) })).toContainText("read-only");
+
+  const api = await playwrightRequest.newContext({ baseURL, storageState: { cookies: [], origins: [] } });
+  const hook = { name: "e2e hook", url: "https://example.com/hooks/e2e", events: ["content.published"] };
+
+  const denied = await api.post("/api/v1/webhooks", { headers: { Authorization: `Bearer ${roKey}` }, data: hook });
+  expect(denied.status()).toBe(403);
+  expect(((await denied.json()) as { error: { type: string } }).error.type).toBe("forbidden");
+
+  const created = await api.post("/api/v1/webhooks", { headers: { Authorization: `Bearer ${rwKey}` }, data: hook });
+  expect(created.status()).toBe(201);
+  const body = (await created.json()) as { data: { id: string; secret: string; events: string[] } };
+  expect(body.data.secret).toMatch(/^whsec_/);
+  expect(body.data.events).toEqual(["content.published"]);
+
+  // The write key's MCP server offers write tools; the read-only one doesn't.
+  const toolsFor = async (key: string) => {
+    const res = await api.post("/api/v1/mcp", {
+      headers: { Authorization: `Bearer ${key}`, Accept: "application/json, text/event-stream" },
+      data: { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} },
+    });
+    return ((await res.json()) as { result: { tools: Array<{ name: string }> } }).result.tools.map((t) => t.name);
+  };
+  expect(await toolsFor(rwKey)).toContain("update_content");
+  expect(await toolsFor(roKey)).not.toContain("update_content");
+  expect(await toolsFor(roKey)).toContain("search_transcripts");
+
+  // It shows up in the Webhooks panel; remove it from there.
+  await page.locator("#webhooks").getByRole("button", { name: "Refresh webhooks" }).click();
+  const row = page.locator("#webhooks").getByText("e2e hook").locator("xpath=ancestor::div[contains(@class,'px-4')][1]");
+  await expect(row).toBeVisible();
+  await row.getByRole("button", { name: "Remove" }).click();
+  await row.getByRole("button", { name: "Confirm remove" }).click();
+  await expect(page.locator("#webhooks").getByText("e2e hook")).toHaveCount(0);
+  const gone = await api.get(`/api/v1/webhooks/${body.data.id}/deliveries`, { headers: { Authorization: `Bearer ${rwKey}` } });
+  expect(gone.status()).toBe(404);
+
+  // Clean up both keys.
+  for (const n of [roName, rwName]) {
+    const r = page.locator("#keys").getByRole("row", { name: new RegExp(n) });
+    await r.getByRole("button", { name: "Revoke" }).click();
+    await r.getByRole("button", { name: "Confirm revoke" }).click();
+    await expect(r).toContainText("Revoked");
+  }
+  await api.dispose();
 });

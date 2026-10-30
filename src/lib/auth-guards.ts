@@ -4,13 +4,24 @@ import { auth } from "@/lib/auth";
 import { setSentrySessionUser } from "@/lib/sentry-user";
 import { isFeatureEnabled, type FeatureFlag } from "@/lib/feature-flags";
 import { canEditBrand, currentRoleAndBrands } from "@/lib/brand-access";
+import { impersonatedSession } from "@/lib/api/impersonate";
+
+/**
+ * The caller's session: the dashboard cookie, or — when an /api/v1 write
+ * route is calling an app handler on behalf of an API key — the key's owner
+ * (src/lib/api/impersonate.ts). Every guard below goes through this so the
+ * API and the UI share one permission check.
+ */
+async function currentSession(): Promise<Session | null> {
+  return impersonatedSession() ?? (await auth());
+}
 
 export type GuardResult =
   | { session: Session; response?: undefined }
   | { session?: undefined; response: NextResponse };
 
 export async function requireSession(): Promise<GuardResult> {
-  const session = await auth();
+  const session = await currentSession();
   if (!session?.user) {
     return {
       response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
@@ -29,7 +40,7 @@ export async function requireSession(): Promise<GuardResult> {
 }
 
 export async function requireAdmin(): Promise<GuardResult> {
-  const session = await auth();
+  const session = await currentSession();
   if (!session?.user) {
     return {
       response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),

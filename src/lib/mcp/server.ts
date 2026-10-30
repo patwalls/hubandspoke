@@ -14,18 +14,22 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
 import type { ApiPrincipal } from "@/lib/api/auth";
-import { listAccounts, listBrands, listFormats } from "@/lib/api/catalog";
+import { listAccounts, listBrands, listFormats, listStatuses, listUsers } from "@/lib/api/catalog";
 import {
   CONTENT_SORTS,
   SOURCE_TYPES,
   getContent,
   getTranscript,
   listClipIdeas,
+  listComments,
   listContent,
   listDerivatives,
+  listDrafts,
   listMedia,
   renderTranscript,
 } from "@/lib/api/content";
+import { searchTranscripts } from "@/lib/api/transcript-search";
+import { addComment, createContentFromLink, decideClipIdea, updateContent } from "@/lib/api/writes";
 import { ApiError } from "@/lib/api/http";
 import type { ApiContentItem } from "@/lib/api/serialize";
 import { API_VERSION } from "@/lib/api/constants";
@@ -87,11 +91,14 @@ export function buildMcpServer(ctx: McpContext): McpServer {
         "Hub & Spoke is the content command center for a group of media brands: long YouTube videos (hubs) and the clips, posts and newsletters made from them (spokes).",
         "Start with search_content to find items; it returns compact rows. Use get_content for full detail and get_transcript for what was said.",
         "Brand slugs come from list_brands; account ids from list_accounts. Dates are ISO-8601 (UTC). Views and likes are the latest synced numbers, not live.",
+        "search_transcripts finds where something was said. If update_content, add_comment and the clip-idea tools are present, the key may make changes; confirm with the person before changing a status or killing an idea.",
       ].join(" "),
     },
   );
 
   const readOnly = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
+
+  const writes = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false };
 
   function tool<Shape extends z.ZodRawShape>(
     name: string,
@@ -99,9 +106,10 @@ export function buildMcpServer(ctx: McpContext): McpServer {
     shape: Shape,
     run: (args: z.infer<z.ZodObject<Shape>>) => Promise<unknown>,
   ) {
+    const isWrite = MCP_TOOLS.find((t) => t.name === name)?.write === true;
     server.registerTool(
       name,
-      { title: name.replace(/_/g, " "), description, inputSchema: shape, annotations: readOnly },
+      { title: name.replace(/_/g, " "), description, inputSchema: shape, annotations: isWrite ? writes : readOnly },
       (async (args: z.infer<z.ZodObject<Shape>>) => {
         const started = performance.now();
         try {
@@ -220,6 +228,73 @@ export function buildMcpServer(ctx: McpContext): McpServer {
   );
 
   tool("get_media_links", MCP_TOOLS[9].description, { id: uuid }, async (a) => (await listMedia(a.id)).data);
+
+  const desc = (name: string) => MCP_TOOLS.find((t) => t.name === name)?.description ?? name;
+
+  tool("list_drafts", desc("list_drafts"), { id: uuid, current_only: z.boolean().optional() }, async (a) =>
+    (await listDrafts(a.id, { current_only: a.current_only })).data,
+  );
+  tool("list_comments", desc("list_comments"), { id: uuid }, async (a) => (await listComments(a.id)).data);
+  tool(
+    "search_transcripts",
+    desc("search_transcripts") + ' Quotes force a phrase, -word excludes. Each hit has a snippet and at_sec.',
+    { q: z.string().min(2).describe("Words or a quoted phrase"), brand: z.string().optional(), limit: z.number().int().min(1).max(50).optional() },
+    async (a) => (await searchTranscripts(a, ctx.baseUrl)).data,
+  );
+  tool("list_users", desc("list_users"), { include_inactive: z.boolean().optional() }, async (a) => (await listUsers(a)).data);
+  tool("list_statuses", desc("list_statuses"), { brand: z.string().optional() }, async (a) => (await listStatuses(a)).data);
+
+  // Write tools exist only for keys that may write, so a read-only assistant
+  // never offers an action it can't take.
+  if (ctx.principal.scopes.includes("write")) {
+    tool(
+      "update_content",
+      desc("update_content") +
+        " Moving to Published needs url (the live link); moving to Killed needs kill_reason (10+ chars). Status names come from list_statuses.",
+      {
+        id: uuid,
+        status: z.string().optional(),
+        editor_id: z.string().uuid().nullable().optional().describe("User id from list_users; null unassigns"),
+        title: z.string().optional(),
+        format: z.string().nullable().optional(),
+        hub_id: z.string().uuid().nullable().optional(),
+        kill_reason: z.string().optional(),
+        url: z.string().url().optional().describe("Required when status becomes Published"),
+        published_at: z.string().optional(),
+      },
+      async ({ id, ...rest }) => updateContent(ctx.principal, id, rest, ctx.baseUrl),
+    );
+    tool(
+      "create_content_from_link",
+      desc("create_content_from_link") + " Reads title, date and metrics from the platform. Costs one Scrape Creators credit.",
+      {
+        url: z.string().url(),
+        brand: z.string().describe("Brand slug from list_brands"),
+        title: z.string().optional(),
+        format: z.string().optional(),
+        editor_id: z.string().uuid().optional(),
+      },
+      async (a) => createContentFromLink(ctx.principal, a, ctx.baseUrl),
+    );
+    tool(
+      "add_comment",
+      desc("add_comment"),
+      { id: uuid, body: z.string().min(1).max(5000), at_sec: z.number().min(0).optional().describe("Timecode the comment refers to") },
+      async (a) => addComment(ctx.principal, a.id, { body: a.body, at_sec: a.at_sec ?? null }),
+    );
+    tool(
+      "accept_clip_idea",
+      desc("accept_clip_idea"),
+      { id: z.string().uuid().describe("Clip idea id from list_clip_ideas"), editor_id: z.string().uuid().optional() },
+      async (a) => decideClipIdea(ctx.principal, a.id, { action: "accept", editor_id: a.editor_id ?? null }),
+    );
+    tool(
+      "kill_clip_idea",
+      desc("kill_clip_idea"),
+      { id: z.string().uuid().describe("Clip idea id from list_clip_ideas"), reason: z.string().optional() },
+      async (a) => decideClipIdea(ctx.principal, a.id, { action: "kill", reason: a.reason ?? null }),
+    );
+  }
 
   return server;
 }

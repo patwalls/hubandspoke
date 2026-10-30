@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireSession } from "@/lib/auth-guards";
+import type { ApiKeyScope } from "@/lib/db/schema";
 import { isAdminNow } from "@/lib/brand-access";
 import {
   MAX_ACTIVE_KEYS_PER_USER,
@@ -33,7 +34,9 @@ export async function POST(request: NextRequest) {
   const guard = await requireSession();
   if (guard.response) return guard.response;
   const userId = guard.session.user.id;
-  const body = (await request.json().catch(() => ({}))) as { name?: unknown; expires_in_days?: unknown };
+  const body = (await request.json().catch(() => ({}))) as { name?: unknown; expires_in_days?: unknown; scopes?: unknown };
+  const scopes: ApiKeyScope[] =
+    Array.isArray(body.scopes) && body.scopes.includes("write") ? ["read", "write"] : ["read"];
   const name = typeof body.name === "string" ? body.name.trim() : "";
   if (!name) {
     return NextResponse.json({ error: "Give the key a name (what will use it, e.g. \"Zapier\")." }, { status: 400 });
@@ -55,6 +58,6 @@ export async function POST(request: NextRequest) {
       { status: 400 },
     );
   }
-  const { key, summary } = await createApiKey({ userId, name, expiresAt });
+  const { key, summary } = await createApiKey({ userId, name, expiresAt, scopes });
   return NextResponse.json({ key, summary }, { status: 201 });
 }

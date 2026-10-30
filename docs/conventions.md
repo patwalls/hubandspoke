@@ -313,10 +313,15 @@ routes: snake_case JSON, stable shapes, API-key auth, documented on
    `ApiError(type, message)` — `v1Handler` renders `{ error: { type, message } }`
    with the right status and never leaks a stack. Validate the query string
    with zod via `parseQuery`; a bad param is a 400 that names the param.
-4. **Read-only for now.** A key acts as its owner, and creators can read every
-   brand, so GET needs no brand gate. The first write endpoint must gate on
-   the principal's role + `brand_ids` exactly like `requireBrandEdit` does for
-   the app, and must only be reachable by keys (not the session fallback).
+4. **Writes reuse the app's handlers, never a second implementation.** A write
+   endpoint calls `requireScope(principal, "write")`, then goes through
+   `src/lib/api/writes.ts`, which builds the request the UI would send and
+   calls the app's own route handler inside `runAs(principal)`
+   (`src/lib/api/impersonate.ts`). `requireSession` / `requireBrandEdit`
+   read that impersonated session first, so the API has exactly the app's
+   brand gate, invariants, activity events and notifications. If the app has
+   no handler for what the API needs, add the handler to the app first.
+   Reads need no gate (creators see every brand).
 5. **Route files export only handlers.** Next rejects other exports from
    `route.ts`; shared helpers (`idFromPath`, query schemas) go in `src/lib/api`.
 6. **Every request is logged** (`api_requests`, via `after()` so it never
@@ -325,7 +330,13 @@ routes: snake_case JSON, stable shapes, API-key auth, documented on
 7. **Client-safe modules**: `registry.ts`, `constants.ts`,
    `transcript-format.ts`, `mcp/tools.ts` and the snippet builders are imported
    by the docs page — they must not import `@/lib/db` or the MCP SDK.
-8. **Tests**: pure logic unit-tested next to the module; auth and the read
+8. **Webhooks fire from the state-diff sweep, not from write sites.** Don't add
+   `emitWebhook(...)` calls next to a status update — `production_items` has a
+   dozen writers and half of them are syncs. A new event means: a `WEBHOOK_EVENTS`
+   entry in `constants.ts`, detection in `runWebhookDispatchSweep`
+   (`src/lib/services/webhook-dispatch.ts`, with a `diffItem`-style pure
+   function and a unit test), and a payload example in the registry.
+9. **Tests**: pure logic unit-tested next to the module; auth and the read
    model integration-tested with `createTestApiKey` / `createTestUser` from
    `src/test/factories.ts`; `tests/e2e/developers.spec.ts` creates a key in
    the UI and uses it against REST and MCP with no cookie.

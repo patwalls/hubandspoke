@@ -42,6 +42,7 @@ export function ApiKeysPanel({
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [expiresDays, setExpiresDays] = useState("");
+  const [canWrite, setCanWrite] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<{ key: string; name: string } | null>(null);
@@ -73,7 +74,7 @@ export function ApiKeysPanel({
       const res = await fetch("/api/api-keys", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, expires_in_days: expiresDays || undefined }),
+        body: JSON.stringify({ name, expires_in_days: expiresDays || undefined, scopes: canWrite ? ["read", "write"] : ["read"] }),
       });
       const body = (await res.json()) as { key?: string; summary?: ApiKeySummary; error?: string };
       if (!res.ok || !body.key || !body.summary) {
@@ -85,6 +86,7 @@ export function ApiKeysPanel({
       trackUsage("developers:key-created");
       setName("");
       setExpiresDays("");
+      setCanWrite(false);
       load();
     } finally {
       setSubmitting(false);
@@ -175,7 +177,18 @@ export function ApiKeysPanel({
                         : `Created ${new Date(k.createdAt).toLocaleDateString()}`}
                   </div>
                 </td>
-                <td className="px-4 py-2.5 font-mono text-xs text-muted-foreground">{k.keyPrefix}…</td>
+                <td className="px-4 py-2.5 font-mono text-xs text-muted-foreground">
+                  {k.keyPrefix}…
+                  <span
+                    className={`ml-2 rounded px-1 py-0.5 font-sans text-[10px] font-semibold ${
+                      k.scopes?.includes("write")
+                        ? "bg-amber-500/10 text-amber-700 dark:text-amber-400"
+                        : "bg-muted text-muted-foreground"
+                    }`}
+                  >
+                    {k.scopes?.includes("write") ? "read + write" : "read-only"}
+                  </span>
+                </td>
                 {showAll ? (
                   <td className="px-4 py-2.5 text-xs text-muted-foreground">{k.owner?.name ?? k.owner?.email ?? "—"}</td>
                 ) : null}
@@ -255,6 +268,21 @@ export function ApiKeysPanel({
                     onChange={(e) => setExpiresDays(e.target.value.replace(/[^0-9]/g, ""))}
                   />
                 </div>
+                <label className="flex items-start gap-2 text-sm text-foreground">
+                  <input
+                    type="checkbox"
+                    checked={canWrite}
+                    onChange={(e) => setCanWrite(e.target.checked)}
+                    className="mt-1 accent-primary"
+                  />
+                  <span>
+                    Can make changes
+                    <span className="block text-xs text-muted-foreground">
+                      Lets this key move statuses, assign editors, add comments, accept or kill clip ideas, add posts and
+                      manage webhooks — on the brands you can edit. Leave off for reports and dashboards.
+                    </span>
+                  </span>
+                </label>
                 {error ? <p className="text-sm text-destructive">{error}</p> : null}
               </div>
               <DialogFooter>

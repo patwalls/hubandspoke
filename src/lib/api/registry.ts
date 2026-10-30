@@ -6,10 +6,19 @@
  * `src/app/api/v1/**`, add its entry here, add an MCP tool if it suits a
  * model (`src/lib/mcp/server.ts`). See docs/conventions.md → Public API.
  */
-import { CONTENT_SORTS, POST_TYPES, SOURCE_TYPES } from "./constants";
+import { CONTENT_SORTS, POST_TYPES, SOURCE_TYPES, WEBHOOK_EVENTS } from "./constants";
 import { TRANSCRIPT_FORMATS } from "./transcript-format";
 
-export type ApiGroup = "Getting started" | "Content" | "Transcripts & media" | "Workspace";
+export type ApiGroup = "Getting started" | "Content" | "Transcripts & media" | "Workspace" | "Changes" | "Webhooks";
+
+export interface ApiBodyField {
+  name: string;
+  type: "string" | "number" | "boolean" | "string[]";
+  description: string;
+  required?: boolean;
+  enum?: readonly string[];
+  example?: string;
+}
 
 export interface ApiParam {
   name: string;
@@ -24,13 +33,17 @@ export interface ApiParam {
 export interface ApiEndpoint {
   /** Stable id, `group.action`. Also the MCP tool it maps to when one exists. */
   id: string;
-  method: "GET";
+  method: "GET" | "POST" | "PATCH" | "DELETE";
   /** OpenAPI path, relative to `/api/v1`. */
   path: string;
   group: ApiGroup;
   summary: string;
   description: string;
   params: ApiParam[];
+  /** JSON body fields (POST / PATCH). */
+  body?: ApiBodyField[];
+  /** Needs an API key created with "Can make changes". */
+  scope?: "write";
   /** Example response body (JSON) shown in the docs. */
   example: unknown;
   /** Non-JSON responses this endpoint can return (transcript formats). */
@@ -315,9 +328,254 @@ export const API_ENDPOINTS: ApiEndpoint[] = [
     },
     mcpTool: "list_formats",
   },
+  {
+    id: "content.drafts",
+    method: "GET",
+    path: "/content/{id}/drafts",
+    group: "Content",
+    summary: "List an item's drafts",
+    description:
+      "The draft chain for a post: what the AI wrote and every rewrite an editor saved, newest version first. `author_kind` tells them apart; `content` holds the fields (caption, hook, slides…) for that version.",
+    params: [idParam, { name: "current_only", in: "query", type: "boolean", description: "Only the live draft." }],
+    example: {
+      data: [
+        { id: "d2…", content_id: EXAMPLE_ITEM.id, version: 2, is_current: true, author_kind: "user", generated_by: "user:edit", content: { caption: "He makes $2M a year with one email a day. Here's the playbook:" }, created_by: { id: "0f4b…", name: "Sam", email: "sam@starterstory.com" }, created_at: "2026-10-22T09:30:00.000Z" },
+        { id: "d1…", content_id: EXAMPLE_ITEM.id, version: 1, is_current: false, author_kind: "ai", generated_by: "ai:claude-sonnet:v4", content: { caption: "This founder built a $2M newsletter…" }, created_by: null, created_at: "2026-10-21T16:10:00.000Z" },
+      ],
+    },
+    mcpTool: "list_drafts",
+  },
+  {
+    id: "content.comments",
+    method: "GET",
+    path: "/content/{id}/comments",
+    group: "Content",
+    summary: "List an item's comments",
+    description: "Comments on a post in order, with the author, an optional timecode into the video and whether they were resolved.",
+    params: [idParam],
+    example: {
+      data: [
+        { id: "c1…", content_id: EXAMPLE_ITEM.id, body_text: "Cut the intro to 0:08, the hook lands at 0:12", body_html: "<p>Cut the intro to 0:08, the hook lands at 0:12</p>", author: { id: "0f4b…", name: "Sam", email: "sam@starterstory.com" }, at_sec: 12, resolved_at: null, edited_at: null, created_at: "2026-10-22T10:00:00.000Z" },
+      ],
+    },
+    mcpTool: "list_comments",
+  },
+  {
+    id: "transcripts.search",
+    method: "GET",
+    path: "/transcripts/search",
+    group: "Transcripts & media",
+    summary: "Search inside transcripts",
+    description:
+      "Full-text search across every transcript. Each hit has a highlighted snippet (matches wrapped in **) and `at_sec`, the first moment those words are said, so you can link straight into the video. Quotes force a phrase, `-word` excludes.",
+    params: [
+      { name: "q", in: "query", type: "string", required: true, description: "Words or a \"quoted phrase\".", example: "pricing page" },
+      brandParam,
+      { name: "limit", in: "query", type: "integer", description: "1–50. Default 20.", example: "20" },
+    ],
+    example: {
+      data: [
+        { content_id: EXAMPLE_ITEM.id, title: EXAMPLE_ITEM.title, brand: "starter-story", post_type: "youtube_long", account: "youtube/@starterstory", url: EXAMPLE_ITEM.url, published_at: EXAMPLE_ITEM.published_at, app_url: EXAMPLE_ITEM.app_url, rank: 0.12, snippet: "…we changed the **pricing** **page** three times before…", at_sec: 812.4, at_text: "We changed the pricing page three times before it converted." },
+      ],
+    },
+    mcpTool: "search_transcripts",
+  },
+  {
+    id: "users.list",
+    method: "GET",
+    path: "/users",
+    group: "Workspace",
+    summary: "List team members",
+    description: "People in the workspace, for `editor_id` filters and assignments. `edits_brands` is which brands they can change.",
+    params: [{ name: "include_inactive", in: "query", type: "boolean", description: "Include deactivated accounts." }],
+    example: { data: [{ id: "0f4b…", email: "sam@starterstory.com", name: "Sam", role: "creator", avatar_url: null, edits_brands: ["starter-story"], is_active: true, created_at: "2026-04-01T00:00:00.000Z" }] },
+    mcpTool: "list_users",
+  },
+  {
+    id: "statuses.list",
+    method: "GET",
+    path: "/statuses",
+    group: "Workspace",
+    summary: "List workflow statuses",
+    description: "The status names each brand uses, in board order. Use them for the `status` filter and when changing an item's status.",
+    params: [brandParam],
+    example: { data: [{ name: "Idea", brand: "starter-story", color: "#94a3b8", position: 0, is_pipeline_column: true }, { name: "Published", brand: "starter-story", color: "#22c55e", position: 6, is_pipeline_column: false }] },
+    mcpTool: "list_statuses",
+  },
+  {
+    id: "content.update",
+    method: "PATCH",
+    path: "/content/{id}",
+    group: "Changes",
+    scope: "write",
+    summary: "Change an item",
+    description:
+      "Move an item's status, assign an editor, retitle it, set its format or point it at a hub. Same rules as the app: moving to Published needs `url` (the live link); moving to Killed needs `kill_reason`. Everything is recorded in the item's activity.",
+    params: [idParam],
+    body: [
+      { name: "status", type: "string", description: "A status name from GET /statuses, e.g. `Editing`, `Published`, `Killed`.", example: "Editing" },
+      { name: "editor_id", type: "string", description: "User id from GET /users; `null` unassigns." },
+      { name: "title", type: "string", description: "New title." },
+      { name: "format", type: "string", description: "Format name from GET /formats; `null` clears." },
+      { name: "hub_id", type: "string", description: "Make this item a spoke of that hub; `null` detaches." },
+      { name: "kill_reason", type: "string", description: "Required with status Killed (10+ characters)." },
+      { name: "url", type: "string", description: "Required with status Published: the live post link." },
+      { name: "published_at", type: "string", description: "With status Published: ISO date it went live (default today)." },
+    ],
+    example: { data: { ...EXAMPLE_ITEM, status: "Editing" } },
+    mcpTool: "update_content",
+  },
+  {
+    id: "content.create",
+    method: "POST",
+    path: "/content",
+    group: "Changes",
+    scope: "write",
+    summary: "Add a post by link",
+    description:
+      "Track a post that is already live: give its URL and brand, and Hub & Spoke reads the title, date, metrics and thumbnail from the platform and matches the account. The same as \"Add from link\" in the app. Costs one Scrape Creators credit.",
+    params: [],
+    body: [
+      { name: "url", type: "string", required: true, description: "The post's URL.", example: "https://www.youtube.com/watch?v=abc123" },
+      { name: "brand", type: "string", required: true, description: "Brand slug from GET /brands.", example: "starter-story" },
+      { name: "title", type: "string", description: "Override the title read from the platform." },
+      { name: "format", type: "string", description: "Format name from GET /formats." },
+      { name: "editor_id", type: "string", description: "Assign to this user; default is the brand's rules." },
+    ],
+    example: { data: EXAMPLE_ITEM },
+    mcpTool: "create_content_from_link",
+  },
+  {
+    id: "content.comment",
+    method: "POST",
+    path: "/content/{id}/comments",
+    group: "Changes",
+    scope: "write",
+    summary: "Add a comment",
+    description: "Post a comment on an item as the key's owner. Mentions and notifications work like in the app.",
+    params: [idParam],
+    body: [
+      { name: "body", type: "string", required: true, description: "Plain text; blank lines make paragraphs.", example: "Hook lands at 0:12, cut the intro." },
+      { name: "at_sec", type: "number", description: "Timecode into the video the comment refers to." },
+    ],
+    example: { data: { id: "c2…", content_id: EXAMPLE_ITEM.id, body_text: "Hook lands at 0:12, cut the intro.", body_html: "<p>Hook lands at 0:12, cut the intro.</p>", author: { id: "0f4b…", name: "You", email: "you@starterstory.com" }, at_sec: 12, resolved_at: null, edited_at: null, created_at: "2026-10-30T19:00:00.000Z" } },
+    mcpTool: "add_comment",
+  },
+  {
+    id: "clip_ideas.accept",
+    method: "POST",
+    path: "/clip-ideas/{id}/accept",
+    group: "Changes",
+    scope: "write",
+    summary: "Accept a clip idea",
+    description: "Turn a suggested clip into a new item in the queue, assigned to `editor_id` (default: you). Returns the idea and the new item's id.",
+    params: [{ name: "id", in: "path", type: "string", required: true, description: "Clip idea id (from GET /content/{id}/clip-ideas)." }],
+    body: [{ name: "editor_id", type: "string", description: "Who gets the clip. Default: the key's owner." }],
+    example: { data: { clip_idea: { id: "c0ffee00-…", status: "accepted" }, new_content_id: "5d2e…" } },
+    mcpTool: "accept_clip_idea",
+  },
+  {
+    id: "clip_ideas.kill",
+    method: "POST",
+    path: "/clip-ideas/{id}/kill",
+    group: "Changes",
+    scope: "write",
+    summary: "Kill a clip idea",
+    description: "Reject a suggested clip. The reason teaches the clip writer what not to suggest.",
+    params: [{ name: "id", in: "path", type: "string", required: true, description: "Clip idea id." }],
+    body: [{ name: "reason", type: "string", description: "Why it doesn't work.", example: "Too long to stand alone." }],
+    example: { data: { clip_idea: { id: "c0ffee00-…", status: "killed" }, new_content_id: null } },
+    mcpTool: "kill_clip_idea",
+  },
+  {
+    id: "webhooks.list",
+    method: "GET",
+    path: "/webhooks",
+    group: "Webhooks",
+    summary: "List webhooks",
+    description: "Your webhook subscriptions and their delivery health.",
+    params: [],
+    example: { data: [{ id: "w1…", name: "Zapier", url: "https://hooks.zapier.com/…", events: ["content.published"], brand: null, active: true, consecutive_failures: 0, last_delivery_at: "2026-10-30T18:00:00.000Z", last_success_at: "2026-10-30T18:00:00.000Z", last_failure_at: null, created_at: "2026-10-30T12:00:00.000Z" }] },
+  },
+  {
+    id: "webhooks.create",
+    method: "POST",
+    path: "/webhooks",
+    group: "Webhooks",
+    scope: "write",
+    summary: "Subscribe a URL",
+    description:
+      "We POST a JSON event to your URL within about a minute of it happening, retrying with backoff for a day if you don't answer 2xx. The response includes `secret` once: verify `X-HubSpoke-Signature` = `sha256=HMAC(secret, \"<X-HubSpoke-Timestamp>.<raw body>\")`.",
+    params: [],
+    body: [
+      { name: "name", type: "string", required: true, description: "What receives it.", example: "Zapier" },
+      { name: "url", type: "string", required: true, description: "An https:// URL.", example: "https://hooks.zapier.com/hooks/catch/…" },
+      { name: "events", type: "string[]", required: true, description: "Which events to send.", enum: WEBHOOK_EVENTS },
+      { name: "brand", type: "string", description: "Only events for this brand slug. Omit for all." },
+    ],
+    example: { data: { id: "w1…", name: "Zapier", url: "https://hooks.zapier.com/…", events: ["content.published", "transcript.ready"], brand: null, active: true, consecutive_failures: 0, last_delivery_at: null, last_success_at: null, last_failure_at: null, created_at: "2026-10-30T12:00:00.000Z", secret: "whsec_…" } },
+  },
+  {
+    id: "webhooks.update",
+    method: "PATCH",
+    path: "/webhooks/{id}",
+    group: "Webhooks",
+    scope: "write",
+    summary: "Pause or resume a webhook",
+    description: "Set `active` false to stop deliveries without losing the subscription; true to resume (also resets the failure streak).",
+    params: [{ name: "id", in: "path", type: "string", required: true, description: "Webhook id." }],
+    body: [{ name: "active", type: "boolean", required: true, description: "true to deliver, false to pause." }],
+    example: { data: { id: "w1…", active: false } },
+  },
+  {
+    id: "webhooks.delete",
+    method: "DELETE",
+    path: "/webhooks/{id}",
+    group: "Webhooks",
+    scope: "write",
+    summary: "Remove a webhook",
+    description: "Deletes the subscription and its delivery history.",
+    params: [{ name: "id", in: "path", type: "string", required: true, description: "Webhook id." }],
+    example: { data: { id: "w1…", deleted: true } },
+  },
+  {
+    id: "webhooks.rotate_secret",
+    method: "POST",
+    path: "/webhooks/{id}/rotate-secret",
+    group: "Webhooks",
+    scope: "write",
+    summary: "Rotate the signing secret",
+    description: "Issues a new secret (returned once) and retires the old one immediately.",
+    params: [{ name: "id", in: "path", type: "string", required: true, description: "Webhook id." }],
+    example: { data: { id: "w1…", secret: "whsec_…" } },
+  },
+  {
+    id: "webhooks.test",
+    method: "POST",
+    path: "/webhooks/{id}/test",
+    group: "Webhooks",
+    scope: "write",
+    summary: "Send a test event",
+    description: "Queues a `ping` delivery to your URL so you can check the receiver and signature handling.",
+    params: [{ name: "id", in: "path", type: "string", required: true, description: "Webhook id." }],
+    example: { data: { delivery_id: "dl…", status: "pending" } },
+  },
+  {
+    id: "webhooks.deliveries",
+    method: "GET",
+    path: "/webhooks/{id}/deliveries",
+    group: "Webhooks",
+    summary: "List deliveries",
+    description: "Recent deliveries for a webhook: event, status, attempts, the last HTTP status or error, and the payload sent.",
+    params: [
+      { name: "id", in: "path", type: "string", required: true, description: "Webhook id." },
+      { name: "limit", in: "query", type: "integer", description: "1–200. Default 50.", example: "50" },
+    ],
+    example: { data: [{ id: "dl…", webhook_id: "w1…", event: "content.published", status: "delivered", attempts: 1, last_status_code: 200, last_error: null, payload: { content: { id: EXAMPLE_ITEM.id, title: EXAMPLE_ITEM.title, status: "Published" }, from: "Ready To Publish" }, created_at: "2026-10-30T18:00:03.000Z", delivered_at: "2026-10-30T18:00:04.000Z" }] },
+  },
 ];
 
-export const API_GROUPS: ApiGroup[] = ["Getting started", "Content", "Transcripts & media", "Workspace"];
+export const API_GROUPS: ApiGroup[] = ["Getting started", "Content", "Transcripts & media", "Workspace", "Changes", "Webhooks"];
 
 export function endpointById(id: string): ApiEndpoint | undefined {
   return API_ENDPOINTS.find((e) => e.id === id);

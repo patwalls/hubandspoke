@@ -489,6 +489,8 @@ export const productionItems = pgTable(
     index("idx_production_items_pillar_item").on(table.pillarContentItemId),
     index("idx_production_items_reposted_from").on(table.repostedFromItemId),
     index("idx_production_items_editor_user").on(table.editorUserId),
+    // webhook-dispatch-sweep and the API's `updated_after` filter.
+    index("idx_production_items_updated_at").on(table.updatedAt),
     uniqueIndex("uniq_production_items_utm_campaign")
       .on(table.utmCampaign)
       .where(sql`${table.utmCampaign} IS NOT NULL`),
@@ -655,7 +657,11 @@ export const transcripts = pgTable("transcripts", {
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
-});
+}, (table) => [
+  // webhook-dispatch-sweep (transcript.ready) and GET /api/v1/transcripts/search.
+  index("idx_transcripts_updated_at").on(table.updatedAt),
+  index("idx_transcripts_fulltext").using("gin", sql`to_tsvector('english', ${table.fullText})`),
+]);
 
 // One row per slide in a carousel / multi-image post. Populated during
 // enrichment by the SC scraper — IG posts, Threads carousel_media, Twitter
@@ -1882,6 +1888,8 @@ export const users = pgTable(
  *   `expires_at`  — optional hard expiry chosen at creation.
  *   `request_count` / `last_used_at` — bumped on every authenticated request.
  */
+export type ApiKeyScope = "read" | "write";
+
 export const apiKeys = pgTable(
   "api_keys",
   {
@@ -1892,6 +1900,10 @@ export const apiKeys = pgTable(
     name: text("name").notNull(),
     keyPrefix: text("key_prefix").notNull(),
     keyHash: text("key_hash").notNull().unique(),
+    // What the key may do. `read` is always present; `write` unlocks the
+    // mutating endpoints and MCP tools (the owner's brand permissions still
+    // apply on top). Chosen at creation, never widened afterwards.
+    scopes: jsonb("scopes").$type<ApiKeyScope[]>().notNull().default(["read"]),
     lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
     requestCount: integer("request_count").notNull().default(0),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
@@ -1933,6 +1945,88 @@ export const apiRequests = pgTable(
     index("idx_api_requests_created").on(table.createdAt),
   ],
 );
+
+/**
+ * Outgoing webhooks (Developers page → Webhooks). A subscription is one URL
+ * plus the events it wants. Deliveries are rows in `api_webhook_deliveries`,
+ * each sent by the `webhook-deliver` worker task with retries; the HMAC
+ * `secret` signs every body (`X-HubSpoke-Signature`). Events are detected by
+ * `webhook-dispatch-sweep` every minute by diffing `production_items` /
+ * `transcripts` against `api_webhook_item_state`, so a status moved by
+ * Notion sync or a cron fires exactly like one moved in the app.
+ */
+export const apiWebhooks = pgTable(
+  "api_webhooks",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    url: text("url").notNull(),
+    events: jsonb("events").$type<string[]>().notNull().default([]),
+    secret: text("secret").notNull(),
+    /** Brand slug filter; null = every brand. */
+    brand: text("brand"),
+    active: boolean("active").notNull().default(true),
+    consecutiveFailures: integer("consecutive_failures").notNull().default(0),
+    lastDeliveryAt: timestamp("last_delivery_at", { withTimezone: true }),
+    lastSuccessAt: timestamp("last_success_at", { withTimezone: true }),
+    lastFailureAt: timestamp("last_failure_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [index("idx_api_webhooks_user").on(table.userId)],
+);
+
+export const apiWebhookDeliveries = pgTable(
+  "api_webhook_deliveries",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    webhookId: uuid("webhook_id")
+      .notNull()
+      .references(() => apiWebhooks.id, { onDelete: "cascade" }),
+    event: text("event").notNull(),
+    payload: jsonb("payload").notNull(),
+    status: text("status", { enum: ["pending", "delivered", "failed"] })
+      .notNull()
+      .default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    lastStatusCode: integer("last_status_code"),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+  },
+  (table) => [index("idx_api_webhook_deliveries_hook_created").on(table.webhookId, table.createdAt)],
+);
+
+/** Last-seen state per item so the dispatch sweep can tell what changed. */
+export const apiWebhookItemState = pgTable("api_webhook_item_state", {
+  itemId: uuid("item_id")
+    .primaryKey()
+    .references(() => productionItems.id, { onDelete: "cascade" }),
+  status: text("status"),
+  transcriptFetchedAt: timestamp("transcript_fetched_at", { withTimezone: true }),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
+/** Singleton watermarks for the dispatch sweep. */
+export const apiWebhookCursors = pgTable("api_webhook_cursors", {
+  id: text("id").primaryKey(),
+  itemsUpdatedAt: timestamp("items_updated_at", { withTimezone: true }).notNull(),
+  transcriptsUpdatedAt: timestamp("transcripts_updated_at", { withTimezone: true }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
 
 export const usageEvents = pgTable(
   "usage_events",

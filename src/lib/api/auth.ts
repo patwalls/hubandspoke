@@ -14,11 +14,13 @@
  */
 import { NextResponse } from "next/server";
 import { after } from "next/server";
+import { ZodError } from "zod";
 import { auth } from "@/lib/auth";
 import { currentRoleAndBrands } from "@/lib/brand-access";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import type { ApiScope } from "./constants";
 import { ApiError, apiError } from "./http";
 import {
   apiKeyProblem,
@@ -33,7 +35,19 @@ export interface ApiPrincipal {
   user: { id: string; email: string; name: string | null; role: "admin" | "creator" };
   auth: "api_key" | "session";
   key: { id: string; name: string; keyPrefix: string; createdAt: Date } | null;
+  /** `read` always; `write` when the key was created with it (session callers get both, like the app). */
+  scopes: ApiScope[];
   rateLimit: RateLimitResult;
+}
+
+/** Throw a 403 unless the principal may do this. */
+export function requireScope(principal: ApiPrincipal, scope: ApiScope): void {
+  if (!principal.scopes.includes(scope)) {
+    throw new ApiError(
+      "forbidden",
+      `This API key is read-only. Create a key with "Can make changes" on the Developers page to use ${scope} endpoints.`,
+    );
+  }
 }
 
 function presentedKey(request: Request): string | null {
@@ -83,6 +97,7 @@ export async function authenticateApi(request: Request): Promise<ApiPrincipal> {
         keyPrefix: resolved.key.keyPrefix,
         createdAt: resolved.key.createdAt,
       },
+      scopes: resolved.key.scopes,
       rateLimit,
     };
   }
@@ -116,6 +131,7 @@ export async function authenticateApi(request: Request): Promise<ApiPrincipal> {
     },
     auth: "session",
     key: null,
+    scopes: ["read", "write"],
     rateLimit,
   };
 }
@@ -145,6 +161,14 @@ export function v1Handler(
     } catch (err) {
       if (err instanceof ApiError) {
         response = apiError(err);
+      } else if (err instanceof ZodError) {
+        response = apiError(
+          new ApiError(
+            "invalid_request",
+            "The body has invalid fields.",
+            err.issues.map((i) => ({ field: i.path.join("."), message: i.message })),
+          ),
+        );
       } else {
         console.error(`[api:v1] ${route} failed`, err);
         response = apiError(new ApiError("internal_error", "Something went wrong on our side."));

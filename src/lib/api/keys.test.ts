@@ -46,6 +46,7 @@ describe("apiKeyProblem", () => {
       name: "n",
       keyPrefix: "p",
       keyHash: "h",
+      scopes: ["read"],
       lastUsedAt: null,
       requestCount: 0,
       expiresAt: null,

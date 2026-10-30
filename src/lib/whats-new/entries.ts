@@ -29,6 +29,16 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-10-30-api-writes-webhooks",
+    shippedAt: "2026-10-30T22:30:00Z",
+    kind: "feature",
+    title: "The API can now make changes, call you back, and search transcripts",
+    body:
+      "Create a key with \"Can make changes\" and a script or an AI assistant can move statuses, assign editors, comment, accept or kill clip ideas and add posts by link, with your permissions. Add a webhook to get a call when a post is published, a status moves or a transcript is ready. Plus: search inside every transcript, and read drafts, comments, team members and statuses.",
+    href: "/developers",
+    screen: "developers",
+  },
+  {
     id: "2026-10-30-api-and-mcp",
     shippedAt: "2026-10-30T19:30:00Z",
     kind: "feature",

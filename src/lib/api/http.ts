@@ -11,6 +11,7 @@ export type ApiErrorType =
   | "unauthorized"
   | "forbidden"
   | "not_found"
+  | "conflict"
   | "invalid_request"
   | "rate_limited"
   | "internal_error";
@@ -19,6 +20,7 @@ const STATUS: Record<ApiErrorType, number> = {
   unauthorized: 401,
   forbidden: 403,
   not_found: 404,
+  conflict: 409,
   invalid_request: 400,
   rate_limited: 429,
   internal_error: 500,
@@ -84,6 +86,17 @@ export function requireUuid(value: string, what = "id"): string {
     throw new ApiError("invalid_request", `${what} must be a UUID.`);
   }
   return value.toLowerCase();
+}
+
+/** Parse a JSON body; an empty or malformed body is a 400. */
+export async function readJson(request: Request): Promise<unknown> {
+  const text = await request.text();
+  if (!text.trim()) throw new ApiError("invalid_request", "A JSON body is required.");
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new ApiError("invalid_request", "The body is not valid JSON.");
+  }
 }
 
 /** The UUID path segment right after `after` (`/api/v1/content/<id>/transcript` → id). */

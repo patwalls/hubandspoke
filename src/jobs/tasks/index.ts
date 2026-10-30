@@ -6,6 +6,8 @@
 // The `TaskPayloads` type lets `enqueue()` enforce a typed payload per task.
 
 import type { Task } from "graphile-worker";
+import { webhookDeliverTask, type WebhookDeliverPayload } from "./webhook-deliver";
+import { webhookDispatchSweepTask } from "./webhook-dispatch-sweep";
 import {
   descriptClipResolveTask,
   type DescriptClipResolvePayload,
@@ -214,6 +216,8 @@ export interface TaskPayloads {
   "clip-idea-drought-watch": Record<string, never>;
   "format-editor-rules": Record<string, never>;
   "worker-heartbeat": Record<string, never>;
+  "webhook-deliver": WebhookDeliverPayload;
+  "webhook-dispatch-sweep": Record<string, never>;
 }
 
 const helloTask: Task = async (payload, helpers) => {
@@ -293,4 +297,6 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "clip-idea-drought-watch": clipIdeaDroughtWatchTask,
   "format-editor-rules": formatEditorRulesTask,
   "worker-heartbeat": workerHeartbeatTask,
+  "webhook-deliver": webhookDeliverTask,
+  "webhook-dispatch-sweep": webhookDispatchSweepTask,
 };

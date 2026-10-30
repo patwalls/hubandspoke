@@ -17,6 +17,7 @@ If you're new to this codebase, read in this order:
 ```
 CRON ENTRIES (src/jobs/crontab.ts, UTC)
   * * * * *  worker-heartbeat     → (priority -10) bumps worker_heartbeat.last_seen_at. Read by GET /api/health/worker to detect silent worker wedges.
+  * * * * *  webhook-dispatch-sweep → diffs production_items / transcripts against api_webhook_item_state → webhook-deliver (per subscription × event). Two indexed scans when idle. jobKey + preserve_run_at so a slow minute never stacks.
   *:00  performance-decay         → SC API. Writes views/likes/comments. Decay-tier-gated.
   *:15  threshold-monitor-sweep   → in-place scan. Auto-creates repurposed Idea items when views cross format thresholds.
   *:20  enrichment-sweep          → fan-out → enrich-item (per item) → maybe transcribe-whisper
@@ -1221,6 +1222,23 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
     on the machine to starve under memory pressure.
 
 ---
+
+### `webhook-dispatch-sweep` — outgoing webhooks (every minute)
+
+- **Trigger:** cron `* * * * *` (`?jobKey=webhook-dispatch-sweep&jobKeyMode=preserve_run_at` — one in flight at a time).
+- **Code:** `src/jobs/tasks/webhook-dispatch-sweep.ts` → `runWebhookDispatchSweep()` in `src/lib/services/webhook-dispatch.ts`.
+- **What it does:** reads `production_items` with `updated_at` past the watermark in `api_webhook_cursors` (5 s overlap), compares `status` to `api_webhook_item_state`, and emits `content.created` (row born after the sweep started), `content.status_changed`, `content.published` (status became Published); reads `transcripts` with `updated_at` past the transcript watermark and emits `transcript.ready` when `fetched_at` differs from the last seen value (errored rows skipped). Upserts the state table, advances both watermarks, then inserts one `api_webhook_deliveries` row per active subscription whose `events` include the event (and whose `brand` matches, if set) and enqueues `webhook-deliver` for each.
+- **First run / no subscriptions:** seeds `api_webhook_item_state` from every live item and sets the watermarks to now without emitting — history is never replayed. The seed runs even with zero subscriptions so the first one never sees a backfill.
+- **Why a diff, not write-site hooks:** `production_items.status` is written by the app's PUT and publish routes, the API, Notion sync, account syncs, three schedule sweeps and merges; only some write `content_events`. The diff sees all of them.
+- **Idle cost:** two index range scans (`idx_production_items_updated_at`, `idx_transcripts_updated_at`), no writes. Batch cap 500 rows per table per minute (catches up on the next tick).
+
+### `webhook-deliver` — POST one delivery
+
+- **Trigger:** enqueued by the sweep and by `POST /api/v1/webhooks/{id}/test` (`event: ping`). `maxAttempts: 8` (graphile exponential backoff, roughly a day), `jobKey: webhook-deliver:<deliveryId>`.
+- **Code:** `src/jobs/tasks/webhook-deliver.ts` → `deliverWebhook()`.
+- **Request:** JSON `{ id, event, created_at, data }`, headers `X-HubSpoke-Event`, `X-HubSpoke-Delivery`, `X-HubSpoke-Timestamp`, `X-HubSpoke-Signature: sha256=HMAC-SHA256(secret, "<timestamp>.<body>")`, 10 s timeout, redirects not followed, bounded by `helpers.abortSignal`.
+- **Outcome:** 2xx → delivery `delivered`, subscription `last_success_at` set and `consecutive_failures` reset. Otherwise the task throws (retry); on the final attempt the delivery is `failed`, the subscription's `consecutive_failures` increments and at 25 the subscription is paused (`active = false`; "Resume" on /developers resets it). A paused subscription's pending deliveries are marked failed on pickup.
+- **Observability:** /developers → Webhooks → Deliveries (per hook, last 20) and `GET /api/v1/webhooks/{id}/deliveries`.
 
 ## Per-item child tasks
 

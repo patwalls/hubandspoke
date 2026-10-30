@@ -37,6 +37,7 @@
 // number here (crontab.test.ts enforces it).
 export const CRONTAB = `
 * * * * * worker-heartbeat ?priority=-10
+* * * * * webhook-dispatch-sweep ?jobKey=webhook-dispatch-sweep&jobKeyMode=preserve_run_at
 0 * * * * performance-decay ?queue=performance-decay
 15 * * * * threshold-monitor-sweep
 30 * * * * notion-sync

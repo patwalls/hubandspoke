@@ -2,8 +2,9 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Bot, BookOpen, Code2, KeyRound, Activity, Sparkles } from "lucide-react";
+import { Bot, BookOpen, Code2, KeyRound, Activity, Sparkles, Webhook } from "lucide-react";
 import { RATE_LIMIT_PER_MINUTE } from "@/lib/api/rate-limit";
+import { WEBHOOK_EVENTS } from "@/lib/api/constants";
 import { API_ENDPOINTS } from "@/lib/api/registry";
 import { MCP_TOOLS } from "@/lib/mcp/tools";
 import { cn } from "@/lib/utils";
@@ -12,6 +13,7 @@ import { ApiKeysPanel } from "./api-keys-panel";
 import { CodeBlock } from "./code-block";
 import { EndpointReference } from "./endpoint-reference";
 import { McpSetup } from "./mcp-setup";
+import { WebhooksPanel } from "./webhooks-panel";
 import { curlSnippet, javascriptSnippet, openApiUrl, pythonSnippet, sheetsSnippet } from "./snippets";
 
 const SECTIONS = [
@@ -19,6 +21,7 @@ const SECTIONS = [
   { id: "quickstart", label: "Quickstart", icon: Sparkles },
   { id: "reference", label: "Reference", icon: BookOpen },
   { id: "mcp", label: "AI assistants (MCP)", icon: Bot },
+  { id: "webhooks", label: "Webhooks", icon: Webhook },
   { id: "activity", label: "Activity", icon: Activity },
 ] as const;
 
@@ -70,12 +73,13 @@ export function DevelopersPage({
             <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
               Every video, Short, reel, post, tweet and newsletter across all brands, their transcripts, media files,
               clip ideas and performance numbers. Pull it into a spreadsheet, a report, Zapier or Make, a script, or
-              let an AI assistant work with it directly. Read-only, so nothing you build here can change anything in the app.
+              let an AI assistant work with it directly. Keys are read-only unless you tick &ldquo;Can make changes&rdquo;, which
+              also lets a key move statuses, assign editors, comment, triage clip ideas and add posts, on the brands you can edit.
             </p>
             <div className="mt-4 grid gap-3 sm:grid-cols-3">
               <Stat label="Endpoints" value={String(API_ENDPOINTS.length)} hint="REST, JSON, cursor pagination" />
               <Stat label="MCP tools" value={String(MCP_TOOLS.length)} hint="Claude, Cursor and more" />
-              <Stat label="Rate limit" value={`${RATE_LIMIT_PER_MINUTE}/min`} hint="per key" />
+              <Stat label="Webhooks" value={String(WEBHOOK_EVENTS.length)} hint={`events · ${RATE_LIMIT_PER_MINUTE}/min rate limit`} />
             </div>
             <div className="mt-4 flex flex-wrap gap-3 text-xs">
               <span className="text-muted-foreground">
@@ -154,6 +158,15 @@ export function DevelopersPage({
 
         <Section id="mcp" title="AI assistants (MCP)" icon={Bot}>
           <McpSetup baseUrl={baseUrl} apiKey={freshKey} />
+        </Section>
+
+        <Section
+          id="webhooks"
+          title="Webhooks"
+          icon={Webhook}
+          intro="Get a call the moment a post is published, a status moves, a new item appears or a transcript is ready — however it happened (app, Notion, a sync, the API)."
+        >
+          <WebhooksPanel isAdmin={isAdmin} />
         </Section>
 
         <Section id="activity" title="Activity" icon={Activity}>

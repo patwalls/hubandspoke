@@ -8,7 +8,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { apiKeys, apiRequests, users } from "@/lib/db/schema";
+import { apiKeys, apiRequests, users, type ApiKeyScope } from "@/lib/db/schema";
 
 export const API_KEY_PREFIX = "hs_live_";
 const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -44,6 +44,7 @@ export interface ApiKeySummary {
   id: string;
   name: string;
   keyPrefix: string;
+  scopes: ApiKeyScope[];
   lastUsedAt: string | null;
   requestCount: number;
   expiresAt: string | null;
@@ -57,6 +58,7 @@ function toSummary(row: typeof apiKeys.$inferSelect): ApiKeySummary {
     id: row.id,
     name: row.name,
     keyPrefix: row.keyPrefix,
+    scopes: row.scopes,
     lastUsedAt: row.lastUsedAt?.toISOString() ?? null,
     requestCount: row.requestCount,
     expiresAt: row.expiresAt?.toISOString() ?? null,
@@ -72,7 +74,9 @@ export async function createApiKey(opts: {
   userId: string;
   name: string;
   expiresAt?: Date | null;
+  scopes?: ApiKeyScope[];
 }): Promise<{ key: string; summary: ApiKeySummary }> {
+  const scopes: ApiKeyScope[] = opts.scopes?.includes("write") ? ["read", "write"] : ["read"];
   const name = opts.name.trim().slice(0, MAX_KEY_NAME_LENGTH) || "Untitled key";
   const key = generateApiKeySecret();
   const [row] = await db
@@ -82,6 +86,7 @@ export async function createApiKey(opts: {
       name,
       keyPrefix: displayPrefix(key),
       keyHash: hashApiKey(key),
+      scopes,
       expiresAt: opts.expiresAt ?? null,
     })
     .returning();

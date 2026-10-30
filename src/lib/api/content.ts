@@ -9,11 +9,14 @@ import { db } from "@/lib/db";
 import {
   accounts,
   clipIdeas,
+  contentComments,
+  contentDrafts,
   productionItemMedia,
   productionItems,
   transcripts,
   users,
 } from "@/lib/db/schema";
+import { htmlToPlainText } from "@/lib/comments/sanitize";
 import { getPresignedGetUrl } from "@/lib/s3";
 import { z } from "zod";
 import { ApiError, decodeCursor, encodeCursor, zBool, zIsoDate, zLimit } from "./http";
@@ -391,4 +394,93 @@ export async function listMedia(id: string): Promise<{ data: ApiMediaFile[] }> {
     out.push({ kind: "thumbnail", content_type: null, size_bytes: null, url: item.thumbnail, expires_at: null });
   }
   return { data: out };
+}
+
+export interface ApiDraft {
+  id: string;
+  content_id: string;
+  version: number;
+  is_current: boolean;
+  /** `ai` for a generated draft, `user` for an editor's rewrite. */
+  author_kind: "ai" | "user";
+  generated_by: string;
+  content: Record<string, unknown>;
+  created_by: { id: string; name: string | null; email: string } | null;
+  created_at: string;
+}
+
+/** The draft chain for one item, newest version first. `current_only` returns just the live one. */
+export async function listDrafts(id: string, opts: { current_only?: boolean } = {}): Promise<{ data: ApiDraft[] }> {
+  await loadItem(id);
+  const where: SQL[] = [eq(contentDrafts.productionItemId, id)];
+  if (opts.current_only) where.push(eq(contentDrafts.isCurrent, true));
+  const rows = await db
+    .select({ d: contentDrafts, u: { id: users.id, name: users.name, email: users.email } })
+    .from(contentDrafts)
+    .leftJoin(users, eq(users.id, contentDrafts.createdByUserId))
+    .where(and(...where))
+    .orderBy(desc(contentDrafts.version))
+    .limit(200);
+  return {
+    data: rows.map((r) => ({
+      id: r.d.id,
+      content_id: id,
+      version: r.d.version,
+      is_current: r.d.isCurrent,
+      author_kind: r.d.generatedBy.startsWith("user") ? "user" : "ai",
+      generated_by: r.d.generatedBy,
+      content: r.d.content as Record<string, unknown>,
+      created_by: r.u?.id ? r.u : null,
+      created_at: r.d.createdAt.toISOString(),
+    })),
+  };
+}
+
+/** htmlToPlainText keeps entities (the app renders them); the API returns real characters. */
+function decodeEntities(text: string): string {
+  return text
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&");
+}
+
+export interface ApiComment {
+  id: string;
+  content_id: string;
+  body_text: string;
+  body_html: string;
+  author: { id: string | null; name: string | null; email: string | null };
+  at_sec: number | null;
+  resolved_at: string | null;
+  edited_at: string | null;
+  created_at: string;
+}
+
+export async function listComments(id: string): Promise<{ data: ApiComment[] }> {
+  await loadItem(id);
+  const rows = await db
+    .select({ c: contentComments, u: { id: users.id, name: users.name, email: users.email } })
+    .from(contentComments)
+    .leftJoin(users, eq(users.id, contentComments.userId))
+    .where(eq(contentComments.contentItemId, id))
+    .orderBy(contentComments.createdAt)
+    .limit(500);
+  return {
+    data: rows.map((r) => ({
+      id: r.c.id,
+      content_id: id,
+      body_text: decodeEntities(htmlToPlainText(r.c.body)),
+      body_html: r.c.body,
+      author: r.u?.id
+        ? { id: r.u.id, name: r.u.name, email: r.u.email }
+        : { id: null, name: r.c.authorName, email: null },
+      at_sec: r.c.atSeconds,
+      resolved_at: r.c.resolvedAt ? r.c.resolvedAt.toISOString() : null,
+      edited_at: r.c.editedAt ? r.c.editedAt.toISOString() : null,
+      created_at: r.c.createdAt.toISOString(),
+    })),
+  };
 }
