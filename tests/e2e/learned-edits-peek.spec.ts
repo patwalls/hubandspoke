@@ -38,6 +38,7 @@ test("an AI draft shows which editor rewrites it learned from", async ({ page })
 
     // The post being drafted now, by a v16 run.
     const id = await create(`E2E new draft ${stamp}`);
+    await sql`UPDATE production_items SET status = 'Assigned' WHERE id = ${id}`;
     await sql`
       INSERT INTO content_drafts (production_item_id, version, is_current, content, field_schema_snapshot, generated_by)
       VALUES (${id}, 1, true, ${sql.json({ caption: "This dude Sam who built a $9K/mo tool says: charge more." })}, ${schema}, 'draft-algo:v1.7:claude-opus-5-5:v16')`;
