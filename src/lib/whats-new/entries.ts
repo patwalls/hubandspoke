@@ -29,6 +29,16 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-10-30-drafts-learn-cross-posts",
+    shippedAt: "2026-10-30T07:15:00Z",
+    kind: "feature",
+    title: "Your cross-post fixes teach the AI drafts too",
+    body:
+      "When you fix a copied caption on a cross-post before publishing (a name instead of \"He\", a line split in two), the next AI draft in that format now learns from it, the same way it learns from drafts you rewrite.",
+    href: "/[brand]/production",
+    screen: "drafts:learned-peek",
+  },
+  {
     id: "2026-10-30-learned-edits-peek",
     shippedAt: "2026-10-30T03:00:00Z",
     kind: "feature",

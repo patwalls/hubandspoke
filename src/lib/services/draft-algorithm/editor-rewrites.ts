@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import type { ContentDraftContent } from "@/lib/db/schema";
+import { isClipIdeaNotes } from "@/lib/source-caption";
 
 /**
  * v16 (2026-10-29): "drafts learn from what editors change".
@@ -13,6 +14,12 @@ import type { ContentDraftContent } from "@/lib/db/schema";
  * exemplars, never the delta. This module pulls the team's most recent
  * (AI draft → what the editor published) pairs for the same brand + format
  * so the agent can see what keeps getting changed and do it up front.
+ *
+ * v17 (2026-10-30): cross-posts count too. A cross-post / repost starts as
+ * the source's caption copied verbatim (`copy:source`), and editors fix it
+ * the same way they fix AI drafts (a name instead of "He", dropping "just",
+ * a long line split in two). Those (copied caption → published) pairs are
+ * the same house voice, so they teach the next AI draft as well.
  */
 
 /** How far back to look. Editorial standards drift (same reasoning as the
@@ -29,8 +36,14 @@ const TEXT_FIELDS = ["caption", "tweet", "post", "body", "description", "title"]
  *  where most rewrites land anyway. */
 const MAX_CHARS = 1200;
 
+/** Where the text the editor started from came from: an AI draft, or the
+ *  source post's caption copied into a cross-post / repost. */
+export type RewriteOrigin = "ai" | "copy";
+
 export interface EditorRewriteExample {
   field: string;
+  /** Optional for pairs built before v17 (all AI). */
+  origin?: RewriteOrigin;
   draft: string;
   edited: string;
   /** YYYY-MM-DD the editor's version was saved. */
@@ -71,6 +84,27 @@ export function pickRewrite(
   return null;
 }
 
+/**
+ * The text an editor started from, as a rewrite pair's origin — or null
+ * when that version can't teach anything. `draft-algo:*` is an AI draft;
+ * `copy:source*` is a copied source caption, except when the copy was the
+ * clip-idea notes block (before #111 cross-posts of clips seeded those), which
+ * editors replaced wholesale rather than edited.
+ */
+export function rewriteOrigin(
+  generatedBy: string | null | undefined,
+  content: ContentDraftContent | null | undefined,
+): RewriteOrigin | null {
+  if (generatedBy?.startsWith("draft-algo")) return "ai";
+  if (generatedBy?.startsWith("copy:source")) {
+    const notes = Object.values(content ?? {}).some(
+      (v) => typeof v === "string" && isClipIdeaNotes(v),
+    );
+    return notes ? null : "copy";
+  }
+  return null;
+}
+
 interface LoadEditorRewritesOpts {
   brand: string;
   format: string | null;
@@ -92,16 +126,18 @@ export async function loadEditorRewrites(
   const limit = opts.limit ?? 3;
 
   // For each published item of this brand+format whose CURRENT draft is a
-  // human edit, the newest draft-algo version before it. Over-fetch: some
-  // pairs drop out in pickRewrite (only the CTA changed).
+  // human edit, the newest AI draft or copied source caption before it.
+  // Over-fetch: some pairs drop out in pickRewrite (only the CTA changed)
+  // or rewriteOrigin (a copied notes block).
   const rows = (await db.execute(sql`
-    SELECT cur.content AS edited, ai.content AS draft, cur.updated_at AS edited_at
+    SELECT cur.content AS edited, ai.content AS draft, ai.generated_by AS draft_by,
+      cur.updated_at AS edited_at
     FROM content_drafts cur
     JOIN production_items p ON p.id = cur.production_item_id
     JOIN LATERAL (
-      SELECT d.content FROM content_drafts d
+      SELECT d.content, d.generated_by FROM content_drafts d
       WHERE d.production_item_id = cur.production_item_id
-        AND d.generated_by LIKE 'draft-algo%'
+        AND (d.generated_by LIKE 'draft-algo%' OR d.generated_by LIKE 'copy:source%')
         AND d.version < cur.version
       ORDER BY d.version DESC
       LIMIT 1
@@ -118,15 +154,19 @@ export async function loadEditorRewrites(
   `)) as unknown as Array<{
     edited: ContentDraftContent;
     draft: ContentDraftContent;
+    draft_by: string | null;
     edited_at: Date | string | null;
   }>;
 
   const out: EditorRewriteExample[] = [];
   for (const r of rows) {
+    const origin = rewriteOrigin(r.draft_by, r.draft);
+    if (!origin) continue;
     const pair = pickRewrite(r.draft, r.edited);
     if (!pair) continue;
     out.push({
       ...pair,
+      origin,
       editedAt: r.edited_at ? new Date(r.edited_at).toISOString().slice(0, 10) : null,
     });
     if (out.length >= limit) break;
@@ -144,12 +184,13 @@ export function renderEditorRewrites(
 ): string | null {
   if (examples.length === 0) return null;
   const header = `## WHAT EDITORS CHANGED
-Here are the ${examples.length} most recent ${format ? `"${format}" ` : ""}drafts an editor rewrote before publishing: your earlier draft, then what they published. Work out what they keep fixing (voice, openers, length, names, structure) and write it that way from the start. Don't copy their topics — only the kind of change.`;
+Here are the ${examples.length} most recent ${format ? `"${format}" ` : ""}posts an editor rewrote before publishing: what they started from (your earlier draft, or a caption copied from the source post for a cross-post), then what they published. Work out what they keep fixing (voice, openers, length, names, structure) and write it that way from the start. Don't copy their topics — only the kind of change.`;
   const body = examples
     .map((ex, i) => {
       const dateMeta = ex.editedAt ? ` (${ex.editedAt})` : "";
+      const start = ex.origin === "copy" ? "COPIED CAPTION" : "DRAFT";
       return `--- rewrite ${i + 1}${dateMeta}, field: ${ex.field} ---
-DRAFT:
+${start}:
 ${ex.draft}
 
 EDITOR PUBLISHED:

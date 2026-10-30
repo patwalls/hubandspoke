@@ -129,7 +129,9 @@ const MODEL = "claude-opus-5-5";
 // drafts were rewritten by an editor first, often the same fix each time.
 // The per-call payload now carries the latest (draft → published) pairs for
 // the brand + format (editor-rewrites.ts) so those fixes happen up front.
-export const PROMPT_VERSION = 16;
+// v17 (2026-10-30): those pairs include cross-posts — a source caption
+// copied verbatim, then fixed by an editor — labelled COPIED CAPTION.
+export const PROMPT_VERSION = 17;
 export const GENERATED_BY = `${MODEL}:v${PROMPT_VERSION}`;
 
 const SYSTEM_PROMPT = `You write platform-specific draft copy for a production team that turns long-form YouTube interviews into posts across X/Twitter, Instagram, LinkedIn, and YouTube.

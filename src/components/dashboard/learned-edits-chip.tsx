@@ -50,13 +50,15 @@ export function LearnedEditsChip({ itemId, brand }: { itemId: string; brand: str
       <PopoverContent align="start" className="w-[420px] max-h-[460px] overflow-y-auto gap-3 p-3">
         <p className="text-xs text-muted-foreground">
           This AI draft was written after reading how editors rewrote the
-          latest{data.format ? ` ${data.format}` : ""} drafts before publishing.
+          latest{data.format ? ` ${data.format}` : ""} drafts and cross-posts
+          before publishing.
           Your edits teach the next one.
         </p>
         {data.examples.map((ex, i) => (
           <div key={i} className="space-y-1.5 rounded-md border bg-muted/30 p-2">
             <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-              AI draft{ex.editedAt ? ` · edited ${ex.editedAt}` : ""}
+              {ex.origin === "copy" ? "Copied caption" : "AI draft"}
+              {ex.editedAt ? ` · edited ${ex.editedAt}` : ""}
             </div>
             <p className="line-clamp-4 whitespace-pre-line text-xs text-muted-foreground line-through decoration-muted-foreground/40">
               {ex.draft}
