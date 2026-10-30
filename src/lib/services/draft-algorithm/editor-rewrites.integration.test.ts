@@ -13,13 +13,14 @@ async function rewrittenItem(opts: {
   status?: string;
   draft: string;
   edited: string;
+  draftBy?: string;
 }) {
   const item = await createTestProductionItem({ format: opts.format, status: opts.status });
   await createTestContentDraft({
     productionItemId: item.id,
     version: 1,
     isCurrent: false,
-    generatedBy: AI,
+    generatedBy: opts.draftBy ?? AI,
     content: { caption: opts.draft },
   });
   await createTestContentDraft({
@@ -76,5 +77,30 @@ describe("loadEditorRewrites", () => {
     });
     const out = await loadEditorRewrites({ brand: item.brand, format: fmt.name, excludeId: "00000000-0000-0000-0000-000000000000" });
     expect(out).toEqual([]);
+  });
+
+  it("learns from a cross-post's copied caption the editor fixed, but not from a copied notes block", async () => {
+    const fmt = await createTestFormat();
+    const item = await rewrittenItem({
+      format: fmt.name,
+      draftBy: "copy:source",
+      draft: "He doesn't chase new ideas.",
+      edited: "Will doesn't chase new ideas.",
+    });
+    await rewrittenItem({
+      format: fmt.name,
+      draftBy: "copy:source",
+      draft: "Source: A talk\nTimestamp: 01:00–01:30 (30s)\n\nAngle: x",
+      edited: "Being relatable goes a long way in sales.",
+    });
+
+    const out = await loadEditorRewrites({
+      brand: item.brand,
+      format: fmt.name,
+      excludeId: "00000000-0000-0000-0000-000000000000",
+    });
+    expect(out).toEqual([
+      expect.objectContaining({ origin: "copy", draft: "He doesn't chase new ideas." }),
+    ]);
   });
 });

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { learnedFromEdits, pickRewrite, renderEditorRewrites } from "./editor-rewrites";
+import {
+  learnedFromEdits,
+  pickRewrite,
+  renderEditorRewrites,
+  rewriteOrigin,
+} from "./editor-rewrites";
 
 describe("pickRewrite", () => {
   it("returns the body field the editor rewrote", () => {
@@ -43,6 +48,22 @@ describe("pickRewrite", () => {
   });
 });
 
+describe("rewriteOrigin", () => {
+  it("an AI draft and a copied source caption both teach; a human save or CTA regen doesn't", () => {
+    expect(rewriteOrigin("draft-algo:v1.7:claude-opus-5-5:v16", { caption: "x" })).toBe("ai");
+    expect(rewriteOrigin("copy:source", { caption: "He built 4 apps." })).toBe("copy");
+    expect(rewriteOrigin("copy:source:reseed", { caption: "He built 4 apps." })).toBe("copy");
+    expect(rewriteOrigin("user:edit", { caption: "x" })).toBeNull();
+    expect(rewriteOrigin("regen-cta", { body: "x", cta: "y" })).toBeNull();
+    expect(rewriteOrigin(null, { caption: "x" })).toBeNull();
+  });
+
+  it("skips a copy that was the clip-idea notes block — editors replaced it, not edited it", () => {
+    const notes = "Source: How to Earn Respect in Sales\nTimestamp: 02:46–03:15 (29s)\n\nAngle: …";
+    expect(rewriteOrigin("copy:source", { caption: notes })).toBeNull();
+  });
+});
+
 describe("renderEditorRewrites", () => {
   it("returns null with no pairs (caller omits the block)", () => {
     expect(renderEditorRewrites([], "X Quotables")).toBeNull();
@@ -61,6 +82,18 @@ describe("renderEditorRewrites", () => {
     expect(out).toContain("--- rewrite 1 (2026-10-28), field: tweet ---");
     expect(out).toContain("DRAFT:\nRuben says:\n\nEDITOR PUBLISHED:\nThis dude Ruben says:");
     expect(out).toContain("--- rewrite 2, field: caption ---");
+  });
+
+  it("labels a cross-post's starting text as a copied caption, not the agent's draft", () => {
+    const out = renderEditorRewrites(
+      [
+        { field: "caption", origin: "copy", draft: "He doesn't chase ideas.", edited: "Will doesn't chase ideas.", editedAt: null },
+        { field: "caption", origin: "ai", draft: "d", edited: "e", editedAt: null },
+      ],
+      "Repackage Section w/ Hook",
+    )!;
+    expect(out).toContain("COPIED CAPTION:\nHe doesn't chase ideas.\n\nEDITOR PUBLISHED:\nWill doesn't chase ideas.");
+    expect(out).toContain("--- rewrite 2, field: caption ---\nDRAFT:\nd");
   });
 
   it("tells the agent to copy the kind of change, not the topics", () => {
