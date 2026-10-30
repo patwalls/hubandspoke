@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
+  addRuleToSkill,
+  EDITOR_RULES_HEADING,
   extractClipCount,
   extractClipIdeaSection,
   extractCrossPostRulesSection,
@@ -395,5 +397,30 @@ describe("injectLayoutPackInstruction — registry-backed pack reference", () =>
   it("builds a usable section from an empty Skill", () => {
     const out = injectLayoutPackInstruction(null, PACK)!;
     expect(extractDescriptSection(out)).toContain('named "Reels Layout"');
+  });
+});
+
+describe("addRuleToSkill", () => {
+  it("creates the house-rules section at the end of the Skill the first time", () => {
+    const out = addRuleToSkill("## Caption formatting\nShort lines.\n", "Open with the founder's name.");
+    expect(out).toBe(
+      `## Caption formatting\nShort lines.\n\n${EDITOR_RULES_HEADING}\n- Open with the founder's name.\n`,
+    );
+  });
+
+  it("starts an empty Skill with just the section", () => {
+    expect(addRuleToSkill("", "Cut the word just.")).toBe(`${EDITOR_RULES_HEADING}\n- Cut the word just.\n`);
+  });
+
+  it("adds later rules under the existing heading, before the next section", () => {
+    const skill = `## A\nx\n\n${EDITOR_RULES_HEADING}\n- One.\n\n## Clip Idea Generation\ny`;
+    expect(addRuleToSkill(skill, "Two.")).toBe(
+      `## A\nx\n\n${EDITOR_RULES_HEADING}\n- One.\n- Two.\n\n## Clip Idea Generation\ny`,
+    );
+  });
+
+  it("is a no-op when the rule is already in the Skill (double click)", () => {
+    const once = addRuleToSkill("Body", "Split the hook into two lines.");
+    expect(addRuleToSkill(once, "split the hook into two lines.")).toBe(once);
   });
 });

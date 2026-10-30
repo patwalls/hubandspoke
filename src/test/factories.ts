@@ -379,6 +379,8 @@ export interface CreateTestFormatOptions {
   ctaFixedUrl?: string | null;
   /** A stored design template — the design editor can draft this format. */
   designTemplate?: (typeof formats.$inferInsert)["designTemplate"];
+  /** Stored "what editors keep changing" rules (format-editor-rules job). */
+  editorRules?: (typeof formats.$inferInsert)["editorRules"];
   createdAt?: Date;
 }
 
@@ -405,6 +407,7 @@ export async function createTestFormat(
       ctaStrategy: opts.ctaStrategy ?? null,
       ctaFixedUrl: opts.ctaFixedUrl ?? null,
       designTemplate: opts.designTemplate ?? null,
+      editorRules: opts.editorRules ?? null,
       ...(opts.createdAt ? { createdAt: opts.createdAt } : {}),
     })
     .returning();

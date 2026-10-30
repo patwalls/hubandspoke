@@ -80,6 +80,36 @@ export function applyStarterTemplate(existing: string): string {
 }
 
 
+/** The Skill section accepted editor rules go under (format page →
+ *  "What editors keep changing" → Add to Skill). The draft agent reads the
+ *  whole Skill, so the rule applies to every draft from then on. */
+export const EDITOR_RULES_HEADING = "## House rules (from editor rewrites)";
+
+/**
+ * Append one rule as a bullet under EDITOR_RULES_HEADING, creating the
+ * section at the end of the Skill the first time. Unchanged when the rule
+ * is already in the Skill, so a double click can't add it twice.
+ */
+export function addRuleToSkill(existing: string, rule: string): string {
+  const bullet = `- ${rule.trim()}`;
+  if (existing.toLowerCase().includes(rule.trim().toLowerCase())) return existing;
+  const lines = existing.split("\n");
+  const at = lines.findIndex((l) => l.trim().toLowerCase() === EDITOR_RULES_HEADING.toLowerCase());
+  if (at === -1) {
+    const head = existing.trimEnd();
+    return `${head ? `${head}\n\n` : ""}${EDITOR_RULES_HEADING}\n${bullet}\n`;
+  }
+  // End of the section: the next heading of any level, else end of text.
+  let end = lines.findIndex((l, i) => i > at && /^\s*#{1,6}\s+\S/.test(l));
+  if (end === -1) end = lines.length;
+  // Insert after the section's last non-blank line.
+  let last = end - 1;
+  while (last > at && !lines[last].trim()) last--;
+  lines.splice(last + 1, 0, bullet);
+  return lines.join("\n");
+}
+
+
 const DESCRIPT_SECTION_HEADING = /^[ \t]*##{1,2}[ \t]+Descript Clip & Pack Info[ \t]*$/im;
 const CROSS_POST_RULES_HEADING = /^[ \t]*##{1,2}[ \t]+Cross Post Rules[ \t]*$/im;
 const CLIP_IDEA_SECTION_HEADING = /^[ \t]*##{1,2}[ \t]+Clip Idea Generation[ \t]*$/im;
