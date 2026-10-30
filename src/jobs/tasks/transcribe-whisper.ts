@@ -20,6 +20,11 @@ export interface TranscribeWhisperPayload {
    *  this is a single-element array; for podcast-length content it's the
    *  set of ~10-min splits that fit under Whisper's 25 MB cap. */
   audioChunks?: AudioChunk[];
+  /** Re-transcribe even when a text-only transcript (an Instagram/TikTok
+   *  caption scrape) already exists — the caller needs word timings. Only
+   *  a transcript that already has words counts as done. Carried through
+   *  to phase 2, which re-checks the same skip. */
+  needWords?: boolean;
 }
 
 /**
@@ -35,21 +40,23 @@ export interface TranscribeWhisperPayload {
  *      chunk-local timestamps, merge, upsert the `transcripts` row.
  *
  * Idempotent at the top: if a row with non-empty fullText exists for this
- * item, exit — don't burn another API call.
+ * item, exit — don't burn another API call. With `needWords`, only a row
+ * that already has word timings counts (a caption scrape has text, no words).
  */
 export const transcribeWhisperTask: Task = async (rawPayload, helpers) => {
   const payload = rawPayload as TranscribeWhisperPayload;
-  const { productionItemId } = payload;
+  const { productionItemId, needWords } = payload;
 
   const [existing] = await db
     .select({
       source: transcripts.source,
       fullText: transcripts.fullText,
+      words: transcripts.words,
     })
     .from(transcripts)
     .where(eq(transcripts.productionItemId, productionItemId))
     .limit(1);
-  if (existing && existing.fullText && existing.fullText.length > 0) {
+  if (transcriptIsDone(existing, needWords)) {
     helpers.logger.info(
       `transcribe-whisper skip item=${productionItemId} — transcript already exists (source=${existing.source})`,
     );
@@ -91,7 +98,7 @@ export const transcribeWhisperTask: Task = async (rawPayload, helpers) => {
     );
     await helpers.addJob(
       "transcribe-whisper",
-      { productionItemId, audioS3Key, audioS3Bucket, audioChunks: chunks },
+      { productionItemId, audioS3Key, audioS3Bucket, audioChunks: chunks, needWords },
       { runAt: new Date(Date.now() + 1000) },
     );
   } catch (err) {
@@ -110,6 +117,16 @@ export const transcribeWhisperTask: Task = async (rawPayload, helpers) => {
     throw err;
   }
 };
+
+/** Whether an existing transcript row means there's nothing to do. */
+export function transcriptIsDone(
+  existing: { fullText: string | null; words: unknown[] | null } | undefined,
+  needWords = false,
+): boolean {
+  if (!existing) return false;
+  if (needWords) return (existing.words?.length ?? 0) > 0;
+  return !!existing.fullText && existing.fullText.length > 0;
+}
 
 /**
  * Auto clip-idea generation for NEW Starter Story long-form (2026-06-09).

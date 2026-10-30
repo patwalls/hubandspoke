@@ -32,6 +32,11 @@ the same PR.
 3. Enqueue with `enqueue("<name>", { … })` from `@/jobs/enqueue`. The name
    and payload shape are type-checked.
 4. Document in `docs/automation.md` under the relevant entity lifecycle.
+5. A failure that means "a person has to do something" (no media, no
+   transcript) is not an incident: throw it with the `blocked:<reason>:`
+   prefix from `src/jobs/blocked.ts`, show the reason in the UI, and the
+   worker won't page Sentry. Before blocking, fix what the job can fix itself
+   (e.g. ask Whisper for word timings and re-poll, as `descript-derivative-create` does).
 
 ## Adding a new cron schedule
 

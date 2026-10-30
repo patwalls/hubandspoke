@@ -21,6 +21,7 @@ import {
 } from "@/lib/services/descript-derivative";
 import { getTranscriptForPrompt } from "@/lib/services/whisper-transcribe";
 import { enqueue } from "@/jobs/enqueue";
+import { BLOCKED_ERROR_PREFIX } from "@/jobs/blocked";
 
 export interface DescriptDerivativeCreatePayload {
   derivativeItemId: string;
@@ -39,11 +40,17 @@ export interface DescriptDerivativeCreatePayload {
   /** Set on re-enqueue after a cold-import to give the resolver time to
    *  stamp the pillar's `descript_seed_composition_id`. */
   attempt?: number;
+  /** Set once this job has asked Whisper for word timings (a side had only
+   *  a caption-scrape transcript). Later passes wait instead of asking again. */
+  wordsRequested?: boolean;
 }
 
 const DERIVATIVE_COPY_PATH = "derivative-copy";
 const COLD_IMPORT_DELAY_SECONDS = 60;
 const MAX_ATTEMPTS = 10;
+/** Poll interval while Whisper makes word timings. A Reel transcribes in
+ *  ~1 min, but it queues behind other media work. */
+const WORDS_WAIT_SECONDS = 180;
 
 /** Prefixes used to communicate structured "blocked, needs human action"
  *  states from this task up to the status route. The status route
@@ -54,7 +61,7 @@ const MAX_ATTEMPTS = 10;
  *  The error throws (rather than silently returning) so graphile-worker
  *  surfaces the failure in `graphile_worker.jobs.last_error` after the
  *  retry budget is exhausted, where the status route can find it. */
-export const BLOCKED_ERROR_PREFIX = "blocked:";
+export { BLOCKED_ERROR_PREFIX };
 export type BlockedReason =
   | "needs_pillar_media"
   | "needs_transcript"
@@ -77,7 +84,9 @@ function blockedError(reason: BlockedReason, detail: string): Error {
  *      Find the source's segment in the target's transcript via local
  *      `findAnchorInWords`, then send Underlord a pinned-timestamp cut
  *      prompt (`cutSegmentWithRules`). Strict-refuse with
- *      `blocked:needs_transcript:` if either transcript lacks `words[]`,
+ *      `blocked:needs_transcript:` if either transcript lacks `words[]` and
+ *      Whisper can't make them (no media, or it tried and failed); a side
+ *      with media gets a `transcribe-whisper { needWords }` + a re-poll,
  *      or `blocked:no_segment_match:` if the anchor isn't found.
  *
  *   3. Import target has media but no project → cold-import + re-enqueue.
@@ -278,24 +287,54 @@ export const descriptDerivativeCreateTask: Task = async (
       return;
     }
     const sourceTranscript = await getTranscriptForPrompt(source.id);
-    if (!sourceTranscript || sourceTranscript.words.length === 0) {
-      throw blockedError(
-        "needs_transcript",
-        `source ${source.id} has no Whisper transcript with word-level timestamps; can't anchor segment in pillar`,
-      );
-    }
     // When source-is-pillar, target.row.id === source.id — no need to
     // re-query, the transcript we just loaded IS the target's transcript.
     const targetTranscript =
       target.row.id === source.id
         ? sourceTranscript
         : await getTranscriptForPrompt(target.row.id);
-    if (!targetTranscript || targetTranscript.words.length === 0) {
+    // The anchor search needs word timings on both sides. A caption scrape
+    // (Instagram/TikTok) has text but no words; Whisper can make them from
+    // the archived media. Ask once, then come back (HUBANDSPOKE-3E).
+    const missingWords = [
+      { row: source, has: (sourceTranscript?.words.length ?? 0) > 0 },
+      { row: target.row, has: (targetTranscript?.words.length ?? 0) > 0 },
+    ]
+      .filter((side, i, all) => !side.has && all.findIndex((s) => s.row.id === side.row.id) === i)
+      .map((side) => side.row);
+    if (missingWords.length > 0) {
+      const transcribable = missingWords.every((row) => !!row.mediaS3Key);
+      if (transcribable && attempt + 1 < MAX_ATTEMPTS) {
+        if (!payload.wordsRequested) {
+          for (const row of missingWords) {
+            await enqueue(
+              "transcribe-whisper",
+              { productionItemId: row.id, needWords: true },
+              { jobKey: `transcribe-whisper:${row.id}` },
+            );
+          }
+        }
+        await helpers.addJob(
+          "descript-derivative-create",
+          { ...payload, attempt: attempt + 1, wordsRequested: true },
+          { runAt: new Date(Date.now() + WORDS_WAIT_SECONDS * 1000) },
+        );
+        helpers.logger.info(
+          `descript-derivative-create waiting on word timings: items=${missingWords.map((r) => r.id).join(",")} derivative=${derivative.id} (attempt=${attempt + 1})`,
+        );
+        return;
+      }
+      const row = missingWords[0];
       throw blockedError(
         "needs_transcript",
-        `import target ${target.row.id} (${target.kind}) has no Whisper transcript with word-level timestamps`,
+        `${row.id === source.id ? "source" : `import target (${target.kind})`} ${row.id} has no Whisper transcript with word-level timestamps; ${
+          row.mediaS3Key
+            ? "Whisper didn't produce them"
+            : "no archived media to transcribe"
+        }`,
       );
     }
+    if (!sourceTranscript || !targetTranscript) throw new Error("unreachable: transcripts checked above");
     const anchor = findAnchorInWords(
       sourceTranscript.fullText,
       targetTranscript.words,
