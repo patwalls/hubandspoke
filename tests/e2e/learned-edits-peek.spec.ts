@@ -73,6 +73,7 @@ test("an AI draft shows which editor rewrites it learned from", async ({ page })
       // The What's new handler's "Got it" can close the popover; reopen it for the shot.
       if (!(await page.getByText(/^Copied caption/).isVisible())) await chip.click();
       await expect(page.getByText(/^Copied caption/)).toBeVisible();
+      await page.waitForTimeout(400); // let the popover finish fading in
       await page.screenshot({ path: process.env.E2E_SHOT });
     }
   } finally {
