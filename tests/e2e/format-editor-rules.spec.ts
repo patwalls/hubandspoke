@@ -1,5 +1,16 @@
 import { test, expect } from "@playwright/test";
 import postgres from "postgres";
+import type { Page } from "@playwright/test";
+
+// A What's new card newer than the test user pops up over the page.
+async function dismissWhatsNew(page: Page) {
+  await page.waitForLoadState("networkidle");
+  const popup = page.getByRole("dialog", { name: "What's new" });
+  if (await popup.isVisible()) {
+    await popup.getByRole("button", { name: "Got it" }).click();
+    await expect(popup).toBeHidden();
+  }
+}
 
 // drafts-learn M4: the format page shows the weekly job's "What editors keep
 // changing" rules, and "Add to Skill" appends one under the house-rules
@@ -26,6 +37,7 @@ test("format page shows editor rules and adds one to the Skill", async ({ page }
       RETURNING id`;
 
     await page.goto(`/starter-story/formats/${format.id}`);
+    await dismissWhatsNew(page);
     const panel = page.getByTestId("format-editor-rules");
     await expect(panel).toBeVisible();
     await expect(panel).toContainText("What editors keep changing");
@@ -74,6 +86,7 @@ test("formats list flags formats with new editor rules", async ({ page }) => {
       VALUES (${`E2E No Rules ${stamp}`}, 'starter-story', 'plain')`;
 
     await page.goto(`/starter-story/formats`);
+    await dismissWhatsNew(page);
     const row = page.getByRole("row").filter({ hasText: name });
     const chip = row.getByTestId("format-editor-rules-chip");
     await expect(chip).toHaveText("2 edit rules");
