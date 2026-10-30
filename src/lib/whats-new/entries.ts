@@ -29,6 +29,16 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-10-30-api-and-mcp",
+    shippedAt: "2026-10-30T19:30:00Z",
+    kind: "feature",
+    title: "Hub & Spoke now has an API (and works with AI assistants)",
+    body:
+      "Pull any content, transcript or performance number into a spreadsheet, Zapier, a script, or Claude and Cursor. Open API & MCP from your account menu, create a key, and copy one of the ready-made snippets. Read-only, so nothing you connect can change anything here.",
+    href: "/developers",
+    screen: "developers",
+  },
+  {
     id: "2026-10-30-format-editor-rules",
     shippedAt: "2026-10-30T15:05:00Z",
     kind: "feature",

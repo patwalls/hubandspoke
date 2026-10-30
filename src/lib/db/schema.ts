@@ -1870,6 +1870,70 @@ export const users = pgTable(
 // product loop (`/build`) reads this through the read-only `loop_ro` role to
 // see what people actually use. Screen names come from `screenFor()` in
 // src/lib/usage/screen.ts — patterns, never raw ids or free text.
+/**
+ * Public API keys (Developers page, `/developers`). One row per key a user
+ * created; the key itself is shown once at creation and only its SHA-256 is
+ * stored here. A key acts AS its user: every `/api/v1/**` request resolves
+ * the key to `users` and inherits that person's role/brands, so deactivating
+ * a user or revoking a key cuts API access at the same moment.
+ *
+ *   `key_prefix`  — the first characters (`hs_live_a1b2c3d4`) for display.
+ *   `revoked_at`  — soft revoke; the row stays so request history keeps its owner.
+ *   `expires_at`  — optional hard expiry chosen at creation.
+ *   `request_count` / `last_used_at` — bumped on every authenticated request.
+ */
+export const apiKeys = pgTable(
+  "api_keys",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    keyPrefix: text("key_prefix").notNull(),
+    keyHash: text("key_hash").notNull().unique(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    requestCount: integer("request_count").notNull().default(0),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [index("idx_api_keys_user").on(table.userId)],
+);
+
+/**
+ * One row per public-API request (REST route or MCP tool call), written after
+ * the response is sent. Feeds the "Recent requests" table on `/developers`
+ * and lets an admin see who is pulling what. `route` is the OpenAPI path
+ * pattern (`/v1/content/{id}`), never the raw URL, so ids stay out of it;
+ * `tool` is the MCP tool name when `source = 'mcp'`.
+ */
+export const apiRequests = pgTable(
+  "api_requests",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    apiKeyId: uuid("api_key_id").references(() => apiKeys.id, {
+      onDelete: "set null",
+    }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    source: text("source", { enum: ["rest", "mcp"] }).notNull().default("rest"),
+    method: text("method").notNull(),
+    route: text("route").notNull(),
+    tool: text("tool"),
+    status: integer("status").notNull(),
+    durationMs: integer("duration_ms"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("idx_api_requests_key_created").on(table.apiKeyId, table.createdAt),
+    index("idx_api_requests_created").on(table.createdAt),
+  ],
+);
+
 export const usageEvents = pgTable(
   "usage_events",
   {

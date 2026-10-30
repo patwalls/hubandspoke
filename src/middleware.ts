@@ -28,7 +28,11 @@ export default auth((req) => {
   // Boot-time cache warmer (scripts/boot-web.sh). Auth is per-route via
   // Bearer CRON_SECRET — same contract as /api/cron/tick.
   const isWarmApi = pathname === "/api/warm";
-  if (isAuthApi || isCronApi || isWebhookApi || isInviteApi || isHealthApi || isWarmApi)
+  // Public API + MCP endpoint. Auth is per-route (Bearer API key, with the
+  // session cookie as a fallback for the docs page) in src/lib/api/auth.ts —
+  // gating on the session here would 401 every key-authenticated call.
+  const isPublicApi = pathname.startsWith("/api/v1");
+  if (isAuthApi || isCronApi || isWebhookApi || isInviteApi || isHealthApi || isWarmApi || isPublicApi)
     return NextResponse.next();
 
   const isPublic = PUBLIC_PAGES.has(pathname);

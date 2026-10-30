@@ -373,6 +373,12 @@ export function DashboardNav({
                 >
                   What&apos;s new
                 </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => router.push("/developers")}
+                  className="cursor-pointer"
+                >
+                  API &amp; MCP
+                </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   onClick={handleSignOut}

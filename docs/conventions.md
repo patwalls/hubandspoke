@@ -288,6 +288,48 @@ exports, uploads, enqueuing paid work (Descript, LLM drafts, renders).
    View controls (filters, tabs, links, export) stay enabled. Don't auto-fire
    writes or paid work on page load for users who can't edit.
 
+## Public API (`/api/v1`) and MCP
+
+The public API is a separate, versioned surface from the app's own `/api/**`
+routes: snake_case JSON, stable shapes, API-key auth, documented on
+`/developers`. Treat it like a product — a field, once shipped, stays.
+
+1. **Add an endpoint in four places, or don't add it.** A route file under
+   `src/app/api/v1/**` wrapped in `v1Handler("<openapi path>", …)` from
+   `src/lib/api/auth.ts`; its entry in `src/lib/api/registry.ts` (that single
+   list drives `/api/v1/openapi.json`, the reference + "Try it" on
+   `/developers`, and `registry.test.ts`, which fails when a documented path
+   has no route file); the read logic in `src/lib/api/*` (never inline SQL in
+   the route — the MCP tool has to call the same function); and, if a model
+   would use it, a tool in `src/lib/mcp/server.ts` plus its line in
+   `src/lib/mcp/tools.ts`.
+2. **Shapes live in `src/lib/api/serialize.ts`.** snake_case keys, ISO-8601
+   timestamps, `null` not missing. Nothing internal leaks: no Notion ids,
+   Descript/Canva/Typefully state, S3 keys, sync errors. Adding a field is
+   fine; renaming or removing one means a new version path (`/api/v2`).
+3. **Envelopes and errors are fixed.** Single: `{ data }`. List:
+   `{ data: [] }`; paginated list: `{ data, has_more, next_cursor }` with an
+   opaque keyset cursor (`encodeCursor` in `http.ts`). Errors: throw
+   `ApiError(type, message)` — `v1Handler` renders `{ error: { type, message } }`
+   with the right status and never leaks a stack. Validate the query string
+   with zod via `parseQuery`; a bad param is a 400 that names the param.
+4. **Read-only for now.** A key acts as its owner, and creators can read every
+   brand, so GET needs no brand gate. The first write endpoint must gate on
+   the principal's role + `brand_ids` exactly like `requireBrandEdit` does for
+   the app, and must only be reachable by keys (not the session fallback).
+5. **Route files export only handlers.** Next rejects other exports from
+   `route.ts`; shared helpers (`idFromPath`, query schemas) go in `src/lib/api`.
+6. **Every request is logged** (`api_requests`, via `after()` so it never
+   delays the response) with the OpenAPI path pattern, never the raw URL.
+   The MCP endpoint logs one row per tool call with `source='mcp'`.
+7. **Client-safe modules**: `registry.ts`, `constants.ts`,
+   `transcript-format.ts`, `mcp/tools.ts` and the snippet builders are imported
+   by the docs page — they must not import `@/lib/db` or the MCP SDK.
+8. **Tests**: pure logic unit-tested next to the module; auth and the read
+   model integration-tested with `createTestApiKey` / `createTestUser` from
+   `src/test/factories.ts`; `tests/e2e/developers.spec.ts` creates a key in
+   the UI and uses it against REST and MCP with no cookie.
+
 ## Removing a feature
 
 1. Mark the feature `Planned-removal` in `docs/features.md` with a short note

@@ -157,6 +157,17 @@ removing, or deprecating anything.
 
 ---
 
+## Public API & MCP
+
+| Feature | Status | Entry points | Backing tables | Notes |
+|---|---|---|---|---|
+| **Developers page** | Active | `/(dashboard)/developers` (user menu → "API & MCP"; Settings sidebar) | `api_keys`, `api_requests` | 2026-10-30. One page for everything API: create/revoke keys (shown once, SHA-256 stored), quickstart snippets (curl / JS / Python / Google Sheets Apps Script) that fill in a freshly created key, the endpoint reference generated from `src/lib/api/registry.ts` with a "Try it" panel that runs against real data using the dashboard session, MCP setup configs (Claude Code / Cursor / Claude Desktop via `mcp-remote`), and a "Recent requests" table. Admins get "Everyone's keys" / "Everyone" toggles. Usage marks: `developers:key-created`, `developers:try-it`. |
+| **REST API v1** | Active | `GET /api/v1/{me,brands,accounts,formats,content,content/[id],content/[id]/transcript,content/[id]/derivatives,content/[id]/media,content/[id]/clip-ideas}`, `GET /api/v1/openapi.json` (public) | reads `production_items`, `transcripts`, `production_item_media`, `clip_ideas`, `brands`, `accounts`, `formats` | Read-only. Auth: `Authorization: Bearer hs_live_…` (or `X-API-Key`), falling back to the session cookie so the docs page can call it. A key acts as its user; revoked/expired keys and deactivated owners 401 with a precise message. `src/middleware.ts` passes `/api/v1/**` through — auth is per-route in `src/lib/api/auth.ts` (`v1Handler`). Responses: `{ data }` / `{ data, has_more, next_cursor }` (keyset cursor on `coalesce(published_at, published_date, created_at), id`); errors `{ error: { type, message } }`. snake_case, ISO dates, hypermedia `links` + `app_url` per item. Transcript `format=json|text|vtt|srt`. Media returns 15-minute presigned URLs. Rate limit 120/min/key, in-memory (`src/lib/api/rate-limit.ts`), `X-RateLimit-*` headers. Every request is logged to `api_requests` via `after()` and bumps `api_keys.request_count` / `last_used_at`. Read model: `src/lib/api/content.ts`, `catalog.ts`; shapes: `serialize.ts`. |
+| **MCP server** | Active | `POST /api/v1/mcp` (Streamable HTTP, stateless, JSON responses) | same reads as REST | `src/lib/mcp/server.ts` on `@modelcontextprotocol/sdk`. Ten read-only tools (`whoami`, `list_brands`, `list_accounts`, `list_formats`, `search_content`, `get_content`, `get_transcript`, `list_derivatives`, `list_clip_ideas`, `get_media_links`) calling the same `src/lib/api/*` functions as REST. Same Bearer key. No sessions (`sessionIdGenerator: undefined`) so dyno restarts are harmless; GET/DELETE answer 405. Tool calls are logged to `api_requests` with `source='mcp'` + `tool`. No OAuth yet, so claude.ai web Connectors can't connect — Claude Desktop goes through `npx mcp-remote … --header`. |
+| **Key management API** | Active | `GET\|POST /api/api-keys` (`?all=1` admins), `DELETE /api/api-keys/[id]`, `GET /api/api-keys/requests` (`?all=1` admins) | `api_keys`, `api_requests` | Session-authed, personal-only (no brand gate). Max 20 active keys per user, optional expiry in days. Revoke is soft so request history keeps its owner. Lifecycle helpers in `src/lib/api/keys.ts`. |
+
+---
+
 ## Auth
 
 | Feature | Status | Entry points | Backing tables | Notes |

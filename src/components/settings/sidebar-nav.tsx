@@ -10,6 +10,7 @@ const SECTIONS = [
   { href: "/settings/links", label: "Short links" },
   { href: "/settings/sync-errors", label: "Sync errors" },
   { href: "/settings/jobs", label: "Jobs" },
+  { href: "/developers", label: "API & MCP" },
 ] as const;
 
 export function SettingsSidebarNav() {

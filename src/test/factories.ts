@@ -41,6 +41,8 @@ import { createDefaultDoc, type ClipEditDoc } from "@/lib/clip-editor/doc";
 import { DESIGN_DOC_VERSION, type DesignDoc } from "@/lib/design-editor/doc";
 import {
   accounts,
+  apiKeys,
+  apiRequests,
   brands,
   clipEdits,
   clipIdeas,
@@ -73,6 +75,7 @@ type CleanupTable =
   | "accounts"
   | "productionItemMedia"
   | "contentDrafts"
+  | "apiKeys"
   | "users";
 const created: Array<{ table: CleanupTable; id: string }> = [];
 
@@ -109,7 +112,11 @@ afterEach(async () => {
           .where(eq(productionItemMedia.id, row.id));
       } else if (row.table === "contentDrafts") {
         await db.delete(contentDrafts).where(eq(contentDrafts.id, row.id));
+      } else if (row.table === "apiKeys") {
+        await db.delete(apiRequests).where(eq(apiRequests.apiKeyId, row.id));
+        await db.delete(apiKeys).where(eq(apiKeys.id, row.id));
       } else if (row.table === "users") {
+        await db.delete(apiRequests).where(eq(apiRequests.userId, row.id));
         await db.delete(users).where(eq(users.id, row.id));
       }
     } catch (err) {
@@ -893,4 +900,32 @@ export async function createTestDesignFrame(opts: { productionItemId: string; se
     })
     .returning();
   return row;
+}
+
+/**
+ * Insert an `api_keys` row for a user and return the plaintext key alongside
+ * it (the only time it exists in clear). Auto-cleans the key and the
+ * `api_requests` rows it produced.
+ */
+export async function createTestApiKey(opts: {
+  userId: string;
+  name?: string;
+  revokedAt?: Date | null;
+  expiresAt?: Date | null;
+}): Promise<{ key: string; row: typeof apiKeys.$inferSelect }> {
+  const { generateApiKeySecret, hashApiKey, displayPrefix } = await import("@/lib/api/keys");
+  const key = generateApiKeySecret();
+  const [row] = await db
+    .insert(apiKeys)
+    .values({
+      userId: opts.userId,
+      name: opts.name ?? `test-key-${randomSuffix()}`,
+      keyPrefix: displayPrefix(key),
+      keyHash: hashApiKey(key),
+      revokedAt: opts.revokedAt ?? null,
+      expiresAt: opts.expiresAt ?? null,
+    })
+    .returning();
+  trackCleanup("apiKeys", row.id);
+  return { key, row };
 }
