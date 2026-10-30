@@ -158,3 +158,17 @@ ${ex.edited}`;
     .join("\n\n");
   return `${header}\n\n${body}`;
 }
+
+/** The draft prompt version that started reading editor rewrites. */
+export const LEARNS_FROM_EDITS_SINCE = 16;
+
+/**
+ * True when a content_drafts.generated_by value is a Draft Algorithm run
+ * that had the WHAT EDITORS CHANGED block — `draft-algo:<algo>:<model>:v<N>`
+ * with N ≥ 16. Copies, CTA regenerations and human saves never learned.
+ */
+export function learnedFromEdits(generatedBy: string | null | undefined): boolean {
+  if (!generatedBy?.startsWith("draft-algo")) return false;
+  const m = /:v(\d+)$/.exec(generatedBy);
+  return !!m && Number(m[1]) >= LEARNS_FROM_EDITS_SINCE;
+}

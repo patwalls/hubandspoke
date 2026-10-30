@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { pickRewrite, renderEditorRewrites } from "./editor-rewrites";
+import { learnedFromEdits, pickRewrite, renderEditorRewrites } from "./editor-rewrites";
 
 describe("pickRewrite", () => {
   it("returns the body field the editor rewrote", () => {
@@ -66,5 +66,19 @@ describe("renderEditorRewrites", () => {
   it("tells the agent to copy the kind of change, not the topics", () => {
     const out = renderEditorRewrites([{ field: "caption", draft: "a", edited: "b", editedAt: null }], null)!;
     expect(out).toContain("only the kind of change");
+  });
+});
+
+describe("learnedFromEdits", () => {
+  it("is true only for Draft Algorithm runs at v16 or later", () => {
+    expect(learnedFromEdits("draft-algo:v1.7:claude-opus-5-5:v16")).toBe(true);
+    expect(learnedFromEdits("draft-algo:v1.7:claude-opus-5-5:v17")).toBe(true);
+    expect(learnedFromEdits("draft-algo:v1.7:claude-opus-5-5:v15")).toBe(false);
+    // the algo version (v1.7) is not the prompt version
+    expect(learnedFromEdits("draft-algo:v1.7")).toBe(false);
+    expect(learnedFromEdits("regen-cta:v2:claude-opus-5-5")).toBe(false);
+    expect(learnedFromEdits("copy:source")).toBe(false);
+    expect(learnedFromEdits("user:edit")).toBe(false);
+    expect(learnedFromEdits(null)).toBe(false);
   });
 });
