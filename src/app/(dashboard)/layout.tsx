@@ -16,7 +16,7 @@ import { getBrands, getDefaultBrandSlug } from "@/lib/db/brands";
 import { editableBrandSlugs } from "@/lib/brand-access";
 import { BrandAccessProvider } from "@/components/brand-access";
 import { setSentrySessionUser } from "@/lib/sentry-user";
-import { hrefFor, unseenFor, visibleTo, type WhatsNewEntry } from "@/lib/whats-new";
+import { hrefFor, popupFor, visibleTo, type WhatsNewEntry } from "@/lib/whats-new";
 
 export default async function DashboardLayout({
   children,
@@ -88,7 +88,7 @@ export default async function DashboardLayout({
     href: hrefFor(e, defaultBrand),
   });
   const whatsNewUnseen = userRow
-    ? unseenFor(viewer, userRow.whatsNewSeenAt, userRow.createdAt).map(toCard)
+    ? popupFor(viewer, userRow.whatsNewSeenAt, userRow.createdAt).map(toCard)
     : [];
   const whatsNewAll = visibleTo(viewer).slice(0, 30).map(toCard);
 

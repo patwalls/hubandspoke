@@ -2,7 +2,7 @@ import type { FeatureFlag } from "@/lib/feature-flags";
 
 /**
  * The "What's new" cards, NEWEST FIRST. Each one pops up once for every user
- * it applies to, on their next page load after it ships (see `unseenFor`).
+ * it applies to, on their next page load after it ships (see `unseenFor`; at most one pop-up every 20 hours — `popupFor`).
  *
  * The product loop (`.claude/commands/build.md`) appends one per shipped
  * feature; humans can too. Rules for a card:
