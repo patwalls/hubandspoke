@@ -21,6 +21,7 @@ import { maybeAlertDescriptCreditsExhausted } from "@/lib/services/descript-cred
 import { maybeAlertYtArchiveBehind } from "@/lib/services/yt-archive-watch";
 import { maybeAlertClipIdeaDrought } from "@/lib/services/clip-idea-drought-watch";
 import { refreshEditorRules } from "@/lib/services/draft-algorithm/editor-rules";
+import { refreshWinNotes } from "@/lib/services/winners/why-it-won";
 import { platformSupportsLatest } from "@/lib/services/account-content-sync";
 import { getScorecardData } from "@/lib/services/scorecard";
 import { sendDailyScorecardEmail, sendMyWorkDigestEmail } from "@/lib/email";
@@ -559,6 +560,22 @@ export const formatEditorRulesTask: Task = async (_payload, helpers) => {
   const s = await refreshEditorRules({ log: (msg) => helpers.logger.warn(msg) });
   helpers.logger.info(
     `format-editor-rules ok formats=${s.formats} updated=${s.updated} skipped=${s.skipped} failed=${s.failed} (${Date.now() - start}ms)`,
+  );
+};
+
+/**
+ * Every 3 h at :40: write a one-line "why it won" note for each post on a
+ * brand dashboard's "Beat their usual" strip that has none yet (one Haiku
+ * call per new winner — at most 5 per brand, a handful a day once caught up).
+ * Writes `production_items.win_note` only. Idempotent — noted winners are
+ * skipped, so a rerun is free.
+ */
+export const winnerNotesTask: Task = async (_payload, helpers) => {
+  const start = Date.now();
+  helpers.logger.info("winner-notes start");
+  const s = await refreshWinNotes({ log: (msg) => helpers.logger.warn(msg) });
+  helpers.logger.info(
+    `winner-notes ok brands=${s.brands} winners=${s.winners} written=${s.written} skipped=${s.skipped} failed=${s.failed} (${Date.now() - start}ms)`,
   );
 };
 

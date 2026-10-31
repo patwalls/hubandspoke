@@ -42,6 +42,7 @@ CRON ENTRIES (src/jobs/crontab.ts, UTC)
   *:45       yt-archive-watch       → Sentry issue + email Pat + Sam when YouTube items sit unarchived >12h (home-machine cron down; email deduped 6h)
   15:30 UTC  clip-idea-drought-watch → Sentry warning + email Pat + Sam when a freshly-published, transcribed, sectioned video routes to a clippable format but produced 0 clip ideas (deduped per pillar+format, never repeats)
   14:00 UTC  format-editor-rules    → Haiku (~10 calls/week): per format with ≥ 4 draft → published rewrites in 60d and rules older than 6.5 days, write 3–5 "what editors keep changing" rules to formats.editor_rules (shown on the format page; people add them to the Skill)
+  */3h :40   winner-notes           → Haiku (one call per NEW winner, ≤ 5 per brand): for each post on a brand dashboard's "Beat their usual" strip with no note, write one "why it won" sentence (winner vs. the account's 5 posts nearest its median) to production_items.win_note
   (home Mac, hourly) yt-archive launchd cron → archive-yt-local.ts: yt-dlp → prod S3 + prod DB. NOT on the worker dyno — see home-machine/yt-archive/. Runs `--brands=auto` (2026-08-20): brand list resolved from the DB each run = every brand with an active YouTube account, so onboarding a brand in the settings UI is enough
   (home Mac, hourly) H&S OPS LOOP — `/go` (usually via `cx hubandspoke --go`) runs
     `.claude/commands/lap.md` on repeat through the shared fresh-context runner
@@ -1089,6 +1090,24 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
   (graphile retries; a rerun is idempotent).
 - **Never** writes `formats.instructions`: the format page's "Add to Skill"
   does that, one rule at a time, through the normal autosave.
+
+### `winner-notes` — "why it won" under the dashboard's winners
+- **Trigger:** cron `40 */3 * * *`. Added 2026-10-31 (build loop, whats-working M2).
+- **Files:** `src/jobs/tasks/scheduled.ts` (`winnerNotesTask`),
+  `src/lib/services/winners/why-it-won.ts` (`refreshWinNotes`, `buildWhyPrompt`,
+  `parseWhyNote`, `explainWinner`); winners come from `getRecentWinners`
+  (`src/lib/db/winners.ts`, the same rules as the strip).
+- **Inputs → outputs:** every enabled brand's strip winners (≤ 5). A winner that
+  already has `win_note`, or has no text / no baseline posts to compare, is
+  skipped (no LLM call). Otherwise one `claude-haiku-5-5` call with a pinned
+  `return_note` tool, reading the winner's format, title, hook, on-screen text and
+  caption next to the same account + post type's 5 baseline posts closest to
+  its median → one sentence ≤ 180 chars →
+  `production_items.win_note = {note, lift, generatedAt, model}`. Written once;
+  never refreshed, never on a page load.
+- **Failure:** fail-soft per winner — an API error or empty answer logs a warning
+  and leaves the note null, so the next run retries. The task only throws on a
+  DB error (graphile retries; idempotent).
 
 ### `clip-idea-drought-watch` — silent clip-idea generation failure alert
 - **Trigger:** cron `30 15 * * *` (daily at 15:30 UTC ≈ 11:30am ET). Added
