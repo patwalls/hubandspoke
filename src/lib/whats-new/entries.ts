@@ -29,6 +29,16 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-10-31-dashboard-winners",
+    shippedAt: "2026-10-31T03:45:00Z",
+    kind: "feature",
+    title: "See which posts beat their usual this week",
+    body:
+      "Your brand dashboard now lists the week's posts that did best against their own account's normal, so a small account's breakout isn't buried under a big account's average day. Each one shows how many times its usual views it got. Click one to open it.",
+    href: "/[brand]",
+    screen: "home:winners",
+  },
+  {
     id: "2026-10-30-api-writes-webhooks",
     shippedAt: "2026-10-30T22:30:00Z",
     kind: "feature",

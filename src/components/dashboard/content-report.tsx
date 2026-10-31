@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { format, subDays } from "date-fns";
 import { FilterPills, type FilterAccount } from "./filter-pills";
 import { MetricTiles } from "./metric-tiles";
+import { WinnersStrip } from "./winners-strip";
 import { PeriodTable, type GroupDim } from "./period-table";
 import type { ContentReportData } from "@/types";
 import { rehydrateReportAccounts, type HydratedContentReportData } from "@/lib/report-hydrate";
@@ -242,6 +243,8 @@ export function ContentReport({ brand }: { brand: string }) {
           </div>
         </div>
       ) : null}
+
+      <WinnersStrip brand={brand} />
 
       <FilterPills
         startDate={startDate}
