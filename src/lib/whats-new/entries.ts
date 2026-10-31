@@ -29,6 +29,15 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-10-31-production-run",
+    shippedAt: "2026-10-31T16:30:00Z",
+    kind: "feature",
+    title: "Go to the next post without going back to In Production",
+    body: "Open a post from In Production and the top of the page now shows where you are, like \"Review · 3 of 12\", with arrows (or the j and k keys) to open the next or previous post in that list. \"← In Production\" takes you back to the list with your filters.",
+    href: "/[brand]/production",
+    screen: "content:production-run",
+  },
+  {
     id: "2026-10-31-format-scoreboard",
     shippedAt: "2026-10-31T16:00:00Z",
     kind: "feature",

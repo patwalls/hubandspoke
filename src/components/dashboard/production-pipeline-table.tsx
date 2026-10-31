@@ -8,6 +8,7 @@ import { SourceBadge } from "@/components/ui/source-badge";
 import type { ProductionItem } from "@/types";
 import { postTypeDisplay } from "@/lib/platforms";
 import { trackUsage } from "@/lib/usage/track";
+import { rememberRun } from "@/lib/production/run";
 
 export type SortKey =
   | "editor"
@@ -31,6 +32,10 @@ interface ProductionPipelineTableProps {
    *  marked "Next" so the curator, back on the list after a Publish, sees
    *  which rows are the same post's remaining platforms. */
   nextIds?: ReadonlySet<string>;
+  /** This table's status group ("Review"): opening a row remembers the group
+   *  in on-screen order so the content page can step through it
+   *  (lib/production/run). */
+  group?: string;
 }
 
 function formatRelativeTime(iso: string | null | undefined): string {
@@ -203,6 +208,7 @@ export function ProductionPipelineTable({
   sortDir,
   onSort,
   nextIds,
+  group,
 }: ProductionPipelineTableProps) {
   const sortedItems = useMemo(() => {
     if (!sortKey) return items;
@@ -374,7 +380,16 @@ export function ProductionPipelineTable({
                       )}
                       <Link
                         href={`/${brand}/content/${item.id}`}
-                        onClick={isNext ? () => trackUsage("production:next-row:open", brand) : undefined}
+                        onClick={() => {
+                          if (isNext) trackUsage("production:next-row:open", brand);
+                          if (group) {
+                            rememberRun({
+                              brand,
+                              group,
+                              rows: sortedItems.map((r) => ({ id: r.id, title: r.title || "(Untitled)" })),
+                            });
+                          }
+                        }}
                         className="text-sm font-medium text-foreground hover:text-primary hover:underline transition-colors truncate min-w-0"
                         title={item.title || "(Untitled)"}
                       >

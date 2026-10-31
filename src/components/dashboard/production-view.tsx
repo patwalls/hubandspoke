@@ -519,6 +519,7 @@ export function ProductionView({ brand, currentUserId }: ProductionViewProps) {
                   sortDir={sortDir}
                   onSort={toggleSort}
                   nextIds={nextIds}
+                  group={status.name}
                 />
               </section>
             );

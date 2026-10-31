@@ -20,6 +20,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { BackLink } from "@/components/dashboard/back-link";
+import { ContentBackNav } from "@/components/dashboard/production-run-nav";
 import { BrandAvatar as BrandAvatarChip } from "@/components/ui/brand-avatar";
 
 // Brand shape passed down from the (server) layout — mirrors BrandListEntry
@@ -476,18 +477,15 @@ export function SectionTabs({
   // list page). Deep-link / new-tab / cleared-session fall through to
   // the hardcoded list path.
   const contentDetailMatch = pathname.match(
-    /^\/([^/]+)\/content\/[^/]+(?:\/|$)/,
+    /^\/([^/]+)\/content\/([^/]+)(?:\/|$)/,
   );
   const formatDetailMatch = !contentDetailMatch
     ? pathname.match(/^\/([^/]+)\/formats\/[^/]+(?:\/|$)/)
     : null;
+  // The content page's back link knows whether you came from the
+  // production list (ContentBackNav); formats keep the plain link.
   const backLink = contentDetailMatch
-    ? {
-        brand: contentDetailMatch[1],
-        listKey: "content",
-        fallbackHref: `/${contentDetailMatch[1]}/content`,
-        label: "← Content",
-      }
+    ? null
     : formatDetailMatch
       ? {
           brand: formatDetailMatch[1],
@@ -501,6 +499,9 @@ export function SectionTabs({
     // overflow-x-auto: on phones the tab row is wider than the viewport —
     // it must scroll within itself, not pan (or clip) the whole page.
     <div className="flex items-center gap-3 overflow-x-auto no-scrollbar">
+      {contentDetailMatch && (
+        <ContentBackNav brand={contentDetailMatch[1]} contentId={contentDetailMatch[2]} />
+      )}
       {backLink && (
         <BackLink
           brand={backLink.brand}
