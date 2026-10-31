@@ -41,6 +41,38 @@ describe("pickWinners", () => {
   });
 });
 
+describe("pickWinners on posts whose views are estimated from likes", () => {
+  const est = (id: string, likes: number, baselineLikesMedian: number): WinnerCandidate => ({
+    id,
+    title: id,
+    views: likes * 165, // what view-estimator stores for a Facebook post
+    baselineMedian: baselineLikesMedian * 165,
+    baselinePosts: 100,
+    metric: "likes",
+    likes,
+    baselineLikesMedian,
+  });
+
+  it("skips a post with a handful of likes even though its estimated views clear the views floor", () => {
+    // 11 likes → 1,815 "views", 5.5× an account that usually gets 2 likes.
+    expect(pickWinners([est("eleven-likes", 11, 2)])).toEqual([]);
+  });
+
+  it("judges a real hit on likes vs. usual likes", () => {
+    const [w] = pickWinners([est("viral", 2_939, 2)]);
+    expect(w.item.id).toBe("viral");
+    expect(w.lift).toBe(1469.5);
+  });
+
+  it("ranks likes-judged and views-judged posts on one lift scale", () => {
+    const winners = pickWinners([est("fb", 120, 40), c("tiktok", 16_000, 4_000)]);
+    expect(winners.map((x) => [x.item.id, x.lift])).toEqual([
+      ["tiktok", 4],
+      ["fb", 3],
+    ]);
+  });
+});
+
 describe("formatLift", () => {
   it("shows one decimal under 10 and whole numbers above", () => {
     expect(formatLift(2.4)).toBe("2.4×");
