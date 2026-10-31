@@ -24,8 +24,10 @@ import { refreshEditorRules } from "@/lib/services/draft-algorithm/editor-rules"
 import { refreshWinNotes } from "@/lib/services/winners/why-it-won";
 import { platformSupportsLatest } from "@/lib/services/account-content-sync";
 import { getScorecardData } from "@/lib/services/scorecard";
-import { sendDailyScorecardEmail, sendMyWorkDigestEmail } from "@/lib/email";
-import { loadMyWorkDigest } from "@/lib/my-work/queries";
+import { sendDailyScorecardEmail, sendMyWorkDigestEmail, sendWinnersEmail } from "@/lib/email";
+import { buildWinnersEmail } from "@/lib/winners/email";
+import { firstNameOf, loadWinnersEmailBrands } from "@/lib/services/winners/weekly-email";
+import { appBaseUrl, loadMyWorkDigest } from "@/lib/my-work/queries";
 import { isFeatureEnabled } from "@/lib/feature-flags";
 import { db } from "@/lib/db";
 import { accounts, productionItems, users } from "@/lib/db/schema";
@@ -436,6 +438,50 @@ export const myWorkDigestTask: Task = async (_payload, helpers) => {
   }
   helpers.logger.info(
     `my-work-digest sent=${sent} nothing-waiting=${empty} failed=${failed} of ${people.length} (${Date.now() - start}ms)`
+  );
+};
+
+/**
+ * Monday winners email ("what's working" M4). Reads every brand's winners and
+ * format scoreboard once, then one email per person with the `winnersEmail`
+ * flag (not deactivated). No winner anywhere → no email. Each send is wrapped
+ * and the task never throws after the reads, so a retry can't double-send.
+ */
+export const winnersEmailTask: Task = async (_payload, helpers) => {
+  const start = Date.now();
+  const people = (
+    await db
+      .select({ id: users.id, email: users.email, name: users.name })
+      .from(users)
+      .where(isNull(users.deactivatedAt))
+  ).filter((u) => isFeatureEnabled("winnersEmail", u));
+  if (people.length === 0) {
+    helpers.logger.info("winners-email no recipients");
+    return;
+  }
+  const brandData = await loadWinnersEmailBrands();
+  const baseUrl = appBaseUrl();
+  let sent = 0;
+  let failed = 0;
+  let empty = 0;
+  for (const p of people) {
+    try {
+      const email = buildWinnersEmail({ firstName: firstNameOf(p.name), brands: brandData, baseUrl });
+      if (!email) {
+        empty++;
+        continue;
+      }
+      await sendWinnersEmail({ to: p.email, ...email });
+      sent++;
+    } catch (err) {
+      failed++;
+      helpers.logger.error(
+        `winners-email failed for user=${p.id}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+  helpers.logger.info(
+    `winners-email sent=${sent} nothing-won=${empty} failed=${failed} of ${people.length} (${Date.now() - start}ms)`,
   );
 };
 

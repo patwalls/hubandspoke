@@ -51,16 +51,73 @@ export function measure(c: WinnerCandidate): { value: number; usual: number; flo
     : { value: c.views, usual: c.baselineMedian, floor: MIN_VIEWS };
 }
 
+/** Has the post's account + post type enough history to have a usual? */
+function judged(c: WinnerCandidate): boolean {
+  return c.baselinePosts >= MIN_BASELINE_POSTS && measure(c).usual > 0;
+}
+
+/** The post's lift if it beat its usual (the strip's rules), else null. */
+export function winLift(c: WinnerCandidate): number | null {
+  if (!judged(c)) return null;
+  const m = measure(c);
+  if (m.value < m.floor) return null;
+  const lift = Math.round((m.value / m.usual) * 10) / 10;
+  return lift >= MIN_LIFT ? lift : null;
+}
+
 export function pickWinners<T extends WinnerCandidate>(
   candidates: T[],
   { limit = 5 }: { limit?: number } = {},
 ): Winner<T>[] {
   return candidates
-    .map((c) => ({ c, m: measure(c) }))
-    .filter(({ c, m }) => c.baselinePosts >= MIN_BASELINE_POSTS && m.usual > 0 && m.value >= m.floor)
-    .map(({ c, m }) => ({ item: c, lift: Math.round((m.value / m.usual) * 10) / 10 }))
-    .filter((w) => w.lift >= MIN_LIFT)
+    .map((c) => ({ item: c, lift: winLift(c) }))
+    .filter((w): w is Winner<T> => w.lift !== null)
     .sort((a, b) => b.lift - a.lift || b.item.views - a.item.views)
+    .slice(0, limit);
+}
+
+/**
+ * Format scoreboard (milestone 3): which formats keep beating their usual.
+ * Every post that can be judged (its account has a usual) counts once for
+ * its format; a "win" is a post the strip would list. Ranked by hit rate,
+ * then wins, so one lucky post can't top a format that hits every week —
+ * and a format needs MIN_FORMAT_POSTS judged posts before it is ranked.
+ */
+export interface FormatScore {
+  format: string;
+  /** Posts judged against their usual. */
+  posts: number;
+  /** Of those, how many beat it by MIN_LIFT. */
+  wins: number;
+  /** wins ÷ posts, 0..1. */
+  hitRate: number;
+  /** The best lift among the wins; null with no wins. */
+  bestLift: number | null;
+}
+
+export const MIN_FORMAT_POSTS = 3;
+
+export function scoreFormats(
+  candidates: (WinnerCandidate & { format: string | null })[],
+  { limit = 6 }: { limit?: number } = {},
+): FormatScore[] {
+  const by = new Map<string, FormatScore>();
+  for (const c of candidates) {
+    const format = c.format?.trim();
+    if (!format || !judged(c)) continue;
+    const s = by.get(format) ?? { format, posts: 0, wins: 0, hitRate: 0, bestLift: null };
+    s.posts++;
+    const lift = winLift(c);
+    if (lift !== null) {
+      s.wins++;
+      s.bestLift = Math.max(s.bestLift ?? 0, lift);
+    }
+    by.set(format, s);
+  }
+  return [...by.values()]
+    .filter((s) => s.posts >= MIN_FORMAT_POSTS && s.wins > 0)
+    .map((s) => ({ ...s, hitRate: s.wins / s.posts }))
+    .sort((a, b) => b.hitRate - a.hitRate || b.wins - a.wins || a.format.localeCompare(b.format))
     .slice(0, limit);
 }
 

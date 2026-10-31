@@ -29,6 +29,15 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-10-31-format-scoreboard",
+    shippedAt: "2026-10-31T16:00:00Z",
+    kind: "feature",
+    title: "See which formats keep beating their usual",
+    body: "Under Beat their usual on your brand dashboard, a new list ranks the formats whose posts most often did better than their account's normal over the last 4 weeks, like \"3 of 4 posts\". A format that wins week after week now stands out from one lucky post.",
+    href: "/[brand]",
+    screen: "home:winners",
+  },
+  {
     id: "2026-10-31-why-it-won",
     shippedAt: "2026-10-31T12:00:00Z",
     kind: "feature",

@@ -100,3 +100,62 @@ test("posts with estimated views are judged on likes", async ({ page }) => {
     await sql.end();
   }
 });
+
+// Format scoreboard (M3): under the winners, the formats whose posts beat
+// their usual most often over 4 weeks — a format that hits 2 of 3 outranks
+// one lucky post in a format that usually doesn't. The Monday email (M4)
+// carries the same winners and formats (admin preview).
+test("the scoreboard ranks formats by how often they beat their usual, and the Monday email carries it", async ({
+  page,
+}) => {
+  const sql = postgres(process.env.DATABASE_URL!, { max: 1 });
+  const stamp = Date.now();
+  const steady = `E2E Steady ${stamp}`;
+  const lucky = `E2E Lucky ${stamp}`;
+  try {
+    const [account] = await sql<{ id: string }[]>`
+      INSERT INTO accounts (brand_id, platform, handle)
+      SELECT id, 'tiktok', ${`e2e_formats_${stamp}`} FROM brands WHERE slug = 'starter-story'
+      RETURNING id`;
+    const post = (title: string, format: string | null, views: number, daysAgo: number) => sql`
+      INSERT INTO production_items (title, brand, account_id, post_type, format, status, views, published_at)
+      VALUES (${title}, 'starter-story', ${account.id}, 'tiktok', ${format}, 'Published', ${views},
+              now() - make_interval(days => ${daysAgo}))`;
+    // Baseline before the 28-day window: usual ~1,000 views.
+    for (let i = 0; i < 6; i++) await post(`E2E fbase ${i} ${stamp}`, null, 950 + i * 20, 35 + i * 5);
+    // Steady: 2 of 3 posts at 3×. Lucky: 1 of 4 at 20×.
+    await post(`E2E s1 ${stamp}`, steady, 3_000, 3);
+    await post(`E2E s2 ${stamp}`, steady, 3_000, 10);
+    await post(`E2E s3 ${stamp}`, steady, 900, 15);
+    await post(`E2E l1 ${stamp}`, lucky, 20_000, 2);
+    for (let i = 2; i <= 4; i++) await post(`E2E l${i} ${stamp}`, lucky, 800, 5 + i * 3);
+
+    await page.goto("/starter-story");
+    const popup = page.getByRole("dialog", { name: "What's new" });
+    await popup.getByRole("button", { name: "Got it" }).click({ timeout: 15_000 }).catch(() => {});
+    await expect(popup).toBeHidden();
+
+    const board = page.getByTestId("format-scoreboard");
+    await expect(board.getByRole("heading", { name: "Formats that keep beating their usual" })).toBeVisible({
+      timeout: 15_000,
+    });
+    const rows = board.getByRole("listitem");
+    const steadyRow = rows.filter({ hasText: steady });
+    const luckyRow = rows.filter({ hasText: lucky });
+    await expect(steadyRow).toContainText("2 of 3 posts");
+    await expect(luckyRow).toContainText("1 of 4 posts");
+    const order = await rows.allTextContents();
+    expect(order.findIndex((t) => t.includes(steady))).toBeLessThan(order.findIndex((t) => t.includes(lucky)));
+    if (process.env.E2E_SHOT) await board.screenshot({ path: process.env.E2E_SHOT.replace(/\.png$/, "-formats.png") });
+
+    // The Monday email preview (the e2e user has the winnersEmail flag).
+    await page.goto("/api/winners-email/preview");
+    await expect(page.getByRole("link", { name: `E2E l1 ${stamp}` })).toBeVisible();
+    await expect(page.getByText(`${steady}: 2 of 3 posts (best 3.0×)`)).toBeVisible();
+    if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT.replace(/\.png$/, "-email.png"), fullPage: true });
+  } finally {
+    await sql`DELETE FROM production_items WHERE title LIKE ${`E2E % ${stamp}`}`;
+    await sql`DELETE FROM accounts WHERE handle = ${`e2e_formats_${stamp}`}`;
+    await sql.end();
+  }
+});

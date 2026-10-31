@@ -492,6 +492,11 @@ export async function sendMyWorkDigestEmail(opts: {
   return sendMail(opts);
 }
 
+/** The Monday winners email (`winners-email` task / admin preview `?send=me`). */
+export async function sendWinnersEmail(opts: { to: string; subject: string; text: string; html: string }) {
+  return sendMail(opts);
+}
+
 /**
  * A newsletter draft as a test send (the editor's "Send test to me"): the
  * exact HTML the HubSpot push sends, to the signed-in editor's own address

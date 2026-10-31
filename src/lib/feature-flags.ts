@@ -94,6 +94,15 @@ const FLAGS = {
     // Each person can still turn it off on /my-work/email.
     everyone: true,
   },
+  /**
+   * Monday winners email ("what's working" M4): last week's posts that beat
+   * their usual on every brand, with why, plus the formats that keep winning.
+   * Pat-only while it's dogfooded. See docs/automation.md → `winners-email`.
+   */
+  winnersEmail: {
+    emails: ["patrickswalls@gmail.com", "e2e@local.test"],
+    envVar: "FEATURE_WINNERS_EMAIL_EMAILS",
+  },
 } as const satisfies Record<string, FlagDefinition>;
 
 export type FeatureFlag = keyof typeof FLAGS;
