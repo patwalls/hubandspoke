@@ -11,11 +11,16 @@ test("user menu opens the What's new list", async ({ page }) => {
     await popup.getByRole("button", { name: "Got it" }).click();
     await expect(popup).toBeHidden();
   }
+  // Dismissed means quiet: the next page load doesn't pop it again (and new
+  // cards wait ~a day so they arrive together — popupFor, unit-tested).
+  await page.reload();
+  await page.waitForLoadState("networkidle");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
   await page.getByRole("button", { name: "Account menu" }).click();
   await page.getByRole("menuitem", { name: "What's new" }).click();
   const list = page.getByRole("dialog", { name: "What's new" });
   await expect(list).toBeVisible();
-  await expect(list.getByText("New improvements, every few days")).toBeVisible();
+  await expect(list.getByText("Everything that's shipped lately, newest first.")).toBeVisible();
   // Newest first: the card that shipped last is the first thing you see.
   const newest = list.getByText(WHATS_NEW[0].title, { exact: true });
   await newest.scrollIntoViewIfNeeded();

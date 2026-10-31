@@ -118,7 +118,7 @@ removing, or deprecating anything.
 
 | Feature | Status | Entry points | Backing tables | Notes |
 |---|---|---|---|---|
-| What's new pop-up | Active | `WhatsNewDialog` in the dashboard layout; user menu → What's new; `POST /api/whats-new/seen` | `users.whats_new_seen_at`; cards in `src/lib/whats-new/entries.ts` | Pops up once per user for cards shipped after they last dismissed it (or after their account was created). `audience` hides flagged / admin-only cards. The `/build` product loop adds a card per feature it ships. |
+| What's new pop-up | Active | `WhatsNewDialog` in the dashboard layout; user menu → What's new; `POST /api/whats-new/seen` | `users.whats_new_seen_at`; cards in `src/lib/whats-new/entries.ts` | Pops up once per user for cards shipped after they last dismissed it (or after their account was created), and at most once every 20 hours (`POPUP_COOLDOWN_HOURS`): cards shipped in between wait and pop up together on the next visit. `audience` hides flagged / admin-only cards. The `/build` product loop adds a card per feature it ships. |
 | Usage tracking | Active | `UsageTracker` (route views) + `trackUsage(mark)` (editor opens, What's new clicks); `POST /api/usage` | `usage_events` | Screen names are route patterns from `screenFor()` (`/[brand]/queue/clips?tab=ready&clip=[id]`) — never raw ids or search text. Readable by the loops' read-only `loop_ro` role, so the product loop builds from what people actually use. No retention job yet (rows are tiny; revisit past ~1M). |
 
 ---

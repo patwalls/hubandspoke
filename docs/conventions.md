@@ -495,6 +495,8 @@ It needs no secrets (Sentry source-map upload skips itself without
 - **Tell people.** Add a card at the TOP of `src/lib/whats-new/entries.ts` (newest first, unique
   `<YYYY-MM-DD>-<slug>` id, `shippedAt` = now in ISO). Plain words for editors, not engineers.
   A feature behind a flag or admin-only names it in `audience`, or people who can't use it get the pop-up.
+  The pop-up opens at most once every 20 hours (`popupFor`), so cards shipped the same day reach people
+  together — still, one card per thing people would notice; tweaks to a feature ship without one.
 - **Make it measurable.** Routes are tracked automatically (`UsageTracker`). Something that isn't a
   route — a modal, a panel, a button that matters — calls `trackUsage("<area>:<thing>")` from
   `src/lib/usage/track.ts` when it opens, and the card's `screen` names that mark or route pattern,

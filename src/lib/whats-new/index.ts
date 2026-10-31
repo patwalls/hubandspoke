@@ -40,6 +40,29 @@ export function unseenFor(
     .slice(0, MAX_POPUP);
 }
 
+/**
+ * Hours after a dismissal before the pop-up may open again. Cards that ship
+ * in between wait (still unseen) and pop up together on the next visit, so a
+ * day with several launches is one interruption, not one per card. The full
+ * list stays one click away in the user menu.
+ */
+export const POPUP_COOLDOWN_HOURS = 20;
+
+/**
+ * The cards to pop up on this page load: `unseenFor`, unless the viewer
+ * dismissed the pop-up less than `POPUP_COOLDOWN_HOURS` ago.
+ */
+export function popupFor(
+  viewer: WhatsNewViewer,
+  seenAt: Date | null,
+  createdAt: Date,
+  now: Date = new Date(),
+  entries: WhatsNewEntry[] = WHATS_NEW,
+): WhatsNewEntry[] {
+  if (seenAt && now.getTime() - seenAt.getTime() < POPUP_COOLDOWN_HOURS * 3_600_000) return [];
+  return unseenFor(viewer, seenAt, createdAt, entries);
+}
+
 /** Fill `[brand]` in a card's link with the viewer's brand. */
 export function hrefFor(entry: WhatsNewEntry, brand: string): string | undefined {
   return entry.href?.replace("[brand]", brand);
