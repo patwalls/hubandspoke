@@ -29,6 +29,15 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-10-31-winners-likes",
+    shippedAt: "2026-10-31T08:00:00Z",
+    kind: "fix",
+    title: "Beat their usual counts likes on Facebook, LinkedIn and Threads",
+    body: "Those platforms don't report views, so their posts on the dashboard's Beat their usual list are now compared on likes against the account's usual likes, and a post with only a few likes no longer makes the list.",
+    href: "/[brand]",
+    screen: "home:winners",
+  },
+  {
     id: "2026-10-31-dashboard-winners",
     shippedAt: "2026-10-31T03:45:00Z",
     kind: "feature",

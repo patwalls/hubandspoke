@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { pickWinners, type Winner, type WinnerCandidate } from "@/lib/winners/pick";
+import { shouldEstimate } from "@/lib/services/view-estimator";
 
 export interface WinnerRow extends WinnerCandidate {
   format: string | null;
@@ -23,6 +24,8 @@ export async function getRecentWinners(
     id: string;
     title: string | null;
     views: number;
+    likes: number | null;
+    post_type: string;
     format: string | null;
     platform: string | null;
     account_handle: string | null;
@@ -30,9 +33,10 @@ export async function getRecentWinners(
     published_at: string;
     baseline_median: string | number | null;
     baseline_posts: string | number;
+    baseline_likes_median: string | number | null;
   }>(sql`
     WITH recent AS (
-      SELECT p.id, p.title, p.views, p.format, p.thumbnail, p.published_at,
+      SELECT p.id, p.title, p.views, p.likes, p.format, p.thumbnail, p.published_at,
              p.account_id, coalesce(p.post_type, '') AS post_type,
              a.platform, a.handle AS account_handle
         FROM production_items p
@@ -45,6 +49,7 @@ export async function getRecentWinners(
     baseline AS (
       SELECT b.account_id, coalesce(b.post_type, '') AS post_type,
              percentile_cont(0.5) WITHIN GROUP (ORDER BY b.views) AS median,
+             percentile_cont(0.5) WITHIN GROUP (ORDER BY b.likes) AS likes_median,
              count(*) AS posts
         FROM production_items b
        WHERE b.account_id IN (SELECT account_id FROM recent)
@@ -54,9 +59,10 @@ export async function getRecentWinners(
          AND b.published_at <= now() - make_interval(days => ${days})
        GROUP BY 1, 2
     )
-    SELECT r.id, r.title, r.views, r.format, r.platform, r.account_handle,
+    SELECT r.id, r.title, r.views, r.likes, r.post_type, r.format, r.platform, r.account_handle,
            r.thumbnail, r.published_at,
-           bl.median AS baseline_median, coalesce(bl.posts, 0) AS baseline_posts
+           bl.median AS baseline_median, coalesce(bl.posts, 0) AS baseline_posts,
+           bl.likes_median AS baseline_likes_median
       FROM recent r
       LEFT JOIN baseline bl ON bl.account_id = r.account_id AND bl.post_type = r.post_type
   `);
@@ -67,6 +73,10 @@ export async function getRecentWinners(
     views: Number(r.views),
     baselineMedian: Number(r.baseline_median ?? 0),
     baselinePosts: Number(r.baseline_posts),
+    // Estimated-view post types are judged on likes (see pick.ts header).
+    metric: shouldEstimate(r.post_type) ? "likes" : "views",
+    likes: Number(r.likes ?? 0),
+    baselineLikesMedian: Number(r.baseline_likes_median ?? 0),
     format: r.format,
     platform: r.platform,
     accountHandle: r.account_handle,
