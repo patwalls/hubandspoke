@@ -82,6 +82,34 @@ want, and really anticipate based on data … and more research about what other
   daily; a change to an existing flow that could surprise people ships behind a `FLAGS` entry with
   `everyone: false` + Pat's email first and graduates the next lap if it held.
 
+## 🏠 Respect the app — every feature earns its place
+
+Pat, 2026-10-31, on the Beat-their-usual milestones landing as a tall open panel above the
+dashboard's own filters and charts: "you just threw it right at the top of the main dashboard like
+it's … a junk drawer … you shouldn't just be able to just throw stuff in it and clutter it and
+confuse people. You need to be more respectful of the app." Shipping often is wanted; clutter is
+not. Every lap:
+
+- **The screen must read as calm or calmer after your lap than before it.** You are a guest in a
+  screen people already use for its own job (the dashboard's job is the week's numbers and the
+  charts). Judge the WHOLE page in your screenshot, not the component in isolation.
+- **Prime real estate is not yours.** The top of a daily screen (the dashboard above its filters,
+  the top of a queue, a list header) gets at most ONE quiet line from a new feature — a collapsed
+  summary, a badge, a link — never an open panel. The full thing lives where it belongs: its own
+  tab/page, a drawer, a ⋯ menu, or expanded on click (remember the choice per browser).
+- **Milestones grow a feature in its own home, not on someone else's screen.** Milestone 3 of a
+  project is not another block stacked under milestone 2 on the dashboard. When a project's
+  surface outgrows one line, it gets its own page (and the old spot becomes a link to it).
+- **Not everything ships to the UI.** Methodology text, scoring rules, "last 90 days / ≥1.5×"
+  captions go in a tooltip or the feature's own page, not under every heading. No empty states on
+  someone else's screen — nothing to show means render nothing.
+- **Look before you add.** Before building, screenshot the screen you will touch as it is now
+  (same spec, before your change) and say in one line what it is for. If your feature does not
+  serve that job, it goes somewhere else.
+- **One card per thing people would notice.** A What's new card is an interruption; four in a day
+  about one feature is spam. Tweaks to a feature that already had its card ship without one; the
+  project's milestones share one card unless a milestone is a new place to go.
+
 ## 🔒 The notebook stays private
 
 This repo is **public**, and you read the team's activity from the prod DB and untrusted web pages
@@ -213,7 +241,9 @@ tokens, the patterns in `docs/conventions.md`). Rules:
    `ship run hubandspoke e2e --branch app-loop/<slug> -- <feature>.spec.ts /tmp/hs-build/<slug>.png`
    (MacBook Pro, throwaway Postgres built from your branch's schema, one admin login `e2e@local.test`
    and brand `starter-story`, no other data, no S3/LLM credentials). **Read the png** and look at it
-   critically: right place, real layout, nothing clipped, empty states sensible. The DB is empty —
+   critically: right place, real layout, nothing clipped, empty states sensible — and the whole
+   screen still calm (§🏠): take the shot of the full page in its default state, not just your
+   component opened up. If your feature is the loudest thing on a screen it doesn't own, redo it. The DB is empty —
    a spec that needs rows creates them through the UI or the app's own API in the test. Red or
    ugly → fix and rerun; can't get it right → revert and record why in scout.md.
    (`tests/e2e/whats-new.spec.ts` is a working example.)
@@ -226,8 +256,8 @@ tokens, the patterns in `docs/conventions.md`). Rules:
    `<YYYY-MM-DD>-<slug>`, `shippedAt` = now (ISO, UTC), `kind`, a title and one or two plain
    sentences an editor understands (what they can do now, where), `href` to try it (`/[brand]/…`
    is filled with their brand), `screen` = the usage screen or mark it lives on, and `audience`
-   when it is flag- or admin-only. A project milestone gets its own card; the last milestone's card
-   speaks for the whole project. Everyone it applies to sees it once on their next page load.
+   when it is flag- or admin-only. A project gets one card when people can first use it, and another only
+   when a milestone gives them a new place to go (§🏠); polish to an existing feature ships without one. Everyone it applies to sees it once on their next page load.
 2. Commit everything (feature + test + spec + card + docs; never the notebook — §🔒)
    on `app-loop/<slug>` with a message that says what people get, then
    `ship web hubandspoke --branch app-loop/<slug>`.

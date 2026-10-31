@@ -1,5 +1,12 @@
 import { test, expect } from "@playwright/test";
 import postgres from "postgres";
+import type { Page } from "@playwright/test";
+
+async function expandWinners(page: Page) {
+  const toggle = page.getByTestId("winners-strip").getByRole("button", { name: /Beat their usual this week/ });
+  await expect(toggle).toBeVisible({ timeout: 15_000 });
+  if ((await toggle.getAttribute("aria-expanded")) === "false") await toggle.click();
+}
 
 // The brand dashboard names the week's posts that beat their own account's
 // usual (views vs. that account + post type's 90-day median). A post at its
@@ -45,6 +52,15 @@ test("the dashboard shows posts that beat their usual this week", async ({ page 
     await expect(strip.getByRole("heading", { name: "Beat their usual this week" })).toBeVisible({
       timeout: 15_000,
     });
+    // Collapsed by default: one line naming the top post, no list, no scoreboard
+    // (the open list read as a junk drawer at the top of the dashboard).
+    const toggle = strip.getByRole("button", { name: /Beat their usual this week/ });
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(toggle).toContainText(winnerTitle);
+    await expect(strip.getByRole("link")).toHaveCount(0);
+    await expect(page.getByTestId("format-scoreboard")).toHaveCount(0);
+    if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT.replace(/\.png$/, "-collapsed.png") });
+    await toggle.click();
     const row = strip.getByRole("link", { name: new RegExp(winnerTitle) });
     await expect(row).toBeVisible();
     await expect(row).toContainText("8.4×");
@@ -54,6 +70,12 @@ test("the dashboard shows posts that beat their usual this week", async ({ page 
 
     await row.click();
     await expect(page).toHaveURL(/\/starter-story\/content\/[0-9a-f-]{36}/);
+
+    // Expanded is remembered on this browser.
+    await page.goto("/starter-story");
+    await expect(page.getByTestId("winners-strip").getByRole("link", { name: new RegExp(winnerTitle) })).toBeVisible({
+      timeout: 15_000,
+    });
   } finally {
     await sql`DELETE FROM production_items WHERE title LIKE ${`E2E % ${stamp}`}`;
     await sql`DELETE FROM accounts WHERE handle = ${`e2e_winners_${stamp}`}`;
@@ -88,6 +110,7 @@ test("posts with estimated views are judged on likes", async ({ page }) => {
     await expect(popup).toBeHidden();
 
     const strip = page.getByTestId("winners-strip");
+    await expandWinners(page);
     const row = strip.getByRole("link", { name: new RegExp(hitTitle) });
     await expect(row).toBeVisible({ timeout: 15_000 });
     await expect(row).toContainText("60×");
@@ -135,6 +158,7 @@ test("the scoreboard ranks formats by how often they beat their usual, and the M
     await popup.getByRole("button", { name: "Got it" }).click({ timeout: 15_000 }).catch(() => {});
     await expect(popup).toBeHidden();
 
+    await expandWinners(page);
     const board = page.getByTestId("format-scoreboard");
     await expect(board.getByRole("heading", { name: "Formats that keep beating their usual" })).toBeVisible({
       timeout: 15_000,
