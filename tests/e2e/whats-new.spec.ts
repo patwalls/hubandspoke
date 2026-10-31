@@ -20,7 +20,7 @@ test("user menu opens the What's new list", async ({ page }) => {
   await page.getByRole("menuitem", { name: "What's new" }).click();
   const list = page.getByRole("dialog", { name: "What's new" });
   await expect(list).toBeVisible();
-  await expect(list.getByText("New improvements, every few days")).toBeVisible();
+  await expect(list.getByText("Everything that's shipped lately, newest first.")).toBeVisible();
   // Newest first: the card that shipped last is the first thing you see.
   const newest = list.getByText(WHATS_NEW[0].title, { exact: true });
   await newest.scrollIntoViewIfNeeded();
