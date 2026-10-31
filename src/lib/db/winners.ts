@@ -1,6 +1,12 @@
 import { sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { pickWinners, type Winner, type WinnerCandidate } from "@/lib/winners/pick";
+import {
+  pickWinners,
+  scoreFormats,
+  type FormatScore,
+  type Winner,
+  type WinnerCandidate,
+} from "@/lib/winners/pick";
 import { shouldEstimate } from "@/lib/services/view-estimator";
 import type { WinNote } from "@/lib/db/schema";
 
@@ -24,6 +30,23 @@ export async function getRecentWinners(
   brand: string,
   { days = 7, limit = 5 }: { days?: number; limit?: number } = {},
 ): Promise<Winner<WinnerRow>[]> {
+  return pickWinners(await getCandidates(brand, days), { limit });
+}
+
+/**
+ * The format scoreboard (milestone 3): over the last `days` days, which
+ * formats' posts beat their account's usual most often. Same candidates and
+ * win rules as the strip; scoring in `scoreFormats`.
+ */
+export async function getFormatScoreboard(
+  brand: string,
+  { days = 28, limit = 6 }: { days?: number; limit?: number } = {},
+): Promise<FormatScore[]> {
+  return scoreFormats(await getCandidates(brand, days), { limit });
+}
+
+/** Every post from the last `days` days on `brand`, with its account's usual. */
+async function getCandidates(brand: string, days: number): Promise<WinnerRow[]> {
   const rows = await db.execute<{
     id: string;
     title: string | null;
@@ -90,5 +113,5 @@ export async function getRecentWinners(
     postType: r.post_type,
     winNote: r.win_note ?? null,
   }));
-  return pickWinners(candidates, { limit });
+  return candidates;
 }

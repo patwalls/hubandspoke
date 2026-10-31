@@ -43,6 +43,7 @@ CRON ENTRIES (src/jobs/crontab.ts, UTC)
   15:30 UTC  clip-idea-drought-watch → Sentry warning + email Pat + Sam when a freshly-published, transcribed, sectioned video routes to a clippable format but produced 0 clip ideas (deduped per pillar+format, never repeats)
   14:00 UTC  format-editor-rules    → Haiku (~10 calls/week): per format with ≥ 4 draft → published rewrites in 60d and rules older than 6.5 days, write 3–5 "what editors keep changing" rules to formats.editor_rules (shown on the format page; people add them to the Skill)
   */3h :40   winner-notes           → Haiku (one call per NEW winner, ≤ 5 per brand): for each post on a brand dashboard's "Beat their usual" strip with no note, write one "why it won" sentence (winner vs. the account's 5 posts nearest its median) to production_items.win_note
+  Mon 13:00  winners-email          → per `winnersEmail`-flagged user: last week's strip winners (with win_note) + top formats from the 4-week scoreboard, every enabled brand; no winners → no email
   (home Mac, hourly) yt-archive launchd cron → archive-yt-local.ts: yt-dlp → prod S3 + prod DB. NOT on the worker dyno — see home-machine/yt-archive/. Runs `--brands=auto` (2026-08-20): brand list resolved from the DB each run = every brand with an active YouTube account, so onboarding a brand in the settings UI is enough
   (home Mac, hourly) H&S OPS LOOP — `/go` (usually via `cx hubandspoke --go`) runs
     `.claude/commands/lap.md` on repeat through the shared fresh-context runner
@@ -1108,6 +1109,26 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
 - **Failure:** fail-soft per winner — an API error or empty answer logs a warning
   and leaves the note null, so the next run retries. The task only throws on a
   DB error (graphile retries; idempotent).
+
+### `winners-email` — Monday "beat their usual" email
+- **Trigger:** cron `0 13 * * 1` (13:00 UTC Mondays = 9am EDT / 8am EST), after
+  `winner-notes` has had the weekend to write notes. Added 2026-10-31
+  (whats-working M4, idea aaeca7).
+- **Files:** `src/jobs/tasks/scheduled.ts` (`winnersEmailTask`),
+  `src/lib/services/winners/weekly-email.ts` (`loadWinnersEmailBrands`),
+  `src/lib/winners/email.ts` (`buildWinnersEmail`, pure, unit-tested),
+  `src/lib/email.ts` (`sendWinnersEmail`).
+- **Inputs:** for every enabled brand, the dashboard strip's winners
+  (`getRecentWinners`, last 7 days, ≤ 5) and format scoreboard
+  (`getFormatScoreboard`, last 28 days; top 3 in the email). Read once, shared
+  across recipients. Recipients = users with the `winnersEmail` flag (Pat +
+  the e2e user while dogfooded) and `deactivated_at IS NULL`.
+- **Outputs:** one HubSpot SMTP send per recipient; no winner on any brand →
+  no email. No DB writes, no LLM calls (the "Why:" lines are `win_note`).
+- **Idempotency:** per-person sends are wrapped and the task never throws after
+  the reads, so graphile never retries into a double send.
+- **Preview:** `GET /api/winners-email/preview` (flag-gated) renders the exact
+  email; `?send=me` sends it to yourself.
 
 ### `clip-idea-drought-watch` — silent clip-idea generation failure alert
 - **Trigger:** cron `30 15 * * *` (daily at 15:30 UTC ≈ 11:30am ET). Added

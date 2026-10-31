@@ -25,6 +25,14 @@ interface WinnerJson {
   lift: number;
 }
 
+interface FormatScoreJson {
+  format: string;
+  posts: number;
+  wins: number;
+  hitRate: number;
+  bestLift: number | null;
+}
+
 const compact = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 });
 
 /**
@@ -34,6 +42,7 @@ const compact = new Intl.NumberFormat("en-US", { notation: "compact", maximumFra
  */
 export function WinnersStrip({ brand }: { brand: string }) {
   const [winners, setWinners] = useState<WinnerJson[] | null>(null);
+  const [formats, setFormats] = useState<FormatScoreJson[]>([]);
   const tracked = useRef(false);
 
   useEffect(() => {
@@ -41,8 +50,10 @@ export function WinnersStrip({ brand }: { brand: string }) {
     let cancelled = false;
     fetch(`/api/reports/winners?brand=${encodeURIComponent(brand)}`)
       .then((r) => (r.ok ? r.json() : { winners: [] }))
-      .then((j: { winners?: WinnerJson[] }) => {
-        if (!cancelled) setWinners(j.winners ?? []);
+      .then((j: { winners?: WinnerJson[]; formats?: FormatScoreJson[] }) => {
+        if (cancelled) return;
+        setWinners(j.winners ?? []);
+        setFormats(j.formats ?? []);
       })
       .catch(() => {
         if (!cancelled) setWinners([]);
@@ -123,6 +134,52 @@ export function WinnersStrip({ brand }: { brand: string }) {
           })}
         </ol>
       )}
+      {formats.length > 0 && <FormatScoreboard brand={brand} formats={formats} />}
     </section>
+  );
+}
+
+/**
+ * Format scoreboard (milestone 3): the formats whose posts beat their
+ * account's usual most often over the last 4 weeks — "what to make more of".
+ * Rules in `scoreFormats` (src/lib/winners/pick.ts).
+ */
+function FormatScoreboard({ brand, formats }: { brand: string; formats: FormatScoreJson[] }) {
+  return (
+    <div className="mt-4 border-t border-border pt-3" data-testid="format-scoreboard">
+      <div className="mb-2 flex items-baseline justify-between gap-3">
+        <h3 className="text-sm font-semibold">Formats that keep beating their usual</h3>
+        <p className="text-xs text-muted-foreground">Last 4 weeks · posts that beat 1.5×</p>
+      </div>
+      <ol className="space-y-1.5">
+        {formats.map((f) => (
+          <li key={f.format} className="flex items-center gap-3 text-sm">
+            <span className="min-w-0 flex-1 truncate">{f.format}</span>
+            <span
+              className="relative hidden h-1.5 w-24 shrink-0 overflow-hidden rounded-full bg-muted sm:block"
+              aria-hidden
+            >
+              <span
+                className="absolute inset-y-0 left-0 rounded-full bg-emerald-500"
+                style={{ width: `${Math.round(f.hitRate * 100)}%` }}
+              />
+            </span>
+            <span className="w-28 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+              <span className="font-semibold text-foreground">{f.wins}</span> of {f.posts} posts
+            </span>
+            <span className="hidden w-16 shrink-0 text-right text-xs tabular-nums text-muted-foreground md:inline">
+              {f.bestLift !== null ? `best ${formatLift(f.bestLift)}` : ""}
+            </span>
+          </li>
+        ))}
+      </ol>
+      <Link
+        href={`/${brand}/formats`}
+        onClick={() => trackUsage("home:formats-scoreboard:open", brand)}
+        className="mt-2 inline-block text-xs text-muted-foreground hover:text-foreground"
+      >
+        All formats →
+      </Link>
+    </div>
   );
 }
