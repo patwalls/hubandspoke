@@ -125,6 +125,7 @@ import { UserCombobox } from "./user-combobox";
 import { DerivativesAssignAll } from "./derivatives-assign-all";
 import { assignAllIds } from "@/lib/derivatives/assign-all";
 import { UpNext } from "@/components/my-work/up-next";
+import { RunNextCard } from "@/components/dashboard/production-run-nav";
 import { renderInstructions } from "@/lib/utils/markdown";
 import { recordVisit } from "@/lib/hooks/use-recent-items";
 import { startVisibleInterval } from "@/lib/visible-interval";
@@ -1344,6 +1345,8 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
   const [repurposeAnyOpen, setRepurposeAnyOpen] = useState(false);
   const [repurposeAnySearch, setRepurposeAnySearch] = useState("");
   const [status, setStatus] = useState("");
+  // My Work's next card is up (UpNext); the production run's card yields to it.
+  const [upNextCard, setUpNextCard] = useState(false);
   const [pillar, setPillar] = useState<PillarOption | null>(null);
   const [repostedFromOption, setRepostedFromOption] =
     useState<PillarOption | null>(null);
@@ -2631,7 +2634,10 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
 
             {/* The next post waiting on you, after the status: work through
              *  My Work without going back to a list. */}
-            <UpNext itemId={contentId} status={status} editorUserId={editorUserId} />
+            <UpNext itemId={contentId} status={status} editorUserId={editorUserId} onCard={setUpNextCard} />
+            {/* Opened from In Production: after a status change, the next
+             *  post in that status group (production-run M3). */}
+            <RunNextCard brand={brand} itemId={contentId} status={status} suppressed={upNextCard} />
 
             {/* Author handle moved into the state row below — it's
              *  read-only source-data, belongs with the other Pattern B

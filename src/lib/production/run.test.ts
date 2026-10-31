@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { decodeRun, encodeRun, isTypingTarget, positionInRun, RUN_MAX_AGE_MS, RUN_MAX_ROWS } from "./run";
+import { decodeRun, encodeRun, isTypingTarget, leaveRun, positionInRun, RUN_MAX_AGE_MS, RUN_MAX_ROWS, stepFocus } from "./run";
 
 const now = 1_800_000_000_000;
 const rows = [
@@ -70,5 +70,62 @@ describe("j / k only step when you're not typing", () => {
     expect(isTypingTarget({ tagName: "BODY" })).toBe(false);
     expect(isTypingTarget({ tagName: "BUTTON", getAttribute: () => null })).toBe(false);
     expect(isTypingTarget(null)).toBe(false);
+  });
+});
+
+describe("the open post is remembered so the list can land back on it (M2)", () => {
+  it("keeps `current` through storage, and drops junk", () => {
+    const run = decodeRun(raw, "starter-story", now)!;
+    const withCurrent = decodeRun(JSON.stringify({ ...run, current: "b" }), "starter-story", now);
+    expect(withCurrent?.current).toBe("b");
+    expect(decodeRun(JSON.stringify({ ...run, current: 7 }), "starter-story", now)?.current).toBeUndefined();
+  });
+});
+
+describe("a post leaving its status group (M3)", () => {
+  const run = decodeRun(raw, "starter-story", now);
+
+  it("offers the row after it and drops it from the run", () => {
+    const out = leaveRun(run, "a");
+    expect(out?.next).toEqual({ id: "b", title: "Second" });
+    expect(out?.run.rows.map((r) => r.id)).toEqual(["b", "c"]);
+    // The next page's stepper counts the smaller group: "1 of 2", not "2 of 3".
+    expect(positionInRun(out!.run, "b")).toMatchObject({ index: 1, total: 2 });
+  });
+
+  it("wraps to the top when the last row leaves", () => {
+    expect(leaveRun(run, "c")?.next).toEqual({ id: "a", title: "First" });
+  });
+
+  it("has nothing next when the group is now empty", () => {
+    const one = { brand: "b", group: "Review", rows: [{ id: "x", title: "X" }], at: now };
+    expect(leaveRun(one, "x")).toEqual({ run: { ...one, rows: [] }, next: null });
+  });
+
+  it("is null for a post opened from somewhere else", () => {
+    expect(leaveRun(run, "zzz")).toBeNull();
+    expect(leaveRun(null, "a")).toBeNull();
+  });
+});
+
+describe("the production list's keyboard cursor (M2)", () => {
+  it("starts on the first row with either key", () => {
+    expect(stepFocus(-1, "j", 5)).toBe(0);
+    expect(stepFocus(-1, "k", 5)).toBe(0);
+    expect(stepFocus(-1, "ArrowDown", 5)).toBe(0);
+  });
+
+  it("moves and stops at the ends", () => {
+    expect(stepFocus(0, "j", 3)).toBe(1);
+    expect(stepFocus(2, "j", 3)).toBe(2);
+    expect(stepFocus(1, "k", 3)).toBe(0);
+    expect(stepFocus(0, "ArrowUp", 3)).toBe(0);
+  });
+
+  it("ignores other keys and an empty list; a stale cursor past the end restarts", () => {
+    expect(stepFocus(1, "x", 3)).toBeNull();
+    expect(stepFocus(-1, "Enter", 3)).toBeNull();
+    expect(stepFocus(0, "j", 0)).toBeNull();
+    expect(stepFocus(9, "j", 3)).toBe(0);
   });
 });

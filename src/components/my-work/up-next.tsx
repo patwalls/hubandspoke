@@ -45,7 +45,19 @@ interface UpNextData {
  * still waiting — the curator went back to the production list to pick the
  * next platform even with the card up, because it only showed the title.
  */
-export function UpNext({ itemId, status, editorUserId }: { itemId: string; status: string; editorUserId: string }) {
+export function UpNext({
+  itemId,
+  status,
+  editorUserId,
+  onCard,
+}: {
+  itemId: string;
+  status: string;
+  editorUserId: string;
+  /** Told whether the next card is up, so the production run's card
+   *  (RunNextCard) stays out of its way. */
+  onCard?: (shown: boolean) => void;
+}) {
   const [data, setData] = useState<UpNextData | null>(null);
   // The post you just sent on (keyed, so the card never follows you to the next page).
   const [sentOnId, setSentOnId] = useState<string | null>(null);
@@ -80,6 +92,11 @@ export function UpNext({ itemId, status, editorUserId }: { itemId: string; statu
       cancelled = true;
     };
   }, [itemId, status, editorUserId]);
+
+  const cardUp = sentOn && !!data;
+  useEffect(() => {
+    onCard?.(cardUp);
+  }, [cardUp, onCard]);
 
   // Nothing else waiting: the card just says so, then gets out of the way.
   useEffect(() => {
