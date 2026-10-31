@@ -7,9 +7,8 @@ import postgres from "postgres";
 // returns to In Production instead of the Content tab.
 test("a post opened from In Production steps through its status group", async ({ page }) => {
   const sql = postgres(process.env.DATABASE_URL!, { max: 1 });
+  const tag = `E2E Run ${Date.now()}`;
   try {
-    const stamp = Date.now();
-    const tag = `E2E Run ${stamp}`;
     const ids: string[] = [];
     for (const n of [1, 2, 3]) {
       const res = await page.request.post("/api/production-items", {
@@ -67,6 +66,8 @@ test("a post opened from In Production steps through its status group", async ({
     await expect(page.getByRole("link", { name: "← Content" })).toBeVisible();
     await expect(page.getByTestId("production-run")).toHaveCount(0);
   } finally {
+    // Left in Review, they'd sit on other specs' My Work.
+    await sql`DELETE FROM production_items WHERE title LIKE ${tag + "%"}`;
     await sql.end();
   }
 });

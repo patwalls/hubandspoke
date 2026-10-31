@@ -29,6 +29,9 @@ export interface ProductionRun {
   group: string;
   rows: RunRow[];
   at: number;
+  /** The post last open on the content page: back on the list, its row has
+   *  the keyboard focus (M2). */
+  current?: string;
 }
 
 export interface RunPosition {
@@ -54,7 +57,8 @@ export function decodeRun(raw: string | null, brand: string, now: number): Produ
     const rows = v.rows.filter(
       (r): r is RunRow => !!r && typeof r.id === "string" && typeof r.title === "string",
     );
-    return { brand: v.brand, group: v.group, rows, at: v.at };
+    const current = typeof v.current === "string" ? v.current : undefined;
+    return { brand: v.brand, group: v.group, rows, at: v.at, ...(current ? { current } : {}) };
   } catch {
     return null;
   }
@@ -75,6 +79,38 @@ export function positionInRun(run: ProductionRun | null, currentId: string): Run
   };
 }
 
+/**
+ * The run after `id` left its status group (its status changed on the
+ * content page, M3): the row is dropped, and the one to offer next is the row
+ * after it, or the first row when it was the last. Null when the post isn't
+ * in the run (opened from elsewhere).
+ */
+export function leaveRun(
+  run: ProductionRun | null,
+  id: string,
+): { run: ProductionRun; next: RunRow | null } | null {
+  if (!run) return null;
+  const i = run.rows.findIndex((r) => r.id === id);
+  if (i < 0) return null;
+  const rows = run.rows.filter((r) => r.id !== id);
+  return { run: { ...run, rows }, next: rows[i] ?? rows[0] ?? null };
+}
+
+/**
+ * The list's keyboard cursor after a key (M2): j / ↓ down, k / ↑ up, clamped
+ * to the list. From no row (-1) either key lands on the first row. Null for
+ * any other key, or an empty list.
+ */
+export function stepFocus(index: number, key: string, count: number): number | null {
+  if (count <= 0) return null;
+  if (index < 0 || index >= count) {
+    return key === "j" || key === "ArrowDown" || key === "k" || key === "ArrowUp" ? 0 : null;
+  }
+  if (key === "j" || key === "ArrowDown") return Math.min(index + 1, count - 1);
+  if (key === "k" || key === "ArrowUp") return Math.max(index - 1, 0);
+  return null;
+}
+
 /** Is a keypress meant for a field (typing a caption) rather than the page? */
 export function isTypingTarget(el: { tagName?: string; isContentEditable?: boolean; getAttribute?: (n: string) => string | null } | null): boolean {
   if (!el) return false;
@@ -90,6 +126,16 @@ export function rememberRun(run: Omit<ProductionRun, "at">): void {
     window.sessionStorage.setItem(RUN_KEY, encodeRun(run, Date.now()));
   } catch {
     // Private mode / storage full: the content page just shows no stepper.
+  }
+}
+
+/** Rewrite the remembered run (a row left it, or the open post changed) without
+ *  restarting its 3-hour clock. */
+export function saveRun(run: ProductionRun): void {
+  try {
+    window.sessionStorage.setItem(RUN_KEY, JSON.stringify(run));
+  } catch {
+    // Same as rememberRun.
   }
 }
 

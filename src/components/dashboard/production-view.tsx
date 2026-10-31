@@ -17,6 +17,7 @@ import type { ProductionItem } from "@/types";
 import { useUrlState } from "@/lib/hooks/use-url-state";
 import { useRememberListUrl } from "@/lib/hooks/use-remember-list-url";
 import { readNextRows } from "@/lib/my-work/next-rows";
+import { ProductionListKeys, ProductionPeek } from "./production-peek";
 import { trackUsage } from "@/lib/usage/track";
 import {
   Popover,
@@ -147,6 +148,10 @@ export function ProductionView({ brand, currentUserId }: ProductionViewProps) {
   const { key: sortKey, dir: sortDir } = decodeSort(sortValue);
 
   useRememberListUrl({ brand, listKey: "production" });
+
+  // The row peek (production-run M4); the list keys move it.
+  const [peekId, setPeekId] = useState<string | null>(null);
+  const [focusedId, setFocusedId] = useState<string | null>(null);
 
   // Rows the content page's next card just offered (lib/my-work/next-rows).
   const [nextIds, setNextIds] = useState<ReadonlySet<string>>(() => new Set());
@@ -465,7 +470,19 @@ export function ProductionView({ brand, currentUserId }: ProductionViewProps) {
           options={SORT_OPTIONS}
           onChange={(v) => filters.set("sort", v)}
         />
+        <div className="ml-auto">
+          <ProductionListKeys
+            brand={brand}
+            ready={!loading}
+            focusedId={focusedId}
+            onFocus={setFocusedId}
+            peekId={peekId}
+            onPeek={setPeekId}
+          />
+        </div>
       </div>
+
+      {peekId && <ProductionPeek id={peekId} brand={brand} onClose={() => setPeekId(null)} />}
 
       {loading ? (
         <div className="flex items-center justify-center py-20">
@@ -498,7 +515,10 @@ export function ProductionView({ brand, currentUserId }: ProductionViewProps) {
             const statusItems = byStatus.get(status.name) ?? [];
             if (statusItems.length === 0) return null;
             return (
-              <section key={status.id} className="space-y-3">
+              // Keyed by name, not id: the fallback statuses render first and
+              // the brand's own (same names, real ids) replace them, which
+              // remounted every row mid-use (keyboard cursor, Next rows).
+              <section key={status.name} className="space-y-3">
                 <div className="flex items-center gap-2">
                   <span
                     className={cn(
@@ -520,6 +540,9 @@ export function ProductionView({ brand, currentUserId }: ProductionViewProps) {
                   onSort={toggleSort}
                   nextIds={nextIds}
                   group={status.name}
+                  onPeek={setPeekId}
+                  peekId={peekId}
+                  focusedId={focusedId}
                 />
               </section>
             );

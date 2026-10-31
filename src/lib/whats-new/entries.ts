@@ -29,6 +29,15 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-10-31-production-keys-peek",
+    shippedAt: "2026-10-31T18:30:00Z",
+    kind: "feature",
+    title: "Peek at a post and move through In Production from the keyboard",
+    body: "On In Production, press j and k to move down the list, Space to peek at a post (video, draft, latest comments) without opening it, and Enter to open it. When you change a post's status, a card offers the next one in that list, so you don't have to go back for it.",
+    href: "/[brand]/production",
+    screen: "production:peek",
+  },
+  {
     id: "2026-10-31-production-run",
     shippedAt: "2026-10-31T16:30:00Z",
     kind: "feature",

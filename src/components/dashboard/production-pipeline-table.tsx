@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { EyeIcon } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { AccountBadge } from "@/components/ui/account-badge";
@@ -36,6 +37,11 @@ interface ProductionPipelineTableProps {
    *  in on-screen order so the content page can step through it
    *  (lib/production/run). */
   group?: string;
+  /** Open the row peek (production-run M4); the peeked row is tinted. */
+  onPeek?: (id: string) => void;
+  peekId?: string | null;
+  /** The keyboard cursor's row (ProductionListKeys). */
+  focusedId?: string | null;
 }
 
 function formatRelativeTime(iso: string | null | undefined): string {
@@ -209,6 +215,9 @@ export function ProductionPipelineTable({
   onSort,
   nextIds,
   group,
+  onPeek,
+  peekId,
+  focusedId,
 }: ProductionPipelineTableProps) {
   const sortedItems = useMemo(() => {
     if (!sortKey) return items;
@@ -335,10 +344,15 @@ export function ProductionPipelineTable({
               return (
                 <tr
                   key={item.id}
+                  data-production-row={item.id}
+                  data-focused={focusedId === item.id ? "" : undefined}
                   data-testid={isNext ? "production-next-row" : undefined}
                   className={cn(
-                    "border-b border-border/50 hover:bg-accent/30 transition-colors",
+                    "group/row border-b border-border/50 hover:bg-accent/30 transition-colors scroll-mt-24",
                     isNext && "bg-primary/5 shadow-[inset_3px_0_0_var(--color-primary)]",
+                    // Keyboard cursor (ProductionListKeys) and the peeked row.
+                    "data-[focused]:bg-accent/60 data-[focused]:shadow-[inset_3px_0_0_var(--color-foreground)]",
+                    peekId === item.id && "bg-accent/60",
                   )}
                 >
                   <td className="px-3 py-2">
@@ -380,6 +394,7 @@ export function ProductionPipelineTable({
                       )}
                       <Link
                         href={`/${brand}/content/${item.id}`}
+                        data-row-open
                         onClick={() => {
                           if (isNext) trackUsage("production:next-row:open", brand);
                           if (group) {
@@ -406,6 +421,20 @@ export function ProductionPipelineTable({
                         >
                           ↗
                         </a>
+                      )}
+                      {onPeek && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            trackUsage("production:peek", brand);
+                            onPeek(item.id);
+                          }}
+                          aria-label="Peek"
+                          title="Peek without opening (Space)"
+                          className="ml-auto shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/row:opacity-100 group-data-[focused]/row:opacity-100"
+                        >
+                          <EyeIcon className="size-3.5" />
+                        </button>
                       )}
                     </div>
                   </td>
