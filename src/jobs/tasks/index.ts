@@ -103,6 +103,7 @@ import {
   ytArchiveWatchTask,
   clipIdeaDroughtWatchTask,
   formatEditorRulesTask,
+  winnerNotesTask,
 } from "./scheduled";
 import { thresholdMonitorSweepTask } from "./threshold-monitor-sweep";
 import {
@@ -215,6 +216,7 @@ export interface TaskPayloads {
   "yt-archive-watch": Record<string, never>;
   "clip-idea-drought-watch": Record<string, never>;
   "format-editor-rules": Record<string, never>;
+  "winner-notes": Record<string, never>;
   "worker-heartbeat": Record<string, never>;
   "webhook-deliver": WebhookDeliverPayload;
   "webhook-dispatch-sweep": Record<string, never>;
@@ -296,6 +298,7 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "yt-archive-watch": ytArchiveWatchTask,
   "clip-idea-drought-watch": clipIdeaDroughtWatchTask,
   "format-editor-rules": formatEditorRulesTask,
+  "winner-notes": winnerNotesTask,
   "worker-heartbeat": workerHeartbeatTask,
   "webhook-deliver": webhookDeliverTask,
   "webhook-dispatch-sweep": webhookDispatchSweepTask,

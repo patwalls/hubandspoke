@@ -464,6 +464,10 @@ export const productionItems = pgTable(
     // these for up to 14 days. The existing schedule-reconcile-sweep skips
     // these items entirely.
     scheduledNoDate: boolean("scheduled_no_date").default(false),
+    // whats-working M2: one line on why this post beat its account's usual,
+    // written once by the `winner-notes` cron when it first makes the
+    // dashboard's "Beat their usual" strip. See src/lib/services/winners/why-it-won.ts.
+    winNote: jsonb("win_note").$type<WinNote>(),
   },
   (table) => [
     index("idx_production_items_published_date").on(table.publishedDate),
@@ -1322,6 +1326,15 @@ export const descriptLayoutPacks = pgTable("descript_layout_packs", {
     .defaultNow()
     .notNull(),
 });
+
+export interface WinNote {
+  /** One sentence: what this post did differently from the account's usual posts. */
+  note: string;
+  /** The lift (×) it had when the note was written. */
+  lift: number;
+  generatedAt: string;
+  model: string;
+}
 
 export interface FormatEditorRules {
   rules: string[];

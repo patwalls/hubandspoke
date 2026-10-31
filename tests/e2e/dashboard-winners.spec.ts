@@ -3,7 +3,8 @@ import postgres from "postgres";
 
 // The brand dashboard names the week's posts that beat their own account's
 // usual (views vs. that account + post type's 90-day median). A post at its
-// usual stays off the list; the winner opens its content page.
+// usual stays off the list; a winner shows its "why it won" note; the winner
+// opens its content page.
 test("the dashboard shows posts that beat their usual this week", async ({ page }) => {
   const sql = postgres(process.env.DATABASE_URL!, { max: 1 });
   const stamp = Date.now();
@@ -21,12 +22,19 @@ test("the dashboard shows posts that beat their usual this week", async ({ page 
     }
     const winnerTitle = `E2E winner ${stamp}`;
     const usualTitle = `E2E usual ${stamp}`;
+    // Written by the winner-notes cron on prod (Haiku); the e2e box has no LLM key.
+    const winNote = {
+      note: "Opens on a dollar figure instead of the founder's name, unlike the usual posts.",
+      lift: 8.4,
+      generatedAt: new Date().toISOString(),
+      model: "e2e",
+    };
     await sql`
-      INSERT INTO production_items (title, brand, account_id, post_type, format, status, views, published_at)
+      INSERT INTO production_items (title, brand, account_id, post_type, format, status, views, published_at, win_note)
       VALUES (${winnerTitle}, 'starter-story', ${account.id}, 'tiktok', 'Repackage Section w/ Hook', 'Published',
-              8400, now() - interval '2 days'),
+              8400, now() - interval '2 days', ${sql.json(winNote)}),
              (${usualTitle}, 'starter-story', ${account.id}, 'tiktok', NULL, 'Published',
-              1100, now() - interval '1 day')`;
+              1100, now() - interval '1 day', NULL)`;
 
     await page.goto("/starter-story");
     const popup = page.getByRole("dialog", { name: "What's new" });
@@ -40,6 +48,7 @@ test("the dashboard shows posts that beat their usual this week", async ({ page 
     const row = strip.getByRole("link", { name: new RegExp(winnerTitle) });
     await expect(row).toBeVisible();
     await expect(row).toContainText("8.4×");
+    await expect(row.getByTestId("win-note")).toHaveText(`Why: ${winNote.note}`);
     await expect(strip.getByText(usualTitle)).toHaveCount(0);
     if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT });
 
@@ -84,7 +93,7 @@ test("posts with estimated views are judged on likes", async ({ page }) => {
     await expect(row).toContainText("60×");
     await expect(row).toContainText("120 likes");
     await expect(strip.getByText(smallTitle)).toHaveCount(0);
-    if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT });
+    // No screenshot here: the first test's shot (with a "why it won" note) is the one to look at.
   } finally {
     await sql`DELETE FROM production_items WHERE title LIKE ${`E2E % ${stamp}`}`;
     await sql`DELETE FROM accounts WHERE handle = ${`e2e_winners_fb_${stamp}`}`;

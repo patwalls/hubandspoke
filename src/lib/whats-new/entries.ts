@@ -29,6 +29,15 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-10-31-why-it-won",
+    shippedAt: "2026-10-31T12:00:00Z",
+    kind: "feature",
+    title: "See why a post beat its usual",
+    body: "Each post on the dashboard's Beat their usual list now has a one-line note on what it did differently from that account's usual posts, like its hook, on-screen text or format. New winners get their note within a few hours.",
+    href: "/[brand]",
+    screen: "home:winners",
+  },
+  {
     id: "2026-10-31-winners-likes",
     shippedAt: "2026-10-31T08:00:00Z",
     kind: "fix",

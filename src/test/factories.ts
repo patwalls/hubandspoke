@@ -493,6 +493,8 @@ export async function createTestFormatTriggerSource(opts: {
 export interface CreateTestProductionItemOptions {
   /** e.g. "sync:account-content" for a row the account sync discovered. */
   createdVia?: string | null;
+  /** "Why it won" note (whats-working M2). */
+  winNote?: typeof productionItems.$inferInsert["winNote"];
   brand?: string;
   title?: string;
   status?: string;
@@ -607,6 +609,7 @@ export async function createTestProductionItem(
       youtubeDownloadAttempts: opts.youtubeDownloadAttempts ?? 0,
       deletedAt: opts.deletedAt ?? null,
       createdVia: opts.createdVia ?? null,
+      winNote: opts.winNote ?? null,
     })
     .returning();
   trackCleanup("productionItems", row.id);

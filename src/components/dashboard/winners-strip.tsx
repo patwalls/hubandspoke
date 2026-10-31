@@ -20,6 +20,7 @@ interface WinnerJson {
     accountHandle: string | null;
     thumbnail: string | null;
     publishedAt: string;
+    winNote?: { note: string } | null;
   };
   lift: number;
 }
@@ -95,7 +96,18 @@ export function WinnersStrip({ brand }: { brand: string }) {
                     {formatLift(w.lift)}
                   </span>
                   {w.item.platform && <PlatformIcon platform={w.item.platform} size={14} />}
-                  <span className="min-w-0 flex-1 truncate">{w.item.title || "Untitled"}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate">{w.item.title || "Untitled"}</span>
+                    {w.item.winNote?.note && (
+                      <span
+                        className="line-clamp-2 text-xs text-muted-foreground"
+                        title={w.item.winNote.note}
+                        data-testid="win-note"
+                      >
+                        Why: {w.item.winNote.note}
+                      </span>
+                    )}
+                  </span>
                   {w.item.format && (
                     <span className="hidden shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground sm:inline">
                       {w.item.format}

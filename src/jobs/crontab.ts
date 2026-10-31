@@ -63,4 +63,5 @@ export const CRONTAB = `
 20 * * * * newsletter-send-sweep
 30 15 * * * clip-idea-drought-watch
 0 14 * * * format-editor-rules
+40 */3 * * * winner-notes
 `.trim();

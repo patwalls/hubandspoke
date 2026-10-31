@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { pickWinners, type Winner, type WinnerCandidate } from "@/lib/winners/pick";
 import { shouldEstimate } from "@/lib/services/view-estimator";
+import type { WinNote } from "@/lib/db/schema";
 
 export interface WinnerRow extends WinnerCandidate {
   format: string | null;
@@ -9,6 +10,9 @@ export interface WinnerRow extends WinnerCandidate {
   accountHandle: string | null;
   thumbnail: string | null;
   publishedAt: string;
+  postType: string;
+  /** "Why it won" — written by the winner-notes cron; null until then. */
+  winNote: WinNote | null;
 }
 
 /**
@@ -31,12 +35,13 @@ export async function getRecentWinners(
     account_handle: string | null;
     thumbnail: string | null;
     published_at: string;
+    win_note: WinNote | null;
     baseline_median: string | number | null;
     baseline_posts: string | number;
     baseline_likes_median: string | number | null;
   }>(sql`
     WITH recent AS (
-      SELECT p.id, p.title, p.views, p.likes, p.format, p.thumbnail, p.published_at,
+      SELECT p.id, p.title, p.views, p.likes, p.format, p.thumbnail, p.published_at, p.win_note,
              p.account_id, coalesce(p.post_type, '') AS post_type,
              a.platform, a.handle AS account_handle
         FROM production_items p
@@ -60,7 +65,7 @@ export async function getRecentWinners(
        GROUP BY 1, 2
     )
     SELECT r.id, r.title, r.views, r.likes, r.post_type, r.format, r.platform, r.account_handle,
-           r.thumbnail, r.published_at,
+           r.thumbnail, r.published_at, r.win_note,
            bl.median AS baseline_median, coalesce(bl.posts, 0) AS baseline_posts,
            bl.likes_median AS baseline_likes_median
       FROM recent r
@@ -82,6 +87,8 @@ export async function getRecentWinners(
     accountHandle: r.account_handle,
     thumbnail: r.thumbnail,
     publishedAt: new Date(r.published_at).toISOString(),
+    postType: r.post_type,
+    winNote: r.win_note ?? null,
   }));
   return pickWinners(candidates, { limit });
 }
