@@ -288,6 +288,42 @@ exports, uploads, enqueuing paid work (Descript, LLM drafts, renders).
    View controls (filters, tabs, links, export) stay enabled. Don't auto-fire
    writes or paid work on page load for users who can't edit.
 
+## Auth & security — every route checks the DB, not just the cookie
+
+The session is a JWT (30 days, refreshed on use). `src/middleware.ts` only
+checks its signature — it can't see the DB — so a deleted or deactivated
+teammate's cookie sails through it (S-167).
+
+1. **Every `route.ts` calls a guard that looks the user up**:
+   `requireSession` / `requireAdmin` / `requireFeature` / `requireBrandEdit`
+   (`src/lib/auth-guards.ts`), or `v1Handler` / `authenticateApi` for
+   `/api/v1`. Never a bare `await auth()` in a route, and never rely on the
+   middleware alone. Anything genuinely public (webhooks with an HMAC, cron
+   with `CRON_SECRET`, one-time tokens, health probes) is listed with its own
+   check in `PUBLIC` in `src/app/api/route-guards.test.ts`, which fails the
+   build for any route that is neither guarded nor listed.
+2. **Secret checks fail closed**: `if (!secret || header !== \`Bearer ${secret}\`)`.
+   An unset `CRON_SECRET` must refuse, not open the door.
+3. **The middleware runs on every `/api/*` path** (second matcher entry) —
+   the static-image skip is for pages only (S-169).
+4. **A URL a user gives us that the server fetches** (webhooks, cutout
+   pictures) goes through `assertPublicUrl` (`src/lib/net/public-url.ts`) —
+   it resolves DNS and refuses private / loopback / link-local / ULA
+   addresses. Worker-side fetches also pass `dispatcher: publicOnlyDispatcher`
+   (undici `fetch`) so a host that re-resolves after the check is refused at
+   connect time. Never a hostname regex (S-204). A bucket name from a request
+   must pass `isAppBucket` (`src/lib/s3.ts`) before we presign it (S-120).
+5. **Sign-in is throttled** (`src/lib/login-throttle.ts`, S-168): 10 failed
+   attempts per email / 50 per client IP per 15 minutes, in-memory (one web
+   dyno — move it to Postgres if web scales out). Forgot-password sends: 5 per
+   email / 20 per IP an hour, always answering 200.
+6. **Security headers** (HSTS, `frame-ancestors 'none'`, `X-Frame-Options`,
+   nosniff, Referrer-Policy; no `X-Powered-By`) come from
+   `src/lib/security-headers.ts` via `headers()` in `next.config.ts` (S-171).
+   A full script/style CSP is not in place yet — it needs nonces.
+   `tests/e2e/security-hygiene.spec.ts` checks the headers, the .png API
+   path and the throttle message.
+
 ## Public API (`/api/v1`) and MCP
 
 The public API is a separate, versioned surface from the app's own `/api/**`

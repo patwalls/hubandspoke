@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
+import { requireSession } from "@/lib/auth-guards";
 import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { productionItems, users } from "@/lib/db/schema";
-import { auth } from "@/lib/auth";
 
 // Everyone in the users table is assignable — including Notion-synced accounts
 // that haven't logged in yet. Assignment emails still reach them, and they're
@@ -14,10 +14,8 @@ import { auth } from "@/lib/auth";
 // Counts only live (non-deleted) rows — soft-deleted history shouldn't
 // keep an editor floating at the top.
 export async function GET() {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const guard = await requireSession();
+  if (guard.response) return guard.response;
 
   const assignmentCount = sql<number>`count(${productionItems.id})`.as(
     "assignment_count",

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireSession } from "@/lib/auth-guards";
 import {
   and,
   asc,
@@ -49,6 +50,8 @@ function escapeIlike(s: string): string {
 }
 
 export async function GET(request: NextRequest) {
+  const guard = await requireSession();
+  if (guard.response) return guard.response;
   const params = request.nextUrl.searchParams;
   const brand = params.get("brand");
   let q = (params.get("q") || "").trim();

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireSession } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
 import { and, eq, isNotNull, desc } from "drizzle-orm";
@@ -10,6 +11,8 @@ import { and, eq, isNotNull, desc } from "drizzle-orm";
  * Response: { [formatName]: [{ title, views, publishedLink, publishedDate }] }
  */
 export async function GET(request: NextRequest) {
+  const guard = await requireSession();
+  if (guard.response) return guard.response;
   try {
     const brand =
       request.nextUrl.searchParams.get("brand") || "starter-story";

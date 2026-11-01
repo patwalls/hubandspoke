@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireSession } from "@/lib/auth-guards";
 import { getContentReportCached } from "@/lib/db/queries-cached";
 import { format, subDays, differenceInDays, parseISO } from "date-fns";
 import { todayInclusiveOfUtc } from "@/lib/dates";
@@ -14,6 +15,8 @@ const MAX_RANGE_DAYS: Record<string, number> = {
 };
 
 export async function GET(request: NextRequest) {
+  const guard = await requireSession();
+  if (guard.response) return guard.response;
   const searchParams = request.nextUrl.searchParams;
 
   const today = new Date();

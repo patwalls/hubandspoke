@@ -22,7 +22,11 @@ export default function LoginPage() {
     });
 
     if (!result || result.error) {
-      setError("Invalid email or password");
+      setError(
+        result?.code === "too_many_attempts"
+          ? "Too many sign-in attempts. Wait 15 minutes and try again, or reset your password."
+          : "Invalid email or password"
+      );
       setLoading(false);
     } else {
       window.location.href = safeNext(new URLSearchParams(window.location.search).get("next"));

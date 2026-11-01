@@ -4,6 +4,7 @@ import { sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { users, passwordResetTokens } from "@/lib/db/schema";
 import { sendPasswordResetEmail } from "@/lib/email";
+import { clientIp, resetSendsByEmail, resetSendsByIp } from "@/lib/login-throttle";
 
 const TOKEN_TTL_MS = 60 * 60 * 1000; // 1 hour
 
@@ -32,7 +33,14 @@ export async function POST(request: NextRequest) {
 
   // Always respond OK to avoid email enumeration. Only send the email if the
   // user actually exists and isn't deactivated.
-  if (user && !user.deactivatedAt) {
+  // Throttled sends still answer OK — same reply either way (S-168).
+  const ip = clientIp(request.headers);
+  const throttled = !!(resetSendsByEmail.blockedFor(email) || resetSendsByIp.blockedFor(ip));
+  if (!throttled) {
+    resetSendsByEmail.record(email);
+    resetSendsByIp.record(ip);
+  }
+  if (user && !user.deactivatedAt && !throttled) {
     const rawToken = crypto.randomBytes(32).toString("base64url");
     const tokenHash = hashToken(rawToken);
     const expiresAt = new Date(Date.now() + TOKEN_TTL_MS);

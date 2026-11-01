@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireFeature } from "@/lib/auth-guards";
 import { imageSourceSchema } from "@/lib/editor/image-source";
-import { getPresignedGetUrl } from "@/lib/s3";
+import { getPresignedGetUrl, isAppBucket } from "@/lib/s3";
+import { assertPublicUrl } from "@/lib/net/public-url";
 
 /** `POST { src: ImageSource }` → a transparent PNG of the picture (longest
  *  side ≤ 2048) from the `hs-cutout` Cloudflare Worker (cloudflare/cutout/),
@@ -20,9 +21,16 @@ export async function POST(request: NextRequest) {
   if (!parsed.success) return NextResponse.json({ error: "Bad picture" }, { status: 400 });
   const src = parsed.data;
   let url: string;
-  if (src.kind === "s3") url = await getPresignedGetUrl(src.key, 600, src.bucket ? { bucket: src.bucket } : undefined);
-  else if (src.kind === "url" && src.url.startsWith("https://")) url = src.url;
-  else return NextResponse.json({ error: "Only stored or https pictures can be cut out in the cloud" }, { status: 422 });
+  if (src.kind === "s3") {
+    // Only our own buckets — never presign a bucket the caller names (S-120).
+    if (src.bucket && !isAppBucket(src.bucket)) return NextResponse.json({ error: "Bad picture" }, { status: 400 });
+    url = await getPresignedGetUrl(src.key, 600, src.bucket ? { bucket: src.bucket } : undefined);
+  } else if (src.kind === "url" && src.url.startsWith("https://")) {
+    // The Worker fetches it — public internet only.
+    const ok = await assertPublicUrl(src.url).then(() => true, () => false);
+    if (!ok) return NextResponse.json({ error: "That picture's address isn't on the public internet" }, { status: 422 });
+    url = src.url;
+  } else return NextResponse.json({ error: "Only stored or https pictures can be cut out in the cloud" }, { status: 422 });
 
   const res = await fetch(worker, {
     method: "POST",

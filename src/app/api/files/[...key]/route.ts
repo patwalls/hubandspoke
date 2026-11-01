@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { requireSession } from "@/lib/auth-guards";
 import { getPresignedGetUrl } from "@/lib/s3";
 
 interface RouteContext {
@@ -24,10 +24,8 @@ const ALLOWED_PREFIXES = [
  * of rendering it inline. Used by the comment download button.
  */
 export async function GET(request: NextRequest, context: RouteContext) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const guard = await requireSession();
+  if (guard.response) return guard.response;
   const { key: parts } = await context.params;
   const key = parts.join("/");
   if (!key) {

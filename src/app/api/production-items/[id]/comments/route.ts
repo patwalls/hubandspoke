@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { contentComments, productionItems, users } from "@/lib/db/schema";
 import { and, asc, eq, isNotNull, sql } from "drizzle-orm";
-import { auth } from "@/lib/auth";
 import { requireSession } from "@/lib/auth-guards";
 import { enqueueNotification } from "@/lib/services/notifications";
 import { htmlToPlainText, sanitizeCommentHtml } from "@/lib/comments/sanitize";
@@ -41,10 +40,9 @@ function shape(row: {
 
 export async function GET(_request: NextRequest, context: RouteContext) {
   try {
-    const session = await auth();
-    if (!session?.user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const guard = await requireSession();
+    if (guard.response) return guard.response;
+    const session = guard.session;
     const { id } = await context.params;
 
     const [item] = await db

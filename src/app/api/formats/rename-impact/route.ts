@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireSession } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
 import { formats } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
@@ -13,6 +14,8 @@ import { countFormatRenameImpact } from "@/lib/services/format-rename";
  * GET /api/formats/rename-impact?id=<formatId>
  */
 export async function GET(request: NextRequest) {
+  const guard = await requireSession();
+  if (guard.response) return guard.response;
   const id = request.nextUrl.searchParams.get("id");
   if (!id) {
     return NextResponse.json({ error: "id is required" }, { status: 400 });

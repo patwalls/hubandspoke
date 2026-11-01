@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { requireSession } from "@/lib/auth-guards";
 import { generateUtmCampaign } from "@/lib/utm-campaign";
 
 /**
@@ -12,10 +12,8 @@ import { generateUtmCampaign } from "@/lib/utm-campaign";
  * Body: { title?: string }
  */
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const guard = await requireSession();
+  if (guard.response) return guard.response;
 
   let title: string | null = null;
   try {

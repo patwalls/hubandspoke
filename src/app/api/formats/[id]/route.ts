@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireSession } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
 import {
   accounts,
@@ -20,6 +21,8 @@ interface RouteContext {
 }
 
 export async function GET(_request: NextRequest, context: RouteContext) {
+  const guard = await requireSession();
+  if (guard.response) return guard.response;
   try {
     const { id } = await context.params;
 

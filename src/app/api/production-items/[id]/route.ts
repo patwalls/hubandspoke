@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireSession } from "@/lib/auth-guards";
 import { getProductionItemDetail } from "@/lib/services/production-item-detail";
 
 interface RouteContext {
@@ -9,6 +10,8 @@ interface RouteContext {
 // src/lib/services/production-item-detail.ts for why it lives there
 // (SSR by the detail page + boot warming + this route all share it).
 export async function GET(_request: NextRequest, context: RouteContext) {
+  const guard = await requireSession();
+  if (guard.response) return guard.response;
   try {
     const { id } = await context.params;
     const payload = await getProductionItemDetail(id);

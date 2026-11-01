@@ -75,6 +75,12 @@ export function r2BucketName(): string {
   return b;
 }
 
+/** One of the buckets this app owns (S3 or R2) — gate any bucket name that
+ *  arrives from a request before presigning it. */
+export function isAppBucket(bucket: string): boolean {
+  return [process.env.HUBANDSPOKE_S3_BUCKET, process.env.R2_BUCKET].some((b) => !!b && b === bucket);
+}
+
 // ---------------------------------------------------------------------------
 // Routing: pick S3 or R2 based on the bucket name stored with the object.
 // ---------------------------------------------------------------------------

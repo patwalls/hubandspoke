@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireSession } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
 import { productionItems, accounts, brands } from "@/lib/db/schema";
 import { and, eq, isNull, isNotNull, sql } from "drizzle-orm";
@@ -106,6 +107,8 @@ function shapeItem(r: {
 }
 
 export async function GET(request: NextRequest) {
+  const guard = await requireSession();
+  if (guard.response) return guard.response;
   const brand = request.nextUrl.searchParams.get("brand") || "";
   if (!brand) {
     return NextResponse.json({ error: "brand required" }, { status: 400 });

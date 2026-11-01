@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
+import { requireSession } from "@/lib/auth-guards";
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
 import { getPresignedPutUrl } from "@/lib/s3";
 
 const MAX_BYTES = 25 * 1024 * 1024; // 25 MB — comments aren't a media archive
@@ -12,10 +12,8 @@ const PREFIX = (process.env.HUBANDSPOKE_S3_PREFIX || "hubandspoke/uploads")
 const ALLOWED_RE = /^(image\/(png|jpe?g|gif|webp|svg\+xml)|application\/pdf)$/;
 
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const guard = await requireSession();
+  if (guard.response) return guard.response;
 
   let body: {
     fileName?: string;
