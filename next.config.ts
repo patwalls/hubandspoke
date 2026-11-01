@@ -1,7 +1,12 @@
 import { withSentryConfig } from "@sentry/nextjs";
 import type { NextConfig } from "next";
+import { SECURITY_HEADERS } from "./src/lib/security-headers";
 
 const nextConfig: NextConfig = {
+  poweredByHeader: false,
+  async headers() {
+    return [{ source: "/:path*", headers: SECURITY_HEADERS }];
+  },
   // Next 16.3+ rewrites CLAUDE.md with its own agent-rules block on every
   // `next dev` run under an agent, leaving every session's tree dirty.
   // CLAUDE.md is hand-maintained here.

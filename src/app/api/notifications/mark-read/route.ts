@@ -1,18 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireSession } from "@/lib/auth-guards";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { notifications } from "@/lib/db/schema";
-import { auth } from "@/lib/auth";
 
 // Marks one or more notifications as read. Accepts either { ids: string[] } to
 // dismiss specific rows (e.g. clicking a bell entry) or { all: true } to clear
 // the whole inbox. Always scopes the update to the session user so a malicious
 // payload can't toggle someone else's state.
 export async function POST(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const guard = await requireSession();
+  if (guard.response) return guard.response;
+  const session = guard.session;
 
   const body = await request.json().catch(() => ({}));
   const userId = session.user.id;

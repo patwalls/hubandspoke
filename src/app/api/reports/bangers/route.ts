@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireSession } from "@/lib/auth-guards";
 import { getTopBangers, type TopBangersParams } from "@/lib/db/queries";
 
 export async function GET(request: NextRequest) {
+  const guard = await requireSession();
+  if (guard.response) return guard.response;
   const sp = request.nextUrl.searchParams;
 
   const params: TopBangersParams = {

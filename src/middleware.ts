@@ -61,6 +61,10 @@ export default auth((req) => {
 
 export const config = {
   matcher: [
+    // Pages: skip static files so public/ images load on the login screen.
     "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    // API: always — the image-extension skip above must never let
+    // /api/whatever.png past the session check (S-169).
+    "/api/:path*",
   ],
 };

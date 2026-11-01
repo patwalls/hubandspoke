@@ -26,7 +26,7 @@ export const POST = v1Handler("/v1/webhooks", async ({ request, principal }) => 
   const { webhook, secret } = await createWebhook({
     userId: principal.user.id,
     name: body.name,
-    url: validateWebhookUrl(body.url),
+    url: await validateWebhookUrl(body.url),
     events: validateEvents(body.events),
     brand: body.brand ?? null,
   });

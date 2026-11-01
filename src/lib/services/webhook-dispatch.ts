@@ -20,6 +20,8 @@
  * (MAX_ATTEMPTS). Bodies are signed with the subscription's secret.
  */
 import { and, asc, eq, gt, isNull, sql } from "drizzle-orm";
+import { fetch as undiciFetch } from "undici";
+import { assertPublicUrl, publicOnlyDispatcher } from "@/lib/net/public-url";
 import { db } from "@/lib/db";
 import {
   apiWebhookCursors,
@@ -302,7 +304,14 @@ export async function deliverWebhook(deliveryId: string, attempt: number, maxAtt
   let statusCode: number | null = null;
   let error: string | null = null;
   try {
-    const res = await fetch(sub.url, { method: "POST", headers, body, signal: controller.signal, redirect: "manual" });
+    // Production: refuse private hosts — again here, not just at create, so
+    // rows made before S-204 and hosts that re-resolve (DNS rebinding) are
+    // caught; the dispatcher re-checks every address it connects to.
+    const production = process.env.NODE_ENV === "production";
+    if (production) await assertPublicUrl(sub.url);
+    const res = production
+      ? await undiciFetch(sub.url, { method: "POST", headers, body, signal: controller.signal, redirect: "manual", dispatcher: publicOnlyDispatcher })
+      : await fetch(sub.url, { method: "POST", headers, body, signal: controller.signal, redirect: "manual" });
     statusCode = res.status;
     if (res.status < 200 || res.status >= 300) error = `HTTP ${res.status}`;
   } catch (err) {

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireSession } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
 import {
   contentComments,
@@ -9,7 +10,6 @@ import {
 } from "@/lib/db/schema";
 import { asc, eq } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
-import { auth } from "@/lib/auth";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -68,10 +68,9 @@ function shapeEvent(event: EventRow, user: UserRow | null) {
 
 export async function GET(_request: NextRequest, context: RouteContext) {
   try {
-    const session = await auth();
-    if (!session?.user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const guard = await requireSession();
+    if (guard.response) return guard.response;
+    const session = guard.session;
     const { id } = await context.params;
 
     const [item] = await db

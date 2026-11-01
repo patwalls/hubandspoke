@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireSession } from "@/lib/auth-guards";
 import { and, count, desc, eq, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
@@ -6,17 +7,15 @@ import {
   productionItems,
   users,
 } from "@/lib/db/schema";
-import { auth } from "@/lib/auth";
 import { toNotificationItem } from "@/lib/notifications/to-item";
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
 
 export async function GET(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const guard = await requireSession();
+  if (guard.response) return guard.response;
+  const session = guard.session;
 
   const userId = session.user.id;
   const url = new URL(request.url);

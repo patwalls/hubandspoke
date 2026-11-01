@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireSession } from "@/lib/auth-guards";
 import { getProductionReportCached } from "@/lib/services/production-report";
 
 // Thin envelope — the report itself lives in
 // src/lib/services/production-report.ts (shared with the queue page's SSR
 // and /api/warm; 60s cache).
 export async function GET(request: NextRequest) {
+  const guard = await requireSession();
+  if (guard.response) return guard.response;
   const brand = request.nextUrl.searchParams.get("brand") || "starter-story";
   const excludeIdea = request.nextUrl.searchParams.get("excludeIdea") === "true";
   try {

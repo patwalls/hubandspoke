@@ -9,6 +9,7 @@ import { db } from "@/lib/db";
 import { apiWebhookDeliveries, apiWebhooks, users } from "@/lib/db/schema";
 import { WEBHOOK_EVENTS, type WebhookEvent } from "./constants";
 import { ApiError } from "./http";
+import { assertPublicUrl } from "@/lib/net/public-url";
 
 export const MAX_WEBHOOKS_PER_USER = 10;
 const SECRET_PREFIX = "whsec_";
@@ -60,19 +61,33 @@ function toApi(row: typeof apiWebhooks.$inferSelect): ApiWebhook {
   };
 }
 
-export function validateWebhookUrl(raw: string): string {
+/** Create-time check. Production refuses any host that is, or resolves to, a
+ *  private / loopback / link-local address (S-204); delivery re-checks at
+ *  connect time via `publicOnlyDispatcher`. Dev allows http + localhost so a
+ *  local receiver works. */
+export async function validateWebhookUrl(
+  raw: string,
+  resolve?: (host: string) => Promise<string[]>
+): Promise<string> {
   let url: URL;
   try {
     url = new URL(raw.trim());
   } catch {
     throw new ApiError("invalid_request", "url must be a full https:// URL.");
   }
-  const isLocal = /^(localhost|127\.|10\.|192\.168\.|0\.0\.0\.0)/.test(url.hostname) || url.hostname.endsWith(".local");
-  if (url.protocol !== "https:" && !(process.env.NODE_ENV !== "production" && url.protocol === "http:")) {
+  const production = process.env.NODE_ENV === "production";
+  if (url.protocol !== "https:" && !(!production && url.protocol === "http:")) {
     throw new ApiError("invalid_request", "url must use https://.");
   }
-  if (isLocal && process.env.NODE_ENV === "production") {
-    throw new ApiError("invalid_request", "url must be reachable from the internet.");
+  if (url.username || url.password) {
+    throw new ApiError("invalid_request", "url must not contain credentials.");
+  }
+  if (production) {
+    try {
+      await assertPublicUrl(url, resolve);
+    } catch {
+      throw new ApiError("invalid_request", "url must be reachable from the internet.");
+    }
   }
   return url.toString();
 }

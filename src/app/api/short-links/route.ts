@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireSession } from "@/lib/auth-guards";
 import { isNotNull, sql } from "drizzle-orm";
-import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
 import {
@@ -12,8 +12,9 @@ import {
 export const dynamic = "force-dynamic";
 
 async function requireUser() {
-  const session = await auth();
-  if (!session?.user) return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
+  const guard = await requireSession();
+  if (guard.response) return { error: guard.response };
+  const session = guard.session;
   return { session };
 }
 

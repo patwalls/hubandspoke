@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireSession } from "@/lib/auth-guards";
 import { loadCrossPostFeedData } from "@/lib/services/cross-post-feed-data";
 
 // GET /api/cross-post-feed?brand=<slug>
@@ -6,6 +7,8 @@ import { loadCrossPostFeedData } from "@/lib/services/cross-post-feed-data";
 // the standalone /accounts/cross-posting page and by the Queue's Cross-post
 // tab so both surfaces show the same rich data.
 export async function GET(req: NextRequest): Promise<NextResponse> {
+  const guard = await requireSession();
+  if (guard.response) return guard.response;
   const brand = req.nextUrl.searchParams.get("brand");
   if (!brand) {
     return NextResponse.json(

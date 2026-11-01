@@ -1276,7 +1276,7 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
 
 - **Trigger:** enqueued by the sweep and by `POST /api/v1/webhooks/{id}/test` (`event: ping`). `maxAttempts: 8` (graphile exponential backoff, roughly a day), `jobKey: webhook-deliver:<deliveryId>`.
 - **Code:** `src/jobs/tasks/webhook-deliver.ts` → `deliverWebhook()`.
-- **Request:** JSON `{ id, event, created_at, data }`, headers `X-HubSpoke-Event`, `X-HubSpoke-Delivery`, `X-HubSpoke-Timestamp`, `X-HubSpoke-Signature: sha256=HMAC-SHA256(secret, "<timestamp>.<body>")`, 10 s timeout, redirects not followed, bounded by `helpers.abortSignal`.
+- **Request:** JSON `{ id, event, created_at, data }`, headers `X-HubSpoke-Event`, `X-HubSpoke-Delivery`, `X-HubSpoke-Timestamp`, `X-HubSpoke-Signature: sha256=HMAC-SHA256(secret, "<timestamp>.<body>")`, 10 s timeout, redirects not followed, bounded by `helpers.abortSignal`. In production the URL must resolve to a public address (`assertPublicUrl`) and the POST goes through undici with `publicOnlyDispatcher`, which refuses private addresses at connect time (S-204, DNS rebinding); a refusal is recorded as the delivery error like any other failure.
 - **Outcome:** 2xx → delivery `delivered`, subscription `last_success_at` set and `consecutive_failures` reset. Otherwise the task throws (retry); on the final attempt the delivery is `failed`, the subscription's `consecutive_failures` increments and at 25 the subscription is paused (`active = false`; "Resume" on /developers resets it). A paused subscription's pending deliveries are marked failed on pickup.
 - **Observability:** /developers → Webhooks → Deliveries (per hook, last 20) and `GET /api/v1/webhooks/{id}/deliveries`.
 

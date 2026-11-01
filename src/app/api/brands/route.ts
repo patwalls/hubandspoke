@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
-import { requireAdmin } from "@/lib/auth-guards";
+import { requireAdmin, requireSession } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
 import { brands } from "@/lib/db/schema";
 import { getBrands, invalidateBrandCache } from "@/lib/db/brands";
@@ -8,10 +7,8 @@ import { insertDefaultStatusesForBrand } from "@/lib/db/brand-statuses";
 import { max } from "drizzle-orm";
 
 export async function GET() {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const guard = await requireSession();
+  if (guard.response) return guard.response;
   const rows = await getBrands();
   return NextResponse.json({ brands: rows });
 }

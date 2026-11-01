@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireSession } from "@/lib/auth-guards";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { productionItems, formats } from "@/lib/db/schema";
-import { auth } from "@/lib/auth";
 import Anthropic from "@anthropic-ai/sdk";
 
 const MODEL = "claude-haiku-5-5";
@@ -14,10 +14,8 @@ interface RouteContext {
 // Short triage brief for the Queue dialog — 2-3 sentences so Pat can decide
 // who to assign without opening the full detail page.
 export async function GET(_request: NextRequest, context: RouteContext) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const guard = await requireSession();
+  if (guard.response) return guard.response;
 
   const { id } = await context.params;
 

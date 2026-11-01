@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireSession } from "@/lib/auth-guards";
 import { and, desc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
-import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import {
   contentEvents,
@@ -39,10 +39,8 @@ export interface QueueHistoryEvent {
 }
 
 export async function GET(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const guard = await requireSession();
+  if (guard.response) return guard.response;
 
   const brand = request.nextUrl.searchParams.get("brand");
   if (!brand) {

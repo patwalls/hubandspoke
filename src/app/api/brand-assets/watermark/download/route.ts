@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { requireSession } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
 import { brandWatermarks } from "@/lib/db/schema";
 import { fetchBrandBySlug } from "@/lib/db/brands";
@@ -7,10 +7,8 @@ import { getPresignedGetUrl } from "@/lib/s3";
 import { eq, desc } from "drizzle-orm";
 
 export async function GET(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const guard = await requireSession();
+  if (guard.response) return guard.response;
 
   const brandSlug = request.nextUrl.searchParams.get("brand");
   const watermarkId = request.nextUrl.searchParams.get("id");

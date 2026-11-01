@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { requireSession } from "@/lib/auth-guards";
 
 /**
  * Proxy for Meta-CDN images (fbcdn.net, cdninstagram.com). Those CDNs
@@ -24,10 +24,8 @@ function isAllowed(urlStr: string): boolean {
 }
 
 export async function GET(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const guard = await requireSession();
+  if (guard.response) return guard.response;
   const src = request.nextUrl.searchParams.get("url");
   if (!src) return NextResponse.json({ error: "missing url" }, { status: 400 });
   if (!isAllowed(src)) {

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireSession } from "@/lib/auth-guards";
 import { and, eq, ilike, isNull, ne, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { accounts, productionItems } from "@/lib/db/schema";
@@ -8,6 +9,8 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const NUMERIC_ID_RE = /^\d{6,}$/;
 
 export async function GET(request: NextRequest) {
+  const guard = await requireSession();
+  if (guard.response) return guard.response;
   const params = request.nextUrl.searchParams;
   const brand = params.get("brand");
   const q = (params.get("q") || "").trim();

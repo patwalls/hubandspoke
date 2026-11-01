@@ -1,15 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireSession } from "@/lib/auth-guards";
 import { eq } from "drizzle-orm";
-import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
 import { getPresignedGetUrl } from "@/lib/s3";
 
 export async function GET(request: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const guard = await requireSession();
+  if (guard.response) return guard.response;
 
   const itemId = request.nextUrl.searchParams.get("itemId");
   if (!itemId) {
