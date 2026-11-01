@@ -10,6 +10,7 @@ import type { ProductionItem } from "@/types";
 import { postTypeDisplay } from "@/lib/platforms";
 import { trackUsage } from "@/lib/usage/track";
 import { rememberRun } from "@/lib/production/run";
+import { waitingInStatus } from "@/lib/production/waiting";
 
 export type SortKey =
   | "editor"
@@ -485,6 +486,21 @@ export function ProductionPipelineTable({
                     }
                   >
                     {formatRelativeTime(item.createdAt)}
+                    {(() => {
+                      // Stuck in a hand-off status: one quiet amber line,
+                      // only on the rows that need someone (lib/production/waiting).
+                      const waiting = waitingInStatus(item.status, item.statusSince);
+                      if (!waiting) return null;
+                      return (
+                        <div
+                          data-testid="waiting-in-status"
+                          className="text-[11px] leading-tight text-amber-600 dark:text-amber-400"
+                          title={waiting.title}
+                        >
+                          waiting {waiting.days}d
+                        </div>
+                      );
+                    })()}
                   </td>
                 </tr>
               );
