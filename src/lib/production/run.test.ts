@@ -13,6 +13,7 @@ describe("the production run remembered for the content page", () => {
   it("names where you are and the posts either side", () => {
     const run = decodeRun(raw, "starter-story", now + 60_000);
     expect(positionInRun(run, "b")).toEqual({
+      source: "production",
       group: "Review",
       index: 2,
       total: 3,
@@ -55,6 +56,35 @@ describe("the production run remembered for the content page", () => {
     const many = Array.from({ length: RUN_MAX_ROWS + 50 }, (_, i) => ({ id: `id${i}`, title: `T${i}` }));
     const run = decodeRun(encodeRun({ brand: "b", group: "Published", rows: many }, now), "b", now);
     expect(run?.rows).toHaveLength(RUN_MAX_ROWS);
+  });
+});
+
+describe("a run opened from the Content list (content-list-fast M4)", () => {
+  const contentRaw = encodeRun({ brand: "starter-story", source: "content", group: "Content", rows }, now);
+
+  it("says it came from the Content list, so the back link goes there", () => {
+    const run = decodeRun(contentRaw, "starter-story", now);
+    expect(positionInRun(run, "b")).toMatchObject({ source: "content", index: 2, total: 3 });
+  });
+
+  it("runs saved before the Content list had one read as production runs", () => {
+    expect(decodeRun(raw, "starter-story", now)?.source).toBe("production");
+  });
+
+  it("an unknown source is a production run, not a crash", () => {
+    const odd = JSON.stringify({ ...JSON.parse(raw), source: "queue" });
+    expect(decodeRun(odd, "starter-story", now)?.source).toBe("production");
+  });
+
+  it("keeps a whole brand's list, past the production cap", () => {
+    const many = Array.from({ length: RUN_MAX_ROWS + 900 }, (_, i) => ({ id: `r${i}`, title: `Post ${i}` }));
+    const run = decodeRun(encodeRun({ brand: "starter-story", source: "content", group: "Content", rows: many }, now), "starter-story", now);
+    expect(positionInRun(run, `r${RUN_MAX_ROWS + 800}`)?.total).toBe(RUN_MAX_ROWS + 900);
+  });
+
+  it("a status change doesn't drop the post: the Content list holds every status", () => {
+    const run = decodeRun(contentRaw, "starter-story", now);
+    expect(leaveRun(run, "b")).toBeNull();
   });
 });
 

@@ -29,6 +29,15 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-11-01-content-list-step",
+    shippedAt: "2026-11-01T13:20:00Z",
+    kind: "feature",
+    title: "Go to the next post without going back to Content",
+    body: "Open a post from the Content list and the top of the page shows where you are, like \"3 of 40\", with arrows (or the j and k keys) for the next or previous post, in the same order and filters as your list. The list also opens faster now and comes back to where you left it.",
+    href: "/[brand]/content",
+    screen: "content:list-run",
+  },
+  {
     id: "2026-10-31-production-keys-peek",
     shippedAt: "2026-10-31T18:30:00Z",
     kind: "feature",
