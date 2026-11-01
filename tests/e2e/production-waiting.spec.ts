@@ -3,7 +3,8 @@ import postgres from "postgres";
 
 // In Production: a post stuck in a hand-off status (Review / Ready To
 // Publish) for 3+ days says "waiting Nd" under its age; fresh posts and
-// statuses where waiting is normal (Assigned) stay quiet.
+// statuses where waiting is normal (Assigned) stay quiet. The group header's
+// "N waiting 3d+" link filters the list to just those posts.
 
 async function makePost(page: Page, title: string): Promise<string> {
   const res = await page.request.post("/api/production-items", {
@@ -58,6 +59,19 @@ test("posts stuck in Review show how long they've waited", async ({ page }) => {
     // Full page in its default state — the tag must be the quiet thing here.
     await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
     if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT, fullPage: true });
+
+    // The Review header counts its stuck rows; one click narrows the list to
+    // them (URL state, so Back and shared links keep it) and back again.
+    const toggle = page.getByTestId("waiting-toggle");
+    await expect(toggle).toHaveCount(1);
+    await expect(toggle).toHaveText("· 1 waiting 3d+");
+    await toggle.click();
+    await expect(page).toHaveURL(/[?&]waiting=1/);
+    await expect(page.locator("[data-production-row]")).toHaveCount(1);
+    await expect(row(stuck)).toBeVisible();
+    await expect(toggle).toHaveText("· 1 waiting 3d+ — show all");
+    await toggle.click();
+    await expect(page.locator("[data-production-row]")).toHaveCount(3);
   } finally {
     if (ids.length) await sql`DELETE FROM production_items WHERE id IN ${sql(ids)}`;
     await sql.end();
