@@ -11,20 +11,33 @@
  *
  * Kept for a working session only. A run from this morning would step
  * through rows that have moved since.
+ *
+ * The Content list keeps the same kind of run (content-list-fast M4): the
+ * rows in the order on screen after search, filters and sort, with
+ * `source: "content"`, so the post steps through that list and its back link
+ * says "← Content". One run per tab: opening a row from either list replaces it.
  */
 export const RUN_KEY = "hs:production-run";
 export const RUN_MAX_AGE_MS = 3 * 60 * 60 * 1000;
 /** Big status groups (Published) can hold thousands of rows; past this the
  *  stepper is still useful and the storage stays small. */
 export const RUN_MAX_ROWS = 500;
+/** The Content list is one group of every post in the date range (a brand's
+ *  90 days is ~1,400 rows); ids and titles only, ~150 KB at this cap. */
+export const CONTENT_RUN_MAX_ROWS = 3000;
 
 export interface RunRow {
   id: string;
   title: string;
 }
 
+/** The list a run was opened from. Missing = "production" (runs saved
+ *  before content-list-fast M4). */
+export type RunSource = "production" | "content";
+
 export interface ProductionRun {
   brand: string;
+  source?: RunSource;
   /** The status group's name, e.g. "Review". */
   group: string;
   rows: RunRow[];
@@ -35,6 +48,7 @@ export interface ProductionRun {
 }
 
 export interface RunPosition {
+  source: RunSource;
   group: string;
   /** 1-based, for "3 of 12". */
   index: number;
@@ -44,7 +58,8 @@ export interface RunPosition {
 }
 
 export function encodeRun(run: Omit<ProductionRun, "at">, now: number): string {
-  return JSON.stringify({ ...run, rows: run.rows.slice(0, RUN_MAX_ROWS), at: now } satisfies ProductionRun);
+  const cap = run.source === "content" ? CONTENT_RUN_MAX_ROWS : RUN_MAX_ROWS;
+  return JSON.stringify({ ...run, rows: run.rows.slice(0, cap), at: now } satisfies ProductionRun);
 }
 
 /** The remembered run, or null when missing, malformed, stale or from another brand. */
@@ -58,7 +73,8 @@ export function decodeRun(raw: string | null, brand: string, now: number): Produ
       (r): r is RunRow => !!r && typeof r.id === "string" && typeof r.title === "string",
     );
     const current = typeof v.current === "string" ? v.current : undefined;
-    return { brand: v.brand, group: v.group, rows, at: v.at, ...(current ? { current } : {}) };
+    const source: RunSource = v.source === "content" ? "content" : "production";
+    return { brand: v.brand, source, group: v.group, rows, at: v.at, ...(current ? { current } : {}) };
   } catch {
     return null;
   }
@@ -71,6 +87,7 @@ export function positionInRun(run: ProductionRun | null, currentId: string): Run
   const i = run.rows.findIndex((r) => r.id === currentId);
   if (i < 0) return null;
   return {
+    source: run.source ?? "production",
     group: run.group,
     index: i + 1,
     total: run.rows.length,
@@ -89,7 +106,9 @@ export function leaveRun(
   run: ProductionRun | null,
   id: string,
 ): { run: ProductionRun; next: RunRow | null } | null {
-  if (!run) return null;
+  // A post leaving a status group only matters to a run of status groups:
+  // the Content list keeps every status.
+  if (!run || run.source === "content") return null;
   const i = run.rows.findIndex((r) => r.id === id);
   if (i < 0) return null;
   const rows = run.rows.filter((r) => r.id !== id);

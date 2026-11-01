@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import type { ProductionItem } from "@/types";
 import { opensInThisTab } from "@/lib/content-list/return-spot";
+import { rememberRun } from "@/lib/production/run";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -989,7 +990,17 @@ export function PerformanceTable({ items: itemsProp, brand, formats, accounts, f
                       <span className="text-sm font-medium text-foreground truncate inline-flex items-center gap-1.5">
                         <Link
                           href={`/${brand}/content/${item.id}`}
-                          onClick={onOpenRow ? (e) => { if (opensInThisTab(e)) onOpenRow(item.id); } : undefined}
+                          onClick={onOpenRow ? (e) => {
+                            if (!opensInThisTab(e)) return;
+                            onOpenRow(item.id);
+                            // The post steps through this list as it is on screen (content-list-fast M4).
+                            rememberRun({
+                              brand,
+                              source: "content",
+                              group: "Content",
+                              rows: sorted.map((r) => ({ id: r.id, title: r.title || "(Untitled)" })),
+                            });
+                          } : undefined}
                           className="hover:text-primary hover:underline transition-colors truncate"
                         >
                           {item.title || "(Untitled)"}
