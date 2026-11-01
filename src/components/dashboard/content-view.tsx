@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { format, subDays } from "date-fns";
 import { FilterPills, SelectPill } from "./filter-pills";
 import { PerformanceTable } from "./performance-table";
@@ -10,6 +10,8 @@ import type { PickerAccount } from "@/components/ui/account-post-type-picker";
 import { todayInclusiveOfUtc } from "@/lib/dates";
 import { useUrlState } from "@/lib/hooks/use-url-state";
 import { useRememberListUrl } from "@/lib/hooks/use-remember-list-url";
+import { ReportCache, loadMode } from "@/lib/content-list/report-cache";
+import { trackUsage } from "@/lib/usage/track";
 import dynamic from "next/dynamic";
 // Lazy: these alternate views load only when selected via the "Other" pill —
 // keeping them out of the default content-list chunk.
@@ -28,6 +30,9 @@ interface ContentViewProps {
 const LEGACY_REPORT_API: Record<string, string> = {
   matg: "/api/reports/matg",
 };
+
+// Survives client-side navigation: back from a post shows the list at once.
+const reportCache = new ReportCache<HydratedContentReportData>();
 
 export function ContentView({ brand }: ContentViewProps) {
   // Default date range is a rolling 90 days back from "today". Memoize so
@@ -81,6 +86,9 @@ export function ContentView({ brand }: ContentViewProps) {
 
   const [data, setData] = useState<HydratedContentReportData | null>(null);
   const [loading, setLoading] = useState(true);
+  // A filter changed while rows are on screen: keep them, dimmed, until the
+  // new report lands (no spinner flash).
+  const [refreshing, setRefreshing] = useState(false);
   // Fetched once per mount — the create-item dialog's account picker reads
   // this. Kept narrow (no filtering yet); add-form picker filters by
   // `brandSlug` prop so all-brand fetch is fine.
@@ -132,37 +140,66 @@ export function ContentView({ brand }: ContentViewProps) {
     ? "/api/reports/content"
     : LEGACY_REPORT_API[brand] ?? "/api/reports/content";
 
+  // Bumped per request so a slow, older report can't overwrite a newer one
+  // when someone flips filters quickly.
+  const requestSeq = useRef(0);
+  // Read, not watched: whether rows are on screen decides how to wait, not
+  // when to fetch.
+  const hasRowsRef = useRef(false);
+  useEffect(() => {
+    hasRowsRef.current = data !== null;
+  }, [data]);
+
   const fetchReport = useCallback(async () => {
-    setLoading(true);
+    const seq = ++requestSeq.current;
+    const params = new URLSearchParams({
+      brand,
+      startDate,
+      endDate,
+      viewType,
+      platformKey: selectedPlatformKey,
+      accountId: selectedAccountId,
+      postType: selectedPostType,
+      channels: selectedChannels,
+      format: selectedFormat,
+      source: selectedSource,
+      origin: selectedOrigin,
+    });
+    const url = `${apiBase}?${params}`;
+    const cached = reportCache.get(url);
+    const mode = loadMode(cached !== undefined, hasRowsRef.current);
+    if (cached) {
+      setData(cached);
+      setLoading(false);
+      setRefreshing(false);
+      trackUsage("content:list-instant", brand);
+    } else if (mode === "keep") {
+      setRefreshing(true);
+    } else {
+      setLoading(true);
+    }
     try {
-      const params = new URLSearchParams({
-        brand,
-        startDate,
-        endDate,
-        viewType,
-        platformKey: selectedPlatformKey,
-        accountId: selectedAccountId,
-        postType: selectedPostType,
-        channels: selectedChannels,
-        format: selectedFormat,
-        source: selectedSource,
-        origin: selectedOrigin,
-      });
-      const res = await fetch(`${apiBase}?${params}`);
+      const res = await fetch(url);
       const text = await res.text();
+      if (seq !== requestSeq.current) return;
       const contentType = res.headers.get("content-type") || "";
       const looksJson = contentType.includes("application/json") || text.trim().startsWith("{");
       if (!looksJson) {
         console.error(`Content API returned HTTP ${res.status} (non-JSON response).`);
-        setData(null);
+        // A remembered report beats an empty page when the refresh fails.
+        if (!cached) setData(null);
         return;
       }
       const json = rehydrateReportAccounts(JSON.parse(text));
+      if (res.ok) reportCache.set(url, json);
       setData(json);
     } catch (err) {
       console.error("Failed to fetch content:", err);
     } finally {
-      setLoading(false);
+      if (seq === requestSeq.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [apiBase, brand, startDate, endDate, viewType, selectedPlatformKey, selectedAccountId, selectedPostType, selectedChannels, selectedFormat, selectedSource, selectedOrigin]);
 
@@ -234,6 +271,10 @@ export function ContentView({ brand }: ContentViewProps) {
           </div>
         </div>
       ) : data ? (
+        <div
+          aria-busy={refreshing}
+          className={refreshing ? "opacity-60 transition-opacity" : "transition-opacity"}
+        >
         <PerformanceTable
           items={data.items}
           brand={brand}
@@ -242,6 +283,7 @@ export function ContentView({ brand }: ContentViewProps) {
           formatBars={data.formatBars}
           onPostCreated={fetchReport}
         />
+        </div>
       ) : (
         <div className="text-center py-20">
           <p className="text-muted-foreground text-sm">No data available.</p>
