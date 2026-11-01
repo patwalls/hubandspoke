@@ -35,7 +35,7 @@ test("a post opened from the Content list steps through that list", async ({ pag
     const run = page.getByTestId("production-run");
     await expect(run.getByTestId("production-run-position")).toHaveText("2 of 5", { timeout: 15_000 });
     await expect(run.getByRole("link", { name: "← Content" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: title(1) }).first()).toBeVisible();
+    await expect(page.locator("h1:visible", { hasText: title(1) })).toBeVisible();
 
     // The moment worth seeing: the post, with where you are in the list.
     if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT });
@@ -43,7 +43,7 @@ test("a post opened from the Content list steps through that list", async ({ pag
     // j steps to the next row in the list's order, k back.
     await page.keyboard.press("j");
     await expect(run.getByTestId("production-run-position")).toHaveText("3 of 5", { timeout: 15_000 });
-    await expect(page.getByRole("heading", { name: title(2) }).first()).toBeVisible();
+    await expect(page.locator("h1:visible", { hasText: title(2) })).toBeVisible();
     await run.getByRole("link", { name: "Previous" }).click();
     await expect(run.getByTestId("production-run-position")).toHaveText("2 of 5", { timeout: 15_000 });
 
