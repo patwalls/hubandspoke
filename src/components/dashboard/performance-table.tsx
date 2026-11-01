@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useMemo, useDeferredValue } from "react";
+import { useState, useMemo, useDeferredValue, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import type { ProductionItem } from "@/types";
+import { opensInThisTab } from "@/lib/content-list/return-spot";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -64,6 +65,11 @@ interface PerformanceTableProps {
    *  (format, post_type) so a tweet isn't compared against a YT short. */
   formatBars?: Record<string, Record<string, FormatViewBar>>;
   onPostCreated?: () => void;
+  /** Coming back from a post opened off this list: scroll to where you were
+   *  and flash that row once (content-list-fast M3). */
+  returnSpot?: { id: string; y: number } | null;
+  /** A row's title was plain-clicked (opens the post in this tab). */
+  onOpenRow?: (id: string) => void;
 }
 
 type SortKey =
@@ -127,7 +133,7 @@ function getFreshness(item: ProductionItem): {
   return { color: "text-muted-foreground", label: `${Math.floor(days)}d ago`, dotClass: "bg-gray-400" };
 }
 
-export function PerformanceTable({ items: itemsProp, brand, formats, accounts, formatBars, onPostCreated }: PerformanceTableProps) {
+export function PerformanceTable({ items: itemsProp, brand, formats, accounts, formatBars, onPostCreated, returnSpot, onOpenRow }: PerformanceTableProps) {
   const router = useRouter();
   const canEdit = useCanEditBrand(brand === "all" ? null : brand);
   // Defensive: when the report API errors, callers can end up passing
@@ -536,6 +542,38 @@ export function PerformanceTable({ items: itemsProp, brand, formats, accounts, f
   const visibleRows = showAllRows ? sorted : sorted.slice(0, RENDER_CAP);
   const hiddenCount = sorted.length - visibleRows.length;
 
+  // Back from a post: put the list where it was and flash the row once. If
+  // the row sat past the render cap (you had pressed "Show all"), paint all
+  // rows first and come back on the next render.
+  const [flashId, setFlashId] = useState<string | null>(null);
+  const returnedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!returnSpot || returnedFor.current === returnSpot.id) return;
+    if (!sorted.some((i) => i.id === returnSpot.id)) return;
+    if (!visibleRows.some((i) => i.id === returnSpot.id)) {
+      setShowAllRows(true);
+      return;
+    }
+    returnedFor.current = returnSpot.id;
+    window.scrollTo({ top: returnSpot.y });
+    const row = document.querySelector<HTMLElement>(
+      `tr[data-row-id="${CSS.escape(returnSpot.id)}"]`,
+    );
+    if (row) {
+      const r = row.getBoundingClientRect();
+      // Rows above it moved (new posts, a refreshed report): find the row.
+      if (r.top < 0 || r.bottom > window.innerHeight) {
+        row.scrollIntoView({ block: "center" });
+      }
+    }
+    setFlashId(returnSpot.id);
+  }, [returnSpot, sorted, visibleRows]);
+  useEffect(() => {
+    if (!flashId) return;
+    const t = setTimeout(() => setFlashId(null), 2000);
+    return () => clearTimeout(t);
+  }, [flashId]);
+
   function SortHeader({
     label,
     sortKeyName,
@@ -932,7 +970,11 @@ export function PerformanceTable({ items: itemsProp, brand, formats, accounts, f
             {visibleRows.map((item) => (
               <tr
                 key={item.id}
-                className="border-b border-border/50 hover:bg-accent/30 transition-colors"
+                data-row-id={item.id}
+                data-returned={flashId === item.id ? "true" : undefined}
+                className={`border-b border-border/50 hover:bg-accent/30 transition-colors duration-700 ${
+                  flashId === item.id ? "bg-primary/10" : ""
+                }`}
               >
                 <td className="px-3 py-2 max-w-[200px] sm:max-w-[360px]">
                   <div className="flex items-center gap-3">
@@ -946,6 +988,7 @@ export function PerformanceTable({ items: itemsProp, brand, formats, accounts, f
                       <span className="text-sm font-medium text-foreground truncate inline-flex items-center gap-1.5">
                         <Link
                           href={`/${brand}/content/${item.id}`}
+                          onClick={onOpenRow ? (e) => { if (opensInThisTab(e)) onOpenRow(item.id); } : undefined}
                           className="hover:text-primary hover:underline transition-colors truncate"
                         >
                           {item.title || "(Untitled)"}
