@@ -19,6 +19,7 @@ import { useRememberListUrl } from "@/lib/hooks/use-remember-list-url";
 import { readNextRows } from "@/lib/my-work/next-rows";
 import { ProductionListKeys, ProductionPeek } from "./production-peek";
 import { trackUsage } from "@/lib/usage/track";
+import { onlyWaiting, WAITING_AFTER_DAYS } from "@/lib/production/waiting";
 import {
   Popover,
   PopoverContent,
@@ -117,6 +118,37 @@ function encodeSort(key: SortKey | null, dir: SortDir): string {
   return `${key}:${dir}`;
 }
 
+// "· 5 waiting 3d+" beside a status group's count: a quiet link that narrows
+// the list to the posts stuck in that hand-off (and back). Renders nothing
+// when no row in the group is stuck, so most headers stay as they were.
+function WaitingToggle({
+  count,
+  active,
+  onToggle,
+}: {
+  count: number;
+  active: boolean;
+  onToggle: () => void;
+}) {
+  if (count === 0) return null;
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-pressed={active}
+      data-testid="waiting-toggle"
+      title={
+        active
+          ? "Show every post again"
+          : `Show only the posts that have sat here ${WAITING_AFTER_DAYS}+ days`
+      }
+      className="text-xs text-amber-700 dark:text-amber-400 hover:underline underline-offset-2"
+    >
+      · {count} waiting {WAITING_AFTER_DAYS}d+{active ? " — show all" : ""}
+    </button>
+  );
+}
+
 export function ProductionView({ brand, currentUserId }: ProductionViewProps) {
   const [items, setItems] = useState<ProductionItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -136,6 +168,8 @@ export function ProductionView({ brand, currentUserId }: ProductionViewProps) {
     source: { default: "all" },
     editor: { default: "all" },
     sort: { default: "default" }, // "default" = no explicit sort
+    // "1" = only posts stuck in a hand-off status 3+ days (lib/production/waiting).
+    waiting: { default: "" },
   });
   const {
     q: search,
@@ -144,7 +178,9 @@ export function ProductionView({ brand, currentUserId }: ProductionViewProps) {
     source: selectedSource,
     editor: selectedEditor,
     sort: sortValue,
+    waiting: waitingParam,
   } = filters.values;
+  const waitingOnly = waitingParam === "1";
   const { key: sortKey, dir: sortDir } = decodeSort(sortValue);
 
   useRememberListUrl({ brand, listKey: "production" });
@@ -343,7 +379,7 @@ export function ProductionView({ brand, currentUserId }: ProductionViewProps) {
     );
   };
 
-  const pipelineItems = pipelineCandidates.filter((item) => {
+  const filteredItems = pipelineCandidates.filter((item) => {
     if (!matchesChannel(item, selectedPlatform)) return false;
     if (selectedFormat !== "all") {
       if (item.format !== selectedFormat) return false;
@@ -357,6 +393,17 @@ export function ProductionView({ brand, currentUserId }: ProductionViewProps) {
     }
     return matchesQuery(item);
   });
+  // Group headers count the stuck rows under the other filters; the toggle
+  // then narrows the list to just them.
+  const now = Date.now();
+  const waitingIds = new Set(onlyWaiting(filteredItems, now).map((i) => i.id));
+  const pipelineItems = waitingOnly
+    ? filteredItems.filter((i) => waitingIds.has(i.id))
+    : filteredItems;
+  const toggleWaiting = () => {
+    if (!waitingOnly) trackUsage("production:waiting-filter");
+    filters.set("waiting", waitingOnly ? "" : "1");
+  };
 
   const byStatus = new Map<string, ProductionItem[]>();
   for (const s of pipelineStatuses) byStatus.set(s.name, []);
@@ -531,6 +578,11 @@ export function ProductionView({ brand, currentUserId }: ProductionViewProps) {
                   <span className="text-xs text-muted-foreground tabular-nums">
                     {statusItems.length}
                   </span>
+                  <WaitingToggle
+                    count={statusItems.filter((i) => waitingIds.has(i.id)).length}
+                    active={waitingOnly}
+                    onToggle={toggleWaiting}
+                  />
                 </div>
                 <ProductionPipelineTable
                   items={statusItems}
@@ -555,7 +607,8 @@ export function ProductionView({ brand, currentUserId }: ProductionViewProps) {
                 selectedPlatform !== "all" ||
                 selectedFormat !== "all" ||
                 selectedSource !== "all" ||
-                selectedEditor !== "all"
+                selectedEditor !== "all" ||
+                waitingOnly
                   ? "No items match the current filters."
                   : "No items in the pipeline."}
               </p>

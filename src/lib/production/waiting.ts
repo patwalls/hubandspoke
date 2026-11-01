@@ -43,3 +43,12 @@ export function waitingInStatus(
   });
   return { days, title: `In ${status} for ${days} days, since ${date}` };
 }
+
+/** Posts in `items` that are stuck (waitingInStatus not null) — the "N
+ *  waiting 3d+" count on each In Production group header and the rows the
+ *  `waiting=1` filter keeps. */
+export function onlyWaiting<
+  T extends { status?: string | null; statusSince?: string | null },
+>(items: readonly T[], now: number = Date.now()): T[] {
+  return items.filter((i) => waitingInStatus(i.status, i.statusSince, now) !== null);
+}
