@@ -972,8 +972,9 @@ export function PerformanceTable({ items: itemsProp, brand, formats, accounts, f
                 key={item.id}
                 data-row-id={item.id}
                 data-returned={flashId === item.id ? "true" : undefined}
-                className={`border-b border-border/50 hover:bg-accent/30 transition-colors duration-700 ${
-                  flashId === item.id ? "bg-primary/10" : ""
+                className={`border-b border-border/50 hover:bg-accent/30 ${
+                  // On at once, fades out when the flash ends.
+                  flashId === item.id ? "bg-primary/15" : "transition-colors duration-700"
                 }`}
               >
                 <td className="px-3 py-2 max-w-[200px] sm:max-w-[360px]">
