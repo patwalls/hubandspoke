@@ -11,6 +11,7 @@ import { todayInclusiveOfUtc } from "@/lib/dates";
 import { useUrlState } from "@/lib/hooks/use-url-state";
 import { useRememberListUrl } from "@/lib/hooks/use-remember-list-url";
 import { ReportCache, loadMode } from "@/lib/content-list/report-cache";
+import { saveReturnSpot, takeReturnSpot } from "@/lib/content-list/return-spot";
 import { trackUsage } from "@/lib/usage/track";
 import dynamic from "next/dynamic";
 // Lazy: these alternate views load only when selected via the "Other" pill —
@@ -207,6 +208,29 @@ export function ContentView({ brand }: ContentViewProps) {
     fetchReport();
   }, [fetchReport]);
 
+  // content-list-fast M3: opened a post from here and came back → the table
+  // scrolls to where you were and flashes that row.
+  const [returnSpot, setReturnSpot] = useState<{ id: string; y: number } | null>(null);
+  useEffect(() => {
+    const href = window.location.pathname + window.location.search;
+    const spot = takeReturnSpot(window.sessionStorage, brand, href, Date.now());
+    if (spot) {
+      setReturnSpot({ id: spot.id, y: spot.y });
+      trackUsage("content:list-return", brand);
+    }
+  }, [brand]);
+  const onOpenRow = useCallback(
+    (id: string) => {
+      saveReturnSpot(window.sessionStorage, brand, {
+        id,
+        y: window.scrollY,
+        href: window.location.pathname + window.location.search,
+        at: Date.now(),
+      });
+    },
+    [brand],
+  );
+
   return (
     <div className="space-y-6">
       {/* flex-wrap: on phones the "Other" pill drops below the title instead
@@ -282,6 +306,8 @@ export function ContentView({ brand }: ContentViewProps) {
           accounts={accounts}
           formatBars={data.formatBars}
           onPostCreated={fetchReport}
+          returnSpot={returnSpot}
+          onOpenRow={onOpenRow}
         />
         </div>
       ) : (
