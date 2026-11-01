@@ -132,6 +132,9 @@ type UserExtras = {
    *  (clip-idea pipeline) show when work actually started, not when the
    *  automation inserted the row. */
   firstEditAt?: Date | null;
+  /** When the item entered its current status (latest status_change to it),
+   *  else its created_at. Drives the "waiting 5d" tag (lib/production/waiting). */
+  statusSince?: Date | null;
 };
 
 function mapProductionItem(
@@ -194,6 +197,9 @@ function mapProductionItem(
       item.predictedViewsSnapshotAt?.toISOString() ?? null,
     createdAt: (extras.firstEditAt ?? item.createdAt).toISOString(),
     updatedAt: item.updatedAt.toISOString(),
+    ...(extras.statusSince !== undefined
+      ? { statusSince: (extras.statusSince ?? item.createdAt).toISOString() }
+      : {}),
   };
 }
 
@@ -1197,8 +1203,35 @@ export async function getProductionPipeline(
     }
   }
 
+  // When each item entered its current status: the latest status_change
+  // whose `to` is that status. Items born in their status (cross-posts start
+  // Ready To Publish) have none and fall back to created_at in the mapper.
+  const statusSinceById = new Map<string, Date>();
+  if (itemIds.length > 0) {
+    const statusRows = await db
+      .select({
+        contentItemId: contentEvents.contentItemId,
+        to: sql<string | null>`${contentEvents.payload}->>'to'`,
+        at: sql<Date | string>`max(${contentEvents.createdAt})`,
+      })
+      .from(contentEvents)
+      .where(
+        and(
+          inArray(contentEvents.contentItemId, itemIds),
+          eq(contentEvents.eventType, "status_change")
+        )
+      )
+      .groupBy(contentEvents.contentItemId, sql`${contentEvents.payload}->>'to'`);
+    const statusById = new Map(rows.map((r) => [r.item.id, r.item.status]));
+    for (const row of statusRows) {
+      if (!row.at || row.to !== statusById.get(row.contentItemId)) continue;
+      statusSinceById.set(row.contentItemId, new Date(row.at));
+    }
+  }
+
   return rows.map((r) =>
     mapProductionItem(r.item, {
+      statusSince: statusSinceById.get(r.item.id) ?? null,
       editorUserName: r.editorUserName,
       editorAvatarUrl: r.editorAvatarUrl,
       account: r.accountId

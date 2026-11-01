@@ -200,6 +200,9 @@ export interface ProductionItem {
   hubSpokeOverride?: boolean | null;
   createdAt: string;
   updatedAt: string;
+  /** In Production list only: when the item entered its current status (ISO).
+   *  See lib/production/waiting. */
+  statusSince?: string | null;
 }
 
 export interface Period {
