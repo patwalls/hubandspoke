@@ -298,6 +298,17 @@ export const REPORT_ITEM_TRIMMED_KEYS = [
   "mediaS3Bucket",
   "mediaSizeBytes",
   "mediaContentType",
+  "mediaS3UploadedAt",
+  // cover sources: the server resolves the one cover the row shows
+  // (coverImageUrl) and ships it as `posterUrl` — src/lib/content-list/report-item.ts
+  "thumbnail",
+  "mediaUrl",
+  "mediaS3Key",
+  "posterS3Key",
+  // detail-page / pipeline fields the list never reads
+  "hook",
+  "repostedFromItemId",
+  "enrichmentCompletedAt",
 ] as const;
 
 /**

@@ -197,15 +197,10 @@ function mapProductionItem(
   };
 }
 
-// Presign every unique S3 key in `items` in parallel and attach posterUrl /
-// mediaUrl to each. Failures fall through (url stays null); the UI has its own
-// fallback to `thumbnail`. 1h TTL matches the detail endpoint.
-async function attachPresignedCoverUrls(items: ProductionItem[]): Promise<void> {
-  const keys = new Set<string>();
-  for (const it of items) {
-    if (it.posterS3Key) keys.add(it.posterS3Key);
-    if (it.mediaS3Key) keys.add(it.mediaS3Key);
-  }
+// Presign the given S3 keys (reportCoverKeys: only what a cover can come from)
+// in parallel and attach posterUrl / mediaUrl to each item. Failures fall
+// through (url stays null); coverImageUrl falls back to `thumbnail`. 1h TTL matches the detail endpoint.
+async function attachPresignedCoverUrls(items: ProductionItem[], keys: Set<string>): Promise<void> {
   const urlByKey = new Map<string, string>();
   await Promise.all(
     Array.from(keys).map(async (key) => {
@@ -305,7 +300,7 @@ import {
   type WeekStartsOn,
 } from "@/lib/utils/dates";
 import type { ContentReportData, MetricData, ProductionItem, ReportItem } from "@/types";
-import { REPORT_ITEM_TRIMMED_KEYS } from "@/types";
+import { reportCoverKeys, slimReportItem } from "@/lib/content-list/report-item";
 import { summarizeChannels } from "@/lib/export-csv";
 import { fetchFormatViewBars } from "@/lib/services/format-view-bars";
 import {
@@ -976,28 +971,13 @@ export async function getContentReport(
         mapProductionItem(it, { account: accountByItemId.get(it.id) ?? null })
       )
     : [];
-  await attachPresignedCoverUrls(mappedItems);
+  await attachPresignedCoverUrls(mappedItems, reportCoverKeys(mappedItems));
   // Strip the heavyweight/detail-only fields before the payload leaves the
   // server — this is what took the report response from ~2.7 MB to a fraction.
   // REPORT_ITEM_TRIMMED_KEYS is also the source of the ReportItem type, so a
   // consumer reading a stripped field fails to compile rather than at runtime.
-  const reportItems: ReportItem[] = mappedItems.map((it) => {
-    // Sparse serialization: drop trimmed keys AND null-valued keys. Roughly
-    // half of every item's ~90 keys are null — key names + "null" across
-    // ~1,200 items were ~600 KB of payload. Consumers read fields with
-    // nullish-tolerant patterns only (audited 2026-08-10: zero `=== null`
-    // comparisons on item fields in the report flow), so undefined-for-null
-    // is behaviorally identical there.
-    const slim: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(it)) {
-      if (v !== null && v !== undefined) slim[k] = v;
-    }
-    for (const k of REPORT_ITEM_TRIMMED_KEYS) delete slim[k];
-    // Account objects are deduplicated into `accountsById` (below) — the same
-    // ~9 accounts embedded per-item were ~570 KB of the payload.
-    delete slim.account;
-    return slim as ReportItem;
-  });
+  // Slim per-row shape + one resolved cover per row (src/lib/content-list/report-item.ts).
+  const reportItems: ReportItem[] = mappedItems.map(slimReportItem);
   const accountsById: NonNullable<ContentReportData["accountsById"]> = {};
   for (const it of mappedItems) {
     if (it.account && !accountsById[it.account.id]) accountsById[it.account.id] = it.account;
