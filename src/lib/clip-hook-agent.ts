@@ -95,7 +95,7 @@ const tools = (
     },
     transcriptAnchorQuote: {
       type: "string",
-      description: "Verbatim copy of the section's anchor quote (≥ 8 words).",
+      description: "Verbatim copy of the section's anchor quote (from the SECTION block).",
     },
     tightStartSec: {
       type: "number",
@@ -304,16 +304,12 @@ function validate(
     !angle ||
     !rationale ||
     !Number.isFinite(estimatedViews) ||
-    estimatedViews < 0 ||
-    !anchorRaw
+    estimatedViews < 0
   ) {
     return {
       error:
-        "eligible=true but one of hook/angle/rationale/estimatedViews/transcriptAnchorQuote is missing or invalid",
+        "eligible=true but one of hook/angle/rationale/estimatedViews is missing or invalid",
     };
-  }
-  if (tokenize(anchorRaw).length < 8) {
-    return { error: `transcriptAnchorQuote shorter than 8 words` };
   }
   // Blueprint anchor must match the reference library when one exists.
   let blueprintAnchor: string | null = null;
@@ -346,19 +342,69 @@ function validate(
     finalEnd = tightEndRaw;
   }
 
-  // Anchor must fall inside the final range. Reuse the shared resolver
-  // with the (possibly narrowed) range.
-  const anchorRes = resolveAnchorForRange({
-    intendedStartSec: finalStart,
-    intendedEndSec: finalEnd,
-    anchorQuote: anchorRaw,
-    words: args.transcriptWords,
-    segments: args.transcriptSegments,
-    durationSec: args.pillarDurationSec,
-    candidateLabel: `Hook for section "${args.section.topic}"`,
-  });
-  if (!anchorRes.ok) {
-    return { error: anchorRes.failureReason ?? "anchor resolution failed" };
+  // Anchor must fall inside the final range. The section's own anchor was
+  // already found in the transcript by pass 1 (clip-section-agent), so it is
+  // always acceptable — even when it's under 8 words, which pass 1 lets
+  // through when the quote still resolves ("We use Superwall for our
+  // paywalls."). The ≥8-word rule only guards a quote the WRITER picks.
+  // Before 2026-11-02 the writer was told to copy the section's anchor and
+  // then rejected for doing so, so every short-anchor section (1.8% of live
+  // sections — tech-stack lists of short "We use X for Y" lines especially)
+  // could never become a clip in any format: the $400K iOS app video's
+  // tech-stack section went 0 ideas. A writer anchor that is missing, short,
+  // or unresolvable falls back to the section's anchor instead of discarding
+  // an otherwise good hook; if a narrowed range excludes that anchor, the
+  // full section range is used.
+  const sectionAnchor = args.section.transcriptAnchorQuote.trim();
+  const isSectionAnchor =
+    anchorRaw !== "" &&
+    canonicalizeForMatch(anchorRaw) === canonicalizeForMatch(sectionAnchor);
+  const resolve = (quote: string, start: number, end: number) =>
+    resolveAnchorForRange({
+      intendedStartSec: start,
+      intendedEndSec: end,
+      anchorQuote: quote,
+      words: args.transcriptWords,
+      segments: args.transcriptSegments,
+      durationSec: args.pillarDurationSec,
+      candidateLabel: `Hook for section "${args.section.topic}"`,
+    });
+  const attempts: Array<{ quote: string; start: number; end: number }> = [];
+  if (anchorRaw && (isSectionAnchor || tokenize(anchorRaw).length >= 8)) {
+    attempts.push({ quote: anchorRaw, start: finalStart, end: finalEnd });
+  }
+  if (sectionAnchor && !isSectionAnchor) {
+    attempts.push({ quote: sectionAnchor, start: finalStart, end: finalEnd });
+  }
+  if (
+    sectionAnchor &&
+    (finalStart !== args.section.startSec || finalEnd !== args.section.endSec)
+  ) {
+    attempts.push({
+      quote: sectionAnchor,
+      start: args.section.startSec,
+      end: args.section.endSec,
+    });
+  }
+  let anchorRes: ReturnType<typeof resolveAnchorForRange> | null = null;
+  let anchorQuote = "";
+  for (const a of attempts) {
+    const res = resolve(a.quote, a.start, a.end);
+    if (res.ok) {
+      anchorRes = res;
+      anchorQuote = a.quote;
+      break;
+    }
+    anchorRes ??= res;
+  }
+  if (!anchorRes || !anchorRes.ok) {
+    return {
+      error:
+        anchorRes?.failureReason ??
+        (anchorRaw
+          ? "transcriptAnchorQuote shorter than 8 words"
+          : "transcriptAnchorQuote missing"),
+    };
   }
 
   // Extras check.
@@ -391,7 +437,7 @@ function validate(
     rationale,
     estimatedViews,
     blueprintAnchorHook: blueprintAnchor,
-    transcriptAnchorQuote: anchorRaw,
+    transcriptAnchorQuote: anchorQuote,
     transcriptAnchorStartSec: anchorRes.anchorStartSec,
     startSec: anchorRes.startSec,
     endSec: anchorRes.endSec,
@@ -493,7 +539,7 @@ ${DEFAULT_FORMAT_BLOCK}`;
         ? validated.error
         : "tool_use block missing";
     response = await attempt(
-      `Your previous response failed validation: ${reason}. Re-call write_format_hook with either eligible:false (+ one-sentence reason) OR a full eligible:true object (hook, angle, rationale, integer estimatedViews, blueprintAnchorHook copied verbatim from the REFERENCE LIBRARY, transcriptAnchorQuote ≥8 words verbatim from the transcript excerpt above, and extras conforming to the schema when declared).`,
+      `Your previous response failed validation: ${reason}. Re-call write_format_hook with either eligible:false (+ one-sentence reason) OR a full eligible:true object (hook, angle, rationale, integer estimatedViews, blueprintAnchorHook copied verbatim from the REFERENCE LIBRARY, transcriptAnchorQuote copied verbatim from the SECTION block's anchor, and extras conforming to the schema when declared).`,
     );
     extracted = extract(response);
     if (extracted) {
