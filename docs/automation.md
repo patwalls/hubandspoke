@@ -1194,7 +1194,21 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
   extractor now joins every block with that heading, and the stale block was
   removed from both futurepedia skills (Oct 19 pillar: 0 → 2 ideas). If
   every reason cites rules the skill no longer seems to say, check for a
-  repeated heading.
+  repeated heading. **2026-11-02 — short section anchors:** the $400K/Month
+  iOS App video's "Brainrot's full tech stack" section went 0 ideas for
+  Repackage Tech Stack With Hook with `agent error: validation failed:
+  transcriptAnchorQuote shorter than 8 words`. Pass 1 keeps a section whose
+  anchor is under 8 words when the quote still resolves ("We use Superwall
+  for our paywalls."), and pass 2 told the writer to copy that anchor and then
+  rejected it for being short, so such a section could never clip in any format
+  (34 of 1,926 live sections; tech-stack lists of short "We use X for Y" lines
+  are the usual victims). `clip-hook-agent.ts` now always accepts the
+  section's own anchor, and falls back to it (and to the full section range if
+  a narrowed cut drops it) when the writer's quote is missing, short or not in
+  the transcript. A read-only replay of pass 2 (import
+  `writeFormatHookForSection` + `loadLiveSectionsForPillar` in a throwaway
+  tsx script against prod `DATABASE_URL`, with a logging `client`) shows the
+  raw tool input, which is the fastest way to tell these cases apart.
 - **Brand scope:** the home cron only archives the brands in its env file
   (`BRANDS` in `~/.config/hubandspoke/yt-archive.env`). The watchdog mirrors
   that list in `DEFAULT_WATCH_BRANDS`, overridable without a deploy via the

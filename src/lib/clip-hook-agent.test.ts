@@ -214,6 +214,77 @@ describe("writeFormatHookForSection — wiring", () => {
     expect(candidate.reason).toMatch(/agent error/i);
   });
 
+  describe("a section whose stored anchor is under 8 words", () => {
+    // Pass 1 (clip-section-agent) keeps a short anchor when it still resolves
+    // in the transcript. The 2026-11-02 drought: the $400K iOS app video's
+    // tech-stack section was anchored on "We use Superwall for our paywalls."
+    // (6 words); the writer copied it as told, validation rejected it as
+    // "shorter than 8 words" on both tries, and the format got 0 ideas.
+    const SHORT = "We use Superwall for our paywalls.";
+    function shortArgs(client: Anthropic): HookGenerateArgs {
+      const base = baseArgs({ client });
+      return {
+        ...base,
+        section: {
+          ...base.section,
+          transcriptAnchorQuote: SHORT,
+          transcriptExcerpt: `[01:50] ${SHORT}`,
+        },
+        transcriptWords: wordsFor(SHORT, 110),
+      };
+    }
+
+    it("accepts the section's own anchor echoed verbatim, on the first call", async () => {
+      const { client, create } = makeClient([
+        { ...ELIGIBLE_INPUT, transcriptAnchorQuote: SHORT },
+      ]);
+      const { candidate } = await writeFormatHookForSection(shortArgs(client));
+
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(candidate.eligible).toBe(true);
+      expect(candidate.hook).toBe(ELIGIBLE_INPUT.hook);
+      expect(candidate.transcriptAnchorQuote).toBe(SHORT);
+      expect(candidate.transcriptAnchorStartSec).toBeCloseTo(110, 0);
+    });
+
+    it("falls back to the section's anchor when the writer's own quote is short or missing", async () => {
+      for (const transcriptAnchorQuote of ["for our paywalls", undefined]) {
+        const { client, create } = makeClient([
+          { ...ELIGIBLE_INPUT, transcriptAnchorQuote },
+        ]);
+        const { candidate } = await writeFormatHookForSection(shortArgs(client));
+
+        expect(create).toHaveBeenCalledTimes(1);
+        expect(candidate.eligible).toBe(true);
+        expect(candidate.transcriptAnchorQuote).toBe(SHORT);
+      }
+    });
+
+    it("uses the full section range when the writer's narrowed cut leaves the anchor out", async () => {
+      const { client } = makeClient([
+        { ...ELIGIBLE_INPUT, transcriptAnchorQuote: SHORT, tightStartSec: 125, tightEndSec: 160 },
+      ]);
+      const { candidate } = await writeFormatHookForSection(shortArgs(client));
+
+      expect(candidate.eligible).toBe(true);
+      expect(candidate.startSec).toBeLessThanOrEqual(110);
+      expect(candidate.endSec).toBeGreaterThan(110);
+    });
+  });
+
+  it("still rejects a writer anchor that isn't in the transcript when the section's anchor can't be used either", async () => {
+    const { client } = makeClient([
+      { ...ELIGIBLE_INPUT, transcriptAnchorQuote: "an invented line the founder never actually said on camera" },
+    ]);
+    const base = baseArgs({ client });
+    const { candidate } = await writeFormatHookForSection({
+      ...base,
+      section: { ...base.section, transcriptAnchorQuote: "also never said by anyone at all here" },
+    });
+    expect(candidate.eligible).toBe(false);
+    expect(candidate.reason).toMatch(/agent error/i);
+  });
+
   it("is attributed to the fixed prompt version (hook-v2)", () => {
     expect(HOOK_PROMPT_VERSION).toBe(2);
     expect(HOOK_GENERATED_BY).toMatch(/:hook-v2$/);
