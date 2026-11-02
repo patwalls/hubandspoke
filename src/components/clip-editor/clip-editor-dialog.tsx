@@ -257,6 +257,10 @@ function EditorWorkspace({
   const framing = useFraming(engine, plan, doc);
   const scene = useMemo(() => resolveScene(plan), [plan]);
   const view = useMemo(() => buildTranscriptView(doc, session.words), [doc, session.words]);
+  const carriedCount = session.carriedFixes?.length ?? 0;
+  useEffect(() => {
+    if (carriedCount > 0) trackUsage("clip-editor:carried-fixes", brand);
+  }, [carriedCount, brand]);
   const speakerLabels = useMemo<SpeakerLabels>(() => {
     const list = session.speakers ?? [];
     if (list.length < 2) return {}; // one voice → labels are noise
@@ -773,6 +777,11 @@ function EditorWorkspace({
             <p className="mb-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-800">
               This source only has caption-level timing, so word cuts are
               approximate. Re-run the transcript for frame-accurate edits.
+            </p>
+          )}
+          {carriedCount > 0 && (
+            <p data-testid="carried-fixes" className="mb-2 truncate text-[11px] text-muted-foreground" title="Fixed in another clip of this video — click a word to change it">
+              Spelling from this video&apos;s other clips: {session.carriedFixes.join(", ")}
             </p>
           )}
           <TranscriptEditor

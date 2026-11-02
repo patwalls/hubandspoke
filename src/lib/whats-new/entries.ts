@@ -29,6 +29,16 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-11-02-carry-spelling-fixes",
+    shippedAt: "2026-11-02T11:15:00Z",
+    kind: "feature",
+    title: "Fix a name once per video in the clip editor",
+    body: "When you fix a misspelled word in one clip's transcript (like \"chat gpt\" to \"ChatGPT\"), the next clip you open from the same video starts with that fix already in its captions. A short line above the transcript lists the fixes it brought over.",
+    href: "/[brand]/queue",
+    screen: "clip-editor:carried-fixes",
+    audience: { flag: "clipEditor" },
+  },
+  {
     id: "2026-11-01-content-list-step",
     shippedAt: "2026-11-01T13:20:00Z",
     kind: "feature",
