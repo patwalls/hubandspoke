@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { EyeIcon } from "lucide-react";
+import { EyeIcon, MessageSquareIcon } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { AccountBadge } from "@/components/ui/account-badge";
@@ -11,6 +11,7 @@ import { postTypeDisplay } from "@/lib/platforms";
 import { trackUsage } from "@/lib/usage/track";
 import { rememberRun } from "@/lib/production/run";
 import { waitingInStatus } from "@/lib/production/waiting";
+import { newCommentsFor } from "@/lib/production/new-comments";
 
 export type SortKey =
   | "editor"
@@ -43,6 +44,9 @@ interface ProductionPipelineTableProps {
   peekId?: string | null;
   /** The keyboard cursor's row (ProductionListKeys). */
   focusedId?: string | null;
+  /** Who is looking: their own comments never count as new
+   *  (lib/production/new-comments). */
+  viewerId?: string | null;
 }
 
 function formatRelativeTime(iso: string | null | undefined): string {
@@ -219,6 +223,7 @@ export function ProductionPipelineTable({
   onPeek,
   peekId,
   focusedId,
+  viewerId,
 }: ProductionPipelineTableProps) {
   const sortedItems = useMemo(() => {
     if (!sortKey) return items;
@@ -411,6 +416,39 @@ export function ProductionPipelineTable({
                       >
                         {item.title || "(Untitled)"}
                       </Link>
+                      {(() => {
+                        // Fresh feedback from someone else: a quiet count
+                        // that opens the peek (it lists the latest comments).
+                        const fresh = newCommentsFor(item.recentComments, viewerId);
+                        if (!fresh) return null;
+                        const body = (
+                          <>
+                            <MessageSquareIcon className="size-3" aria-hidden />
+                            {fresh.count}
+                          </>
+                        );
+                        const cls =
+                          "shrink-0 inline-flex items-center gap-0.5 rounded px-0.5 text-[11px] tabular-nums text-sky-600 dark:text-sky-400";
+                        return onPeek ? (
+                          <button
+                            type="button"
+                            data-testid="new-comments"
+                            onClick={() => {
+                              trackUsage("production:new-comments", brand);
+                              onPeek(item.id);
+                            }}
+                            title={fresh.title}
+                            aria-label={fresh.title}
+                            className={cn(cls, "hover:bg-accent")}
+                          >
+                            {body}
+                          </button>
+                        ) : (
+                          <span data-testid="new-comments" title={fresh.title} className={cls}>
+                            {body}
+                          </span>
+                        );
+                      })()}
                       {item.publishedLink && (
                         <a
                           href={item.publishedLink}

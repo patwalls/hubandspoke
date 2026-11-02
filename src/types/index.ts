@@ -203,6 +203,17 @@ export interface ProductionItem {
   /** In Production list only: when the item entered its current status (ISO).
    *  See lib/production/waiting. */
   statusSince?: string | null;
+  /** In Production list only: open comments left on the post in the last
+   *  RECENT_COMMENT_HOURS, newest first. See lib/production/new-comments. */
+  recentComments?: RecentComment[];
+}
+
+export interface RecentComment {
+  /** ISO time the comment was left. */
+  at: string;
+  byUserId: string | null;
+  /** The commenter's first name, if known. */
+  by: string | null;
 }
 
 export interface Period {

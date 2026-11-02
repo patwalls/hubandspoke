@@ -595,6 +595,7 @@ export function ProductionView({ brand, currentUserId }: ProductionViewProps) {
                   onPeek={setPeekId}
                   peekId={peekId}
                   focusedId={focusedId}
+                  viewerId={currentUserId}
                 />
               </section>
             );
