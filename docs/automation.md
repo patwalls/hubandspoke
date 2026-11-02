@@ -2517,6 +2517,10 @@ has a row in `docs/features.md`'s cleanup backlog.
   once the port answers. The warmer imports the heavy server modules and
   pre-populates the shared 60s report cache (`src/lib/db/queries-cached.ts`)
   for every enabled brand + the credits banners — measured 892ms total.
+  The production report is warmed under both keys people load: the queue
+  page's full one and In Production's `excludeIdea=true` one (2026-11-02 —
+  only the queue key was warmed, so In Production, the busier screen, paid
+  the cold report after every deploy).
   Why: the first user after every deploy paid ~2.3s of lazy route-module
   init PLUS cold caches on every dashboard route ("everything feels slow
   right after a deploy" — 2026-08-09). Re-callable any time; safe noop

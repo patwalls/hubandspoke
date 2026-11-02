@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { isNotionAuthoritative } from "@/lib/platform";
@@ -19,12 +19,19 @@ import { useRememberListUrl } from "@/lib/hooks/use-remember-list-url";
 import { readNextRows } from "@/lib/my-work/next-rows";
 import { ProductionListKeys, ProductionPeek } from "./production-peek";
 import { trackUsage } from "@/lib/usage/track";
+import { ReportCache } from "@/lib/content-list/report-cache";
 import { onlyWaiting, WAITING_AFTER_DAYS } from "@/lib/production/waiting";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+
+// Survives client-side navigation: coming back from a post shows the list at
+// once and refreshes it quietly. Every status change clears the server's
+// report cache, so the refetch that follows a change is the slow one (1.5-6s)
+// — exactly the moment someone returns to the list. Keyed by brand.
+const pipelineCache = new ReportCache<ProductionItem[]>();
 
 interface ProductionViewProps {
   brand: string;
@@ -215,24 +222,41 @@ export function ProductionView({ brand, currentUserId }: ProductionViewProps) {
     [filters],
   );
 
+  // Bumped per request so a slow, older response can't overwrite a newer one
+  // (switching brands quickly).
+  const requestSeq = useRef(0);
+
   const fetchPipeline = useCallback(async () => {
-    setLoading(true);
+    const seq = ++requestSeq.current;
+    const cached = pipelineCache.get(brand);
+    if (cached) {
+      setItems(cached);
+      setLoading(false);
+      trackUsage("production:list-instant", brand);
+    } else {
+      setLoading(true);
+    }
     try {
       const res = await fetch(
         `/api/reports/production?brand=${encodeURIComponent(brand)}&excludeIdea=true`
       );
+      if (seq !== requestSeq.current) return;
       if (!res.ok) {
         console.error(`Production API returned HTTP ${res.status}`);
-        setItems([]);
+        // A remembered list beats an empty page when the refresh fails.
+        if (!cached) setItems([]);
         return;
       }
       const json = await res.json();
-      setItems(json.items ?? []);
+      if (seq !== requestSeq.current) return;
+      const fresh: ProductionItem[] = json.items ?? [];
+      pipelineCache.set(brand, fresh);
+      setItems(fresh);
     } catch (err) {
       console.error("Failed to fetch production pipeline:", err);
-      setItems([]);
+      if (!cached && seq === requestSeq.current) setItems([]);
     } finally {
-      setLoading(false);
+      if (seq === requestSeq.current) setLoading(false);
     }
   }, [brand]);
 

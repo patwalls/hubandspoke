@@ -62,17 +62,22 @@ export async function GET(request: NextRequest) {
       timings[`report:${b}`] = -1;
     }
   }
-  // Production-pipeline report (the queue page SSRs this; 1.5-2.7s cold).
+  // Production-pipeline report, both keys people load: the queue page SSRs
+  // the full one (excludeIdea=false), the In Production list fetches it
+  // without Ideas (excludeIdea=true). 1.5-2.7s cold each.
   for (const b of brands.map((x) => x.slug)) {
-    const t = Date.now();
-    try {
-      const { getProductionReportCached } = await import(
-        "@/lib/services/production-report"
-      );
-      await getProductionReportCached(b, false);
-      timings[`production:${b}`] = Date.now() - t;
-    } catch {
-      timings[`production:${b}`] = -1;
+    for (const excludeIdea of [false, true]) {
+      const key = `production${excludeIdea ? "-no-ideas" : ""}:${b}`;
+      const t = Date.now();
+      try {
+        const { getProductionReportCached } = await import(
+          "@/lib/services/production-report"
+        );
+        await getProductionReportCached(b, excludeIdea);
+        timings[key] = Date.now() - t;
+      } catch {
+        timings[key] = -1;
+      }
     }
   }
   try {
