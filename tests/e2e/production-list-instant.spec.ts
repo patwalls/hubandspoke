@@ -28,6 +28,10 @@ test("In Production comes back instantly from a post and refreshes behind it", a
   try {
     const id = await makePost(page, `${tag} before`);
     ids.push(id);
+    await sql`UPDATE production_items SET status = 'Assigned' WHERE id = ${id}`;
+    // A write through the app drops the 60 s report cache after the row
+    // changed underneath it.
+    ids.push(await makePost(page, `E2E cache bust ${Date.now()}`));
 
     await page.goto("/starter-story/production");
     const popup = page.getByRole("dialog", { name: "What's new" });
