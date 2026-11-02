@@ -70,9 +70,13 @@ test("a new clip starts with the spelling fixed in other clips of the same video
       });
     });
 
+    const flagsLoaded = page.waitForResponse(/\/api\/feature-flags$/);
     await page.goto("/starter-story/queue");
+    await flagsLoaded;
     await page.getByRole("dialog", { name: "What's new" }).getByRole("button", { name: "Got it" }).click({ timeout: 15_000 }).catch(() => {});
-    await page.getByRole("button", { name: title }).click({ timeout: 30_000 });
+    const row = page.getByRole("button", { name: title });
+    await expect(row).toBeVisible({ timeout: 30_000 });
+    await row.click();
     const dialog = page.getByRole("dialog");
     await expect(dialog.getByText("Editor beta")).toBeVisible({ timeout: 20_000 });
 
