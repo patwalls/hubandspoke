@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createDefaultDoc, type ClipEditDoc } from "./doc";
-import { carrySiblingFixes } from "./carry-fixes";
+import { brandSpellingDocs, carrySiblingFixes, learnBrandSpellings } from "./carry-fixes";
 import type { EditorWord } from "./words";
 
 // One source transcript, one word per second: words 0–9 are the first clip's
@@ -83,5 +83,59 @@ describe("carrySiblingFixes", () => {
     expect(again.added).toEqual({});
     expect(again.carried).toEqual([]);
     expect(again.doc).toBe(first.doc);
+  });
+});
+
+// fix-names-once M3: names fixed in clips of 2+ different videos of a brand.
+describe("brand spellings", () => {
+  const video = (texts: string[]): EditorWord[] =>
+    texts.map((text, i) => ({ index: i, text, startSec: i, endSec: i + 0.8 }));
+  const a = video(["we", "use", "cloud", "daily"]);
+  const b = video(["i", "asked", "cloud,", "then", "chat", "gpt"]);
+  const c = video(["chat", "gpt", "is", "great"]);
+  const fixDoc = (wordEdits: Record<string, string>) => ({ ...fresh, wordEdits });
+
+  it("learns a name only once it was fixed in two different videos", () => {
+    const spellings = learnBrandSpellings([
+      { sourceId: "A", doc: fixDoc({ "2000": "Claude" }), words: a },
+      { sourceId: "A", doc: fixDoc({ "2000": "Claude" }), words: a },
+      { sourceId: "B", doc: fixDoc({ "2000": "Claude,", "4000": "ChatGPT", "5000": "" }), words: b },
+    ]);
+    // "Claude": videos A and B. "ChatGPT": only video B (two clips of one video don't count).
+    expect(spellings).toEqual([{ said: "cloud", replacement: "Claude", videos: 2 }]);
+  });
+
+  it("never learns a case or punctuation tweak", () => {
+    const spellings = learnBrandSpellings([
+      { sourceId: "A", doc: fixDoc({ "0": "We," }), words: a },
+      { sourceId: "B", doc: fixDoc({ "0": "I," }), words: b },
+    ]);
+    expect(spellings).toEqual([]);
+  });
+
+  it("offers a brand spelling everywhere this video says it, keeping each spot's punctuation", () => {
+    const here = video(["so", "chat", "gpt.", "and", "cloud", "and", "chat", "gpt"]);
+    const docs = brandSpellingDocs(
+      [
+        { said: "chat gpt", replacement: "ChatGPT", videos: 2 },
+        { said: "rourke", replacement: "Rork", videos: 3 }, // never said here
+      ],
+      here,
+      fresh,
+    );
+    expect(docs).toHaveLength(1);
+    const clip = createDefaultDoc({ startSec: 0, endSec: 8, hook: "" });
+    const { added, carried } = carrySiblingFixes(clip, here, docs);
+    expect(added).toEqual({ "1000": "ChatGPT.", "2000": "", "6000": "ChatGPT", "7000": "" });
+    expect(carried).toEqual(["ChatGPT"]);
+  });
+
+  it("a clip's own spelling of the name wins over the brand's", () => {
+    const here = video(["cloud", "and", "cloud"]);
+    const docs = brandSpellingDocs([{ said: "cloud", replacement: "Claude", videos: 2 }], here, fresh);
+    const own = { ...createDefaultDoc({ startSec: 0, endSec: 3, hook: "" }), wordEdits: { "0": "Klaud" } };
+    const { added } = carrySiblingFixes(own, here, docs);
+    expect(added["0"]).toBeUndefined();
+    expect(added["2000"]).toBe("Claude");
   });
 });

@@ -17,7 +17,8 @@ import { resolveClipAspectRatio } from "@/lib/db/formats";
 import { getPresignedGetUrl } from "@/lib/s3";
 import { applyLook, clipLookSchema, createDefaultDoc, parseDoc, type ClipEditDoc } from "@/lib/clip-editor/doc";
 import { resolveTranscriptWords, type EditorWord } from "@/lib/clip-editor/words";
-import { carrySiblingFixes } from "@/lib/clip-editor/carry-fixes";
+import { brandSpellingDocs, carrySiblingFixes } from "@/lib/clip-editor/carry-fixes";
+import { loadBrandSpellings } from "./brand-spellings";
 import type { TranscriptSpeaker } from "@/lib/diarization/types";
 import { toRenderStatus, type ClipRenderStatus } from "./render-status";
 import { ensureClipPostDraft, type ClipPost } from "./post-draft";
@@ -93,7 +94,7 @@ export interface ClipEditorSession {
    *  ("Apply 2 fixes"), never applied on their own. `wordEdits` is exactly
    *  what applying adds (the clip's own corrections are never in it). Null
    *  when there's nothing to offer. */
-  offeredFixes: { names: string[]; wordEdits: Record<string, string> } | null;
+  offeredFixes: { names: string[]; wordEdits: Record<string, string>; fromBrand: boolean } | null;
   /** Detected speakers (null until speaker detection has run). */
   speakers: TranscriptSpeaker[] | null;
   /** True when word timings were interpolated from caption segments. */
@@ -206,15 +207,27 @@ export async function loadClipEditorSession(args: {
   });
 
   // An edit someone already worked on is never changed behind their back —
-  // fixes made elsewhere since are offered instead (fix-names-once M2).
+  // fixes made elsewhere since are offered instead (fix-names-once M2). Any
+  // edit, new or not, is also offered the brand's spellings: names fixed in
+  // 2+ other videos of this brand (M3). Those are never applied on their own.
+  // Sibling fixes come last so this video's own spelling wins.
   let offeredFixes: ClipEditorSession["offeredFixes"] = null;
-  if (!createdHere) {
-    const offer = carrySiblingFixes(
-      edit.doc,
-      words,
-      await loadSiblingDocs(row.sourceProductionItemId, row.id),
-    );
-    if (offer.carried.length > 0) offeredFixes = { names: offer.carried, wordEdits: offer.added };
+  const siblings = createdHere ? [] : await loadSiblingDocs(row.sourceProductionItemId, row.id);
+  const sameVideo = createdHere ? null : carrySiblingFixes(edit.doc, words, siblings);
+  const brandDocs = brandSpellingDocs(
+    // A brand sweep that fails costs the offer, never the editor.
+    await loadBrandSpellings(brand).catch(() => []),
+    words,
+    edit.doc,
+  );
+  const offer = brandDocs.length > 0 ? carrySiblingFixes(edit.doc, words, [...brandDocs, ...siblings]) : sameVideo;
+  if (offer && offer.carried.length > 0) {
+    const fromVideo = new Set(sameVideo?.carried ?? []);
+    offeredFixes = {
+      names: offer.carried,
+      wordEdits: offer.added,
+      fromBrand: offer.carried.some((n) => !fromVideo.has(n)),
+    };
   }
 
   const videoUrl = await getPresignedGetUrl(row.mediaS3Key, 4 * 3600, {
