@@ -96,4 +96,52 @@ describe("buildMyWorkDigest", () => {
     // Your-turn lines don't get answer links.
     expect(d.html).not.toContain("/my-work/answer/t1");
   });
+
+  describe("stuck hand-offs come first (handoffs-dont-stall M3)", () => {
+    const now = new Date("2026-11-02T12:00:00Z");
+    const daysAgo = (d: number) => new Date(now.getTime() - d * 86_400_000);
+
+    it("lifts a Ready To Publish post waiting 3+ days above fresh rows and says how long", () => {
+      const yourTurn = [row("a1"), row("a2"), row("a3"), row("a4"), row("a5"), row("rtp", "Ready To Publish")];
+      const turnSince = new Map([
+        ["a1", daysAgo(9)], // Assigned for 9 days is backlog, not a stuck hand-off
+        ["rtp", daysAgo(4)],
+      ]);
+      const d = buildMyWorkDigest({ ...base, now, yourTurn, toReview: [], turnSince })!;
+      expect(d.top[0]).toMatchObject({ row: { id: "rtp" }, why: "Ready To Publish, waiting 4 days" });
+      expect(d.top.find((t) => t.row.id === "a1")!.why).toBe("Assigned");
+      expect(d.stuck).toBe(1);
+      expect(d.text).toContain("1 of these has waited 3+ days to move on.");
+      expect(d.html).toContain("1 of these has waited 3+ days to move on.");
+    });
+
+    it("leaves a Ready To Publish post under 3 days alone", () => {
+      const d = buildMyWorkDigest({
+        ...base,
+        now,
+        yourTurn: [row("a"), row("rtp", "Ready To Publish")],
+        toReview: [],
+        turnSince: new Map([["rtp", daysAgo(2)]]),
+      })!;
+      expect(d.top.map((t) => t.row.id)).toEqual(["a", "rtp"]);
+      expect(d.top[1].why).toBe("Ready To Publish");
+      expect(d.stuck).toBe(0);
+      expect(d.text).not.toContain("3+ days");
+    });
+
+    it("ranks stuck review and publish rows after send-backs, ahead of fresh reviews, and counts beyond the top", () => {
+      const at = now;
+      const news = new Map<string, RowNews>([
+        ["sb", { comment: null, sentBack: { by: "Sam", at }, handedBy: null, isNew: true }],
+      ]);
+      const toReview = [row("r-old", "Review"), row("r-new", "Review")];
+      const yourTurn = [row("sb"), row("p1", "Ready To Publish"), ...["x1", "x2", "x3", "x4", "x5", "x6"].map((id) => ({ ...row(id, "Ready To Publish") }))];
+      const reviewSince = new Map([["r-old", daysAgo(5)], ["r-new", daysAgo(0.5)]]);
+      const turnSince = new Map([["p1", daysAgo(3)], ...["x1", "x2", "x3", "x4", "x5", "x6"].map((id) => [id, daysAgo(6)] as [string, Date])]);
+      const d = buildMyWorkDigest({ ...base, now, news, yourTurn, toReview, reviewSince, turnSince })!;
+      expect(d.top.map((t) => t.row.id)).toEqual(["sb", "r-old", "p1", "x1", "x2"]);
+      expect(d.stuck).toBe(8);
+      expect(d.text).toContain("8 of these have waited 3+ days to move on.");
+    });
+  });
 });

@@ -930,6 +930,13 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
   links only open a page; the answer saves on the tap there, so mail
   scanners that follow links change nothing. Rules in
   `src/lib/my-work/answer.ts`.
+- **Stuck hand-offs first (2026-11-02, handoffs-dont-stall M3):** a To
+  review or Ready To Publish row that has sat 3+ days in that status (same
+  rule as In Production's "waiting Nd", `src/lib/production/waiting.ts`;
+  status time from `getStatusSinceMany`, falling back to `updatedAt`) ranks
+  right after send-backs and new comments, its line says "Ready To Publish,
+  waiting N days", and one line under the subject counts them ("N of these
+  have waited 3+ days to move on"). Assigned rows never get a wait.
 
 ### `daily-scorecard-email` — daily publish-count scorecard
 - **Trigger:** cron `0 13 * * *` (13:00 UTC daily). 9am EDT during DST,
