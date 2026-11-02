@@ -266,11 +266,15 @@ function EditorWorkspace({
   // corrected, through `apply` — so it's one undo step like any edit.
   const offer = session.offeredFixes ?? null;
   const [offerApplied, setOfferApplied] = useState(false);
+  const brandOffered = offer?.fromBrand ?? false;
+  useEffect(() => {
+    if (brandOffered) trackUsage("clip-editor:brand-spellings", brand);
+  }, [brandOffered, brand]);
   const applyOffer = () => {
     if (!offer) return;
     apply((d) => ({ ...d, wordEdits: { ...offer.wordEdits, ...d.wordEdits } }));
     setOfferApplied(true);
-    trackUsage("clip-editor:carried-fixes:apply", brand);
+    trackUsage(offer.fromBrand ? "clip-editor:brand-spellings:apply" : "clip-editor:carried-fixes:apply", brand);
   };
   const speakerLabels = useMemo<SpeakerLabels>(() => {
     const list = session.speakers ?? [];
@@ -795,10 +799,19 @@ function EditorWorkspace({
               Spelling from this video&apos;s other clips: {session.carriedFixes.join(", ")}
             </p>
           )}
-          {carriedCount === 0 && offer && (
+          {offer && (
             <p data-testid="offered-fixes" className="mb-2 flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
-              <span className="truncate" title="Fixed in another clip of this video since this one was opened">
-                {offerApplied ? "Spelling from this video\u2019s other clips: " : "Other clips of this video spell: "}
+              <span
+                className="truncate"
+                title={
+                  offer.fromBrand
+                    ? "Fixed in clips of two or more other videos of this brand"
+                    : "Fixed in another clip of this video since this one was opened"
+                }
+              >
+                {offer.fromBrand
+                  ? offerApplied ? "Spelling from your team\u2019s other clips: " : "Your team\u2019s other clips spell: "
+                  : offerApplied ? "Spelling from this video\u2019s other clips: " : "Other clips of this video spell: "}
                 {offer.names.join(", ")}
               </span>
               {!offerApplied && (

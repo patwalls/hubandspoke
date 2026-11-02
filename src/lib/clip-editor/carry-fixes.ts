@@ -124,3 +124,73 @@ export function carrySiblingFixes(
   }
   return { doc: out, carried: [...carried], added };
 }
+
+/**
+ * Brand spellings (fix-names-once M3): a name the team fixed in clips of TWO
+ * OR MORE different videos of a brand ("cloud" → "Claude") is offered on any
+ * clip of that brand — never applied on its own, since a word that is a name
+ * in one video can be a plain word in another. The two-video bar is the same
+ * idea as Descript's glossary (a word corrected 3+ times gets learned): one
+ * video's fix is that video's business; two videos make it the brand's.
+ */
+export interface BrandSpelling {
+  /** What the transcript says, lowercased, punctuation stripped ("chat gpt"). */
+  said: string;
+  /** The team's spelling, newest wins ("ChatGPT"). */
+  replacement: string;
+  /** How many different videos it was fixed in. */
+  videos: number;
+}
+
+/** Learn the brand's spellings from clip edits of its videos. `edits` oldest
+ *  first; each carries the words of its own source's transcript. */
+export function learnBrandSpellings(
+  edits: { sourceId: string; doc: ClipEditDoc; words: EditorWord[] }[],
+  minVideos = 2,
+): BrandSpelling[] {
+  const seen = new Map<string, { replacement: string; sources: Set<string> }>();
+  for (const { sourceId, doc, words } of edits) {
+    if (words.length === 0) continue;
+    const byKey = new Map(words.map((w, i) => [wordEditKey(w.startSec), i]));
+    for (const fix of phraseFixes(doc, words, byKey)) {
+      const said = fix.target.map((w) => letters(w.text)).join(" ");
+      if (!said) continue;
+      const entry = seen.get(said) ?? { replacement: fix.replacement, sources: new Set<string>() };
+      entry.replacement = fix.replacement.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
+      entry.sources.add(sourceId);
+      seen.set(said, entry);
+    }
+  }
+  return [...seen.entries()]
+    .filter(([, e]) => e.sources.size >= minVideos && e.replacement)
+    .map(([said, e]) => ({ said, replacement: e.replacement, videos: e.sources.size }));
+}
+
+/**
+ * Turn brand spellings into "sibling" docs keyed to THIS transcript — the
+ * first place this video says each one — so `carrySiblingFixes` applies them
+ * with the same "Correct all" rules (phrase only, punctuation kept, the
+ * clip's own corrections win). Spellings this video never says are dropped.
+ */
+export function brandSpellingDocs(
+  spellings: BrandSpelling[],
+  words: EditorWord[],
+  base: ClipEditDoc,
+): ClipEditDoc[] {
+  const said = words.map((w) => letters(w.text));
+  const out: ClipEditDoc[] = [];
+  for (const s of spellings) {
+    const parts = s.said.split(" ");
+    const at = said.findIndex((_, i) => parts.every((p, j) => said[i + j] === p));
+    if (at < 0) continue;
+    // Keep this spot's own punctuation ("rourke." → "Rork.").
+    const lead = words[at].text.match(/^[^\p{L}\p{N}]*/u)?.[0] ?? "";
+    const trail = words[at + parts.length - 1].text.match(/[^\p{L}\p{N}]*$/u)?.[0] ?? "";
+    const wordEdits: Record<string, string> = {};
+    parts.forEach((_, j) => {
+      wordEdits[wordEditKey(words[at + j].startSec)] = j === 0 ? lead + s.replacement + trail : "";
+    });
+    out.push({ ...base, wordEdits });
+  }
+  return out;
+}
