@@ -224,16 +224,19 @@ export async function loadMyWorkDigest(userId: string, name: string | null) {
   const { yourTurn, toReview } = await getMyWork(userId);
   const [news, since] = await Promise.all([
     getRowNews(userId, [...new Set([...yourTurn, ...toReview].map((r) => r.id))]),
-    getStatusSinceMany(toReview.map((r) => r.id)),
+    getStatusSinceMany([...toReview, ...yourTurn].map((r) => r.id)),
   ]);
   // No status history (a post synced in already in Review): updatedAt, as on /my-work.
-  const reviewSince = new Map(toReview.map((r) => [r.id, since.get(r.id) ?? r.updatedAt]));
+  const sinceOf = (r: (typeof toReview)[number]) => since.get(r.id) ?? r.updatedAt;
+  const reviewSince = new Map(toReview.map((r) => [r.id, sinceOf(r)]));
+  const turnSince = new Map(yourTurn.map((r) => [r.id, sinceOf(r)]));
   return buildMyWorkDigest({
     firstName: (name ?? "").trim().split(/\s+/)[0] || null,
     yourTurn,
     toReview,
     news,
     reviewSince,
+    turnSince,
     baseUrl: appBaseUrl(),
   });
 }
