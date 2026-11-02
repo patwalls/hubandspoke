@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { productionItems, formats, brands, users, accounts, clipIdeas, transcripts, viewSnapshots, contentEvents } from "@/lib/db/schema";
+import { productionItems, formats, brands, users, accounts, clipIdeas, transcripts, viewSnapshots, contentEvents, contentComments } from "@/lib/db/schema";
 import { aliasedTable, getTableColumns } from "drizzle-orm";
 import { and, eq, gte, lte, isNotNull, isNull, inArray, notInArray, or, sql, min, type SQL, type Column } from "drizzle-orm";
 import {
@@ -9,6 +9,7 @@ import {
   type MultiFilter,
 } from "@/lib/multi-filter";
 import { getPresignedGetUrl } from "@/lib/s3";
+import { RECENT_COMMENT_HOURS } from "@/lib/production/new-comments";
 import { algorithmLabel } from "@/lib/clip-idea-agent";
 import {
   getInFlightStatusNames,
@@ -135,6 +136,8 @@ type UserExtras = {
   /** When the item entered its current status (latest status_change to it),
    *  else its created_at. Drives the "waiting 5d" tag (lib/production/waiting). */
   statusSince?: Date | null;
+  /** Open comments from the last RECENT_COMMENT_HOURS (lib/production/new-comments). */
+  recentComments?: RecentComment[];
 };
 
 function mapProductionItem(
@@ -200,6 +203,7 @@ function mapProductionItem(
     ...(extras.statusSince !== undefined
       ? { statusSince: (extras.statusSince ?? item.createdAt).toISOString() }
       : {}),
+    ...(extras.recentComments !== undefined ? { recentComments: extras.recentComments } : {}),
   };
 }
 
@@ -305,7 +309,7 @@ import {
   getWeekProgress,
   type WeekStartsOn,
 } from "@/lib/utils/dates";
-import type { ContentReportData, MetricData, ProductionItem, ReportItem } from "@/types";
+import type { ContentReportData, MetricData, ProductionItem, RecentComment, ReportItem } from "@/types";
 import { reportCoverKeys, slimReportItem } from "@/lib/content-list/report-item";
 import { summarizeChannels } from "@/lib/export-csv";
 import { fetchFormatViewBars } from "@/lib/services/format-view-bars";
@@ -1229,9 +1233,49 @@ export async function getProductionPipeline(
     }
   }
 
+  // Open comments from the last RECENT_COMMENT_HOURS, newest first, so the
+  // list can say "💬 2" on posts with fresh feedback. Who wrote them is kept
+  // (not a count) because the report is cached and shared: the row drops the
+  // viewer's own at render time (lib/production/new-comments).
+  const recentCommentsById = new Map<string, RecentComment[]>();
+  if (itemIds.length > 0) {
+    const commentRows = await db
+      .select({
+        contentItemId: contentComments.contentItemId,
+        at: contentComments.createdAt,
+        byUserId: contentComments.userId,
+        userName: users.name,
+        authorName: contentComments.authorName,
+      })
+      .from(contentComments)
+      .leftJoin(users, eq(users.id, contentComments.userId))
+      .where(
+        and(
+          inArray(contentComments.contentItemId, itemIds),
+          isNull(contentComments.resolvedAt),
+          gte(
+            contentComments.createdAt,
+            sql`now() - make_interval(hours => ${RECENT_COMMENT_HOURS})`
+          )
+        )
+      )
+      .orderBy(sql`${contentComments.createdAt} desc`);
+    for (const c of commentRows) {
+      const list = recentCommentsById.get(c.contentItemId) ?? [];
+      const name = c.userName ?? c.authorName;
+      list.push({
+        at: new Date(c.at).toISOString(),
+        byUserId: c.byUserId,
+        by: name ? name.trim().split(/\s+/)[0] : null,
+      });
+      recentCommentsById.set(c.contentItemId, list);
+    }
+  }
+
   return rows.map((r) =>
     mapProductionItem(r.item, {
       statusSince: statusSinceById.get(r.item.id) ?? null,
+      recentComments: recentCommentsById.get(r.item.id) ?? [],
       editorUserName: r.editorUserName,
       editorAvatarUrl: r.editorAvatarUrl,
       account: r.accountId
