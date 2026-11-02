@@ -3,7 +3,7 @@
  * idea, in one round trip: the idea, its (lazily created) edit document, a
  * playable source URL, and the transcript words around the clip.
  */
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, ne } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   clipEdits,
@@ -17,6 +17,7 @@ import { resolveClipAspectRatio } from "@/lib/db/formats";
 import { getPresignedGetUrl } from "@/lib/s3";
 import { applyLook, clipLookSchema, createDefaultDoc, parseDoc, type ClipEditDoc } from "@/lib/clip-editor/doc";
 import { resolveTranscriptWords, type EditorWord } from "@/lib/clip-editor/words";
+import { carrySiblingFixes } from "@/lib/clip-editor/carry-fixes";
 import type { TranscriptSpeaker } from "@/lib/diarization/types";
 import { toRenderStatus, type ClipRenderStatus } from "./render-status";
 import { ensureClipPostDraft, type ClipPost } from "./post-draft";
@@ -83,6 +84,10 @@ export interface ClipEditorSession {
   };
   /** Every word of the source transcript, in order. */
   words: EditorWord[];
+  /** Spelling fixes this edit started with, carried from other clips of the
+   *  same video ("ChatGPT", "Rork"). Only on the open that created the edit;
+   *  empty after. See carry-fixes.ts. */
+  carriedFixes: string[];
   /** Detected speakers (null until speaker detection has run). */
   speakers: TranscriptSpeaker[] | null;
   /** True when word timings were interpolated from caption segments. */
@@ -158,6 +163,12 @@ export async function loadClipEditorSession(args: {
     throw new ClipEditorUnsupportedSourceError("already_decided");
   }
 
+  // The WHOLE transcript: the editor shows the full source so any part of it
+  // can be edited into the clip. (~60 bytes/word — an hour-long podcast is
+  // well under 1 MB before gzip.)
+  const { words, synthetic } = resolveTranscriptWords(transcript);
+
+  let carriedFixes: string[] = [];
   const edit = await loadOrCreateEdit({
     clipIdeaId: row.id,
     userId: args.userId,
@@ -173,14 +184,18 @@ export async function loadClipEditorSession(args: {
       // The format's saved look (fonts, caption style, video inset) is the
       // starting point for every new edit of that format.
       const look = format?.clipTemplate ? clipLookSchema.safeParse(format.clipTemplate) : null;
-      return look?.success ? applyLook(doc, look.data) : doc;
+      const styled = look?.success ? applyLook(doc, look.data) : doc;
+      // Names a teammate already fixed in another clip of this video start
+      // fixed here too.
+      const carried = carrySiblingFixes(
+        styled,
+        words,
+        await loadSiblingDocs(row.sourceProductionItemId, row.id),
+      );
+      carriedFixes = carried.carried;
+      return carried.doc;
     },
   });
-
-  // The WHOLE transcript: the editor shows the full source so any part of it
-  // can be edited into the clip. (~60 bytes/word — an hour-long podcast is
-  // well under 1 MB before gzip.)
-  const { words, synthetic } = resolveTranscriptWords(transcript);
 
   const videoUrl = await getPresignedGetUrl(row.mediaS3Key, 4 * 3600, {
     bucket: row.mediaS3Bucket ?? undefined,
@@ -221,6 +236,7 @@ export async function loadClipEditorSession(args: {
       durationSec: transcript.durationSec ? Number(transcript.durationSec) : null,
     },
     words,
+    carriedFixes,
     speakers: transcript.speakers ?? null,
     wordsSynthetic: synthetic,
     latestRender: render ? toRenderStatus(render) : null,
@@ -266,6 +282,30 @@ async function loadTargetFormat(brand: string, targetFormat: string | null) {
     .where(and(eq(formats.brand, brand), eq(formats.name, targetFormat)))
     .limit(1);
   return format ?? null;
+}
+
+/** The edit docs of every OTHER clip cut from this source, oldest edit
+ *  first (so the newest spelling of a fix wins). Unparseable docs are
+ *  skipped. */
+export async function loadSiblingDocs(
+  sourceProductionItemId: string,
+  clipIdeaId: string,
+): Promise<ClipEditDoc[]> {
+  const rows = await db
+    .select({ doc: clipEdits.doc })
+    .from(clipEdits)
+    .innerJoin(clipIdeas, eq(clipIdeas.id, clipEdits.clipIdeaId))
+    .where(
+      and(
+        eq(clipIdeas.sourceProductionItemId, sourceProductionItemId),
+        ne(clipEdits.clipIdeaId, clipIdeaId),
+      ),
+    )
+    .orderBy(asc(clipEdits.updatedAt));
+  return rows.flatMap((r) => {
+    const parsed = parseDoc(r.doc);
+    return parsed.ok ? [parsed.doc] : [];
+  });
 }
 
 async function loadOrCreateEdit(args: {
