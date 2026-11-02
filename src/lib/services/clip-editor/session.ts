@@ -88,6 +88,12 @@ export interface ClipEditorSession {
    *  same video ("ChatGPT", "Rork"). Only on the open that created the edit;
    *  empty after. See carry-fixes.ts. */
   carriedFixes: string[];
+  /** For an edit that already existed: spelling fixes made in other clips of
+   *  this video since, that this clip hasn't got — offered as one click
+   *  ("Apply 2 fixes"), never applied on their own. `wordEdits` is exactly
+   *  what applying adds (the clip's own corrections are never in it). Null
+   *  when there's nothing to offer. */
+  offeredFixes: { names: string[]; wordEdits: Record<string, string> } | null;
   /** Detected speakers (null until speaker detection has run). */
   speakers: TranscriptSpeaker[] | null;
   /** True when word timings were interpolated from caption segments. */
@@ -169,6 +175,7 @@ export async function loadClipEditorSession(args: {
   const { words, synthetic } = resolveTranscriptWords(transcript);
 
   let carriedFixes: string[] = [];
+  let createdHere = false;
   const edit = await loadOrCreateEdit({
     clipIdeaId: row.id,
     userId: args.userId,
@@ -193,9 +200,22 @@ export async function loadClipEditorSession(args: {
         await loadSiblingDocs(row.sourceProductionItemId, row.id),
       );
       carriedFixes = carried.carried;
+      createdHere = true;
       return carried.doc;
     },
   });
+
+  // An edit someone already worked on is never changed behind their back —
+  // fixes made elsewhere since are offered instead (fix-names-once M2).
+  let offeredFixes: ClipEditorSession["offeredFixes"] = null;
+  if (!createdHere) {
+    const offer = carrySiblingFixes(
+      edit.doc,
+      words,
+      await loadSiblingDocs(row.sourceProductionItemId, row.id),
+    );
+    if (offer.carried.length > 0) offeredFixes = { names: offer.carried, wordEdits: offer.added };
+  }
 
   const videoUrl = await getPresignedGetUrl(row.mediaS3Key, 4 * 3600, {
     bucket: row.mediaS3Bucket ?? undefined,
@@ -237,6 +257,7 @@ export async function loadClipEditorSession(args: {
     },
     words,
     carriedFixes,
+    offeredFixes,
     speakers: transcript.speakers ?? null,
     wordsSynthetic: synthetic,
     latestRender: render ? toRenderStatus(render) : null,

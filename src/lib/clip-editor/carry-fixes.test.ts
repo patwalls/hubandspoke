@@ -63,4 +63,25 @@ describe("carrySiblingFixes", () => {
     // …but "Rork" isn't said between 15 s and 20 s.
     expect(carried).toEqual([]);
   });
+
+  // fix-names-once M2: a clip someone already opened.
+  it("keeps the clip's own corrections and offers only what it hasn't fixed", () => {
+    const worked = { ...fresh, wordEdits: { "14000": "Rourk." } };
+    const { doc, carried, added } = carrySiblingFixes(worked, words, [
+      sibling({ "2000": "ChatGPT", "3000": "", "5000": "Rork" }),
+    ]);
+    // Their own spelling of the name stays, and isn't offered.
+    expect(doc.wordEdits["14000"]).toBe("Rourk.");
+    expect(added["14000"]).toBeUndefined();
+    expect(added["11000"]).toBe("ChatGPT,");
+    expect(carried).toEqual(["ChatGPT"]);
+  });
+
+  it("offers nothing once the clip already has every fix", () => {
+    const first = carrySiblingFixes(fresh, words, [sibling({ "5000": "Rork" })]);
+    const again = carrySiblingFixes(first.doc, words, [sibling({ "5000": "Rork" })]);
+    expect(again.added).toEqual({});
+    expect(again.carried).toEqual([]);
+    expect(again.doc).toBe(first.doc);
+  });
 });

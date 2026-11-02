@@ -261,6 +261,17 @@ function EditorWorkspace({
   useEffect(() => {
     if (carriedCount > 0) trackUsage("clip-editor:carried-fixes", brand);
   }, [carriedCount, brand]);
+  // An edit opened before: fixes made in other clips since are offered, not
+  // applied (fix-names-once M2). Applying adds only words this clip hasn't
+  // corrected, through `apply` — so it's one undo step like any edit.
+  const offer = session.offeredFixes ?? null;
+  const [offerApplied, setOfferApplied] = useState(false);
+  const applyOffer = () => {
+    if (!offer) return;
+    apply((d) => ({ ...d, wordEdits: { ...offer.wordEdits, ...d.wordEdits } }));
+    setOfferApplied(true);
+    trackUsage("clip-editor:carried-fixes:apply", brand);
+  };
   const speakerLabels = useMemo<SpeakerLabels>(() => {
     const list = session.speakers ?? [];
     if (list.length < 2) return {}; // one voice → labels are noise
@@ -782,6 +793,24 @@ function EditorWorkspace({
           {carriedCount > 0 && (
             <p data-testid="carried-fixes" className="mb-2 truncate text-[11px] text-muted-foreground" title="Fixed in another clip of this video — click a word to change it">
               Spelling from this video&apos;s other clips: {session.carriedFixes.join(", ")}
+            </p>
+          )}
+          {carriedCount === 0 && offer && (
+            <p data-testid="offered-fixes" className="mb-2 flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+              <span className="truncate" title="Fixed in another clip of this video since this one was opened">
+                {offerApplied ? "Spelling from this video\u2019s other clips: " : "Other clips of this video spell: "}
+                {offer.names.join(", ")}
+              </span>
+              {!offerApplied && (
+                <button
+                  type="button"
+                  disabled={locked}
+                  onClick={applyOffer}
+                  className="shrink-0 font-medium text-foreground underline underline-offset-2 hover:text-primary disabled:opacity-50"
+                >
+                  Apply {offer.names.length === 1 ? "fix" : `${offer.names.length} fixes`}
+                </button>
+              )}
             </p>
           )}
           <TranscriptEditor

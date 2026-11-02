@@ -10,6 +10,12 @@
  * — so it lands everywhere the video says it, punctuation kept, phrases only
  * matched as phrases.
  *
+ * A doc that already has corrections of its own (fix-names-once M2: a clip
+ * someone opened before the fix was made elsewhere) keeps every one of them —
+ * a sibling's fix only fills words this clip hasn't corrected. `added` is
+ * exactly what would change, so the editor can offer it as one click instead
+ * of rewriting a doc someone already worked on.
+ *
  * Fixes that only change case or punctuation ("so" → "So,") are caption
  * styling for one spot, not a spelling — they are never carried. Uploaded
  * clips' corrections (`<mediaId>@ms` keys) belong to that clip's own file
@@ -65,17 +71,18 @@ function phraseFixes(sibling: ClipEditDoc, words: EditorWord[], byKey: Map<strin
 }
 
 /**
- * Apply the sibling clips' spelling fixes to `doc` (a doc that has no
- * corrections of its own yet). `siblings` oldest first — a later fix of the
- * same phrase wins. Returns the new doc and the fixes that changed a word
- * inside this clip (what the editor tells the person).
+ * Apply the sibling clips' spelling fixes to `doc`. `siblings` oldest first —
+ * a later fix of the same phrase wins; `doc`'s own corrections always win.
+ * Returns the new doc, the corrections it added (`added`), and the fixes that
+ * changed a word inside this clip (what the editor tells the person).
  */
 export function carrySiblingFixes(
   doc: ClipEditDoc,
   words: EditorWord[],
   siblings: ClipEditDoc[],
-): { doc: ClipEditDoc; carried: string[] } {
-  if (words.length === 0 || siblings.length === 0) return { doc, carried: [] };
+): { doc: ClipEditDoc; carried: string[]; added: Record<string, string> } {
+  const none = { doc, carried: [], added: {} };
+  if (words.length === 0 || siblings.length === 0) return none;
   const byKey = new Map(words.map((w, i) => [wordEditKey(w.startSec), i]));
   // Latest fix per phrase (by what was said), so two clips that spelled a
   // name differently don't both apply — the newest spelling wins.
@@ -87,7 +94,7 @@ export function carrySiblingFixes(
       latest.set(said, fix);
     }
   }
-  if (latest.size === 0) return { doc, carried: [] };
+  if (latest.size === 0) return none;
 
   const shown: ShownWord[] = words.map((word) => ({ word, text: word.text }));
   let out = doc;
@@ -95,6 +102,12 @@ export function carrySiblingFixes(
     const target = fix.target.map((w) => shown[byKey.get(wordEditKey(w.startSec))!]);
     out = correctPhrase(out, shown, target, fix.replacement, { all: true });
   }
+  // This clip's own corrections win over anything a sibling did.
+  const own = doc.wordEdits;
+  const added: Record<string, string> = {};
+  for (const [k, v] of Object.entries(out.wordEdits)) if (!(k in own)) added[k] = v;
+  if (Object.keys(added).length === 0) return none;
+  out = { ...out, wordEdits: { ...added, ...own } };
 
   const inClip = (w: EditorWord) => out.sections.some((s) => isWordInRange(w, s));
   const carried = new Set<string>();
@@ -102,12 +115,12 @@ export function carrySiblingFixes(
     const said = fix.target.map((w) => letters(w.text)).join(" ");
     const hit = words.some((w, i) => {
       const k = wordEditKey(w.startSec);
-      if (!(k in out.wordEdits) || !inClip(w)) return false;
+      if (!(k in added) || !inClip(w)) return false;
       // The first word of a run that reads as this phrase.
       const run = words.slice(i, i + fix.target.length).map((x) => letters(x.text)).join(" ");
       return run === said;
     });
     if (hit) carried.add(fix.replacement.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, ""));
   }
-  return { doc: out, carried: [...carried] };
+  return { doc: out, carried: [...carried], added };
 }
