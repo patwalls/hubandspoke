@@ -27,8 +27,12 @@ const BTN =
 /**
  * "Send to review → Andrew" / "Approve → back to John" next to the status
  * chip: status + editor in one click instead of two (rules in
- * src/lib/handoff/pick.ts). `onHandoff` saves through the content page's own
- * PUT, so events and the new editor's notification are unchanged.
+ * src/lib/handoff/pick.ts). After a move to Review from the status menu that
+ * left the editor holding it: "Hand to Andrew for review" (editor only).
+ * `onHandoff` saves through the content page's own PUT, so events and the new
+ * editor's notification are unchanged. `refreshKey` changes once a status
+ * save has landed, so "who sent it to review" is read after the save, not
+ * racing it.
  */
 export function HandoffButton({
   itemId,
@@ -37,6 +41,7 @@ export function HandoffButton({
   editorUserId,
   brandStatuses,
   onHandoff,
+  refreshKey,
 }: {
   itemId: string;
   brand: string;
@@ -44,6 +49,7 @@ export function HandoffButton({
   editorUserId: string;
   brandStatuses: ReadonlySet<string>;
   onHandoff: (patch: { status: string; editorUserId: string }) => Promise<boolean>;
+  refreshKey?: string | number;
 }) {
   const [data, setData] = useState<HandoffData | null>(null);
   const [busy, setBusy] = useState(false);
@@ -64,7 +70,7 @@ export function HandoffButton({
     return () => {
       cancelled = true;
     };
-  }, [itemId, status, relevant]);
+  }, [itemId, status, relevant, refreshKey]);
 
   if (!relevant || !data?.me) return null;
   const handoff = pickHandoff({
@@ -91,7 +97,9 @@ export function HandoffButton({
   const label =
     handoff.kind === "send-to-review"
       ? `Send to review → ${firstName(handoff.person.name)}`
-      : keepsEditor
+      : handoff.kind === "name-reviewer"
+        ? `Hand to ${firstName(handoff.person.name)} for review`
+        : keepsEditor
         ? `Approve → ${handoff.to}`
         : `Approve → back to ${firstName(handoff.person.name)}`;
   const hasMore = handoff.others.length > 0;
@@ -105,7 +113,9 @@ export function HandoffButton({
         title={
           handoff.kind === "send-to-review"
             ? `Moves it to ${handoff.to} and makes ${handoff.person.name} the editor`
-            : keepsEditor
+            : handoff.kind === "name-reviewer"
+              ? `It's in ${handoff.to} but still yours: makes ${handoff.person.name} the editor so they know it's waiting`
+              : keepsEditor
               ? `Moves it to ${handoff.to}; ${handoff.person.name} stays the editor`
               : `Moves it to ${handoff.to} and gives it back to ${handoff.person.name}`
         }
@@ -124,7 +134,7 @@ export function HandoffButton({
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start">
             <DropdownMenuGroup>
-              <DropdownMenuLabel>Send to review →</DropdownMenuLabel>
+              <DropdownMenuLabel>{handoff.kind === "name-reviewer" ? "Hand for review →" : "Send to review →"}</DropdownMenuLabel>
               {handoff.others.map((p) => (
                 <DropdownMenuItem key={p.id} onClick={() => void go(p)}>
                   {p.name}
