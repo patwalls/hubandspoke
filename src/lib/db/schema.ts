@@ -929,6 +929,11 @@ export const designDocs = pgTable(
       .references((): AnyPgColumn => productionItems.id, { onDelete: "cascade" })
       .notNull(),
     doc: jsonb("doc").$type<DesignDoc>().notNull(),
+    /** The doc exactly as the AI + template built it (first draft or the
+     *  last Regenerate), never touched by the editor — diffed against `doc`
+     *  by src/lib/design-editor/design-edits.ts to learn what editors
+     *  change. Null on docs drafted before 2026-11-03 and on cross-post forks. */
+    generatedDoc: jsonb("generated_doc").$type<DesignDoc>(),
     brief: jsonb("brief").$type<Record<string, unknown>>(),
     /** The instruction the user gave the AI for the last (re)generation. */
     briefInstruction: text("brief_instruction"),

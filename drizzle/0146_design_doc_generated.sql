@@ -1,0 +1,1 @@
+ALTER TABLE "design_docs" ADD COLUMN "generated_doc" jsonb;
