@@ -218,7 +218,7 @@ export async function draftFirstDesign(args: { productionItemId: string; userId:
   const draft = await draftDoc(item.id, item.sourceItemId, template.doc, item.angle?.trim() || null);
   await db
     .insert(designDocs)
-    .values({ productionItemId: item.id, doc: draft.doc, brief: draft.fill as unknown as Record<string, unknown>, createdByUserId: args.userId })
+    .values({ productionItemId: item.id, doc: draft.doc, generatedDoc: draft.doc, brief: draft.fill as unknown as Record<string, unknown>, createdByUserId: args.userId })
     .onConflictDoNothing({ target: designDocs.productionItemId });
 }
 
@@ -257,11 +257,12 @@ export async function regenerateDesign(args: {
   const draft = await draftDoc(item.id, item.sourceItemId, template.doc, args.instruction);
   await db
     .insert(designDocs)
-    .values({ productionItemId: item.id, doc: draft.doc, brief: draft.fill as unknown as Record<string, unknown>, briefInstruction: args.instruction, createdByUserId: args.userId })
+    .values({ productionItemId: item.id, doc: draft.doc, generatedDoc: draft.doc, brief: draft.fill as unknown as Record<string, unknown>, briefInstruction: args.instruction, createdByUserId: args.userId })
     .onConflictDoUpdate({
       target: designDocs.productionItemId,
       set: {
         doc: draft.doc,
+        generatedDoc: draft.doc,
         brief: draft.fill as unknown as Record<string, unknown>,
         briefInstruction: args.instruction,
         // A regeneration replaces the doc wholesale → new revision, so an

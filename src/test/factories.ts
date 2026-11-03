@@ -809,6 +809,8 @@ export function minimalDesignDoc(): DesignDoc {
 export interface CreateTestDesignDocOptions {
   productionItemId: string;
   doc?: DesignDoc;
+  /** The AI's untouched draft (design_docs.generated_doc). */
+  generatedDoc?: DesignDoc | null;
   brief?: Record<string, unknown> | null;
   briefInstruction?: string | null;
   createdByUserId?: string | null;
@@ -827,6 +829,7 @@ export async function createTestDesignDoc(
     .values({
       productionItemId: opts.productionItemId,
       doc: opts.doc ?? minimalDesignDoc(),
+      generatedDoc: opts.generatedDoc ?? null,
       brief: opts.brief ?? null,
       briefInstruction: opts.briefInstruction ?? null,
       createdByUserId: opts.createdByUserId ?? null,

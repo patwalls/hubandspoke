@@ -7,8 +7,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { contentDrafts, contentEvents, designDocs, designRenders, productionItemMedia, productionItems } from "@/lib/db/schema";
-import { createTestMedia, createTestProductionItem, getTestUserId } from "@/test/factories";
+import { createTestDesignDoc, createTestMedia, createTestProductionItem, getTestUserId } from "@/test/factories";
 import { buildPlaybookTemplate } from "@/lib/design-editor/playbook-template";
+import { designEdits } from "@/lib/design-editor/design-edits";
 
 const enqueue = vi.fn();
 vi.mock("@/jobs/enqueue", () => ({ enqueue: (...args: unknown[]) => enqueue(...args) }));
@@ -95,5 +96,18 @@ describe("saveDesignDoc", () => {
     const doc = buildPlaybookTemplate();
     expect(await saveDesignDoc({ productionItemId: item.id, expectedRevision: 1, doc })).toEqual({ ok: true, revision: 2 });
     expect(await saveDesignDoc({ productionItemId: item.id, expectedRevision: 1, doc })).toEqual({ ok: false, reason: "conflict", currentRevision: 2 });
+  });
+
+  it("an editor's save never overwrites the AI's draft, so the two can be diffed", async () => {
+    const item = await createTestProductionItem({ sourceType: "repurposed", postType: "instagram_post", format: "Instagram PLAYBOOK" });
+    const generated = buildPlaybookTemplate();
+    await createTestDesignDoc({ productionItemId: item.id, doc: generated, generatedDoc: generated });
+    const edited = structuredClone(generated);
+    const t = edited.pages[0].elements.find((e) => e.type === "text")!;
+    t.y += 60;
+    expect(await saveDesignDoc({ productionItemId: item.id, expectedRevision: 1, doc: edited })).toEqual({ ok: true, revision: 2 });
+    const [row] = await db.select().from(designDocs).where(eq(designDocs.productionItemId, item.id));
+    expect(row.generatedDoc).toEqual(generated);
+    expect(designEdits(row.generatedDoc!, row.doc).map((e) => e.kind)).toEqual(["moved"]);
   });
 });
