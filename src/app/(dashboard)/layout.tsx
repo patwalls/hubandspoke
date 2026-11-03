@@ -16,7 +16,8 @@ import { getBrands, getDefaultBrandSlug } from "@/lib/db/brands";
 import { editableBrandSlugs } from "@/lib/brand-access";
 import { BrandAccessProvider } from "@/components/brand-access";
 import { setSentrySessionUser } from "@/lib/sentry-user";
-import { hrefFor, popupFor, visibleTo, type WhatsNewEntry } from "@/lib/whats-new";
+import { hrefFor, needsOpenedScreens, popupFor, visibleTo, type WhatsNewEntry, type WhatsNewViewer } from "@/lib/whats-new";
+import { getOpenedScreens } from "@/lib/whats-new/opened";
 
 export default async function DashboardLayout({
   children,
@@ -78,7 +79,12 @@ export default async function DashboardLayout({
   // What's new: the cards this user hasn't seen pop up once; the nav menu
   // reopens the full list. Links get the default brand filled in.
   // DB role, not the sign-in JWT, so a promotion shows up without re-login.
-  const viewer = { email: session.user.email, role: userRow?.role ?? session.user.role };
+  const viewer: WhatsNewViewer = { email: session.user.email, role: userRow?.role ?? session.user.role };
+  // Cards about one screen pop up only for people who use it (`usersOf`);
+  // look up what this person opened only when such a card is due.
+  if (userRow && session.user.id && needsOpenedScreens(viewer, userRow.whatsNewSeenAt, userRow.createdAt)) {
+    viewer.openedScreens = await getOpenedScreens(session.user.id).catch(() => undefined);
+  }
   const toCard = (e: WhatsNewEntry): WhatsNewCard => ({
     id: e.id,
     shippedAt: e.shippedAt,
