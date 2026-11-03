@@ -1,4 +1,5 @@
 import { revalidateTag } from "next/cache";
+import { scheduleProductionRewarm } from "@/lib/report-rewarm";
 
 // Next.js 16 changed revalidateTag to require a second `profile` arg for
 // the new "use cache" system.  The two-arg form only targets "use cache"
@@ -14,6 +15,9 @@ export function invalidateReportCaches(): void {
   // Anything that moves an item through the pipeline can admit or retire a
   // queue candidate (in-flight pairs, cooldowns, prior attempts).
   invalidateQueueCaches();
+  // Rebuild In Production's report a few seconds later so the next person
+  // to open it doesn't wait on the recompute (src/lib/report-rewarm.ts).
+  scheduleProductionRewarm();
 }
 
 /** The Repurposed / Repost / Cross-post candidate lists (see

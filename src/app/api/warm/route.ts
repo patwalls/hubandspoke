@@ -34,6 +34,25 @@ export async function GET(request: NextRequest) {
   const timings: Record<string, number> = {};
 
   const brands = await getEnabledBrands();
+
+  // `?only=production` — the after-edit re-warm (src/lib/report-rewarm.ts):
+  // an edit expired the production report for every brand, so rebuild just
+  // In Production's key (excludeIdea=true). Sequential, one connection.
+  if (request.nextUrl.searchParams.get("only") === "production") {
+    const { getProductionReportCached } = await import(
+      "@/lib/services/production-report"
+    );
+    for (const b of brands.map((x) => x.slug)) {
+      const t = Date.now();
+      try {
+        await getProductionReportCached(b, true);
+        timings[`production-no-ideas:${b}`] = Date.now() - t;
+      } catch {
+        timings[`production-no-ideas:${b}`] = -1;
+      }
+    }
+    return NextResponse.json({ ok: true, totalMs: Date.now() - t0, timings });
+  }
   const defaults = {
     startDate,
     endDate,

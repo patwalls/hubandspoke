@@ -41,4 +41,23 @@ describe("GET /api/warm", () => {
       "starter-story:true",
     ]);
   });
+
+  it("?only=production rebuilds just In Production's key for every brand", async () => {
+    const { GET } = await import("./route");
+    const res = await GET(
+      new NextRequest("http://localhost/api/warm?only=production", {
+        headers: { authorization: "Bearer s3cret" },
+      }),
+    );
+    expect(res.status).toBe(200);
+    const calls = productionReport.mock.calls.map(([b, x]) => `${b}:${x}`).sort();
+    expect(calls).toEqual(["my-first-million:true", "starter-story:true"]);
+  });
+
+  it("?only=production without the secret is a 401 noop", async () => {
+    const { GET } = await import("./route");
+    const res = await GET(new NextRequest("http://localhost/api/warm?only=production"));
+    expect(res.status).toBe(401);
+    expect(productionReport).not.toHaveBeenCalled();
+  });
 });

@@ -2530,6 +2530,20 @@ has a row in `docs/features.md`'s cleanup backlog.
   page's full one and In Production's `excludeIdea=true` one (2026-11-02 —
   only the queue key was warmed, so In Production, the busier screen, paid
   the cold report after every deploy).
+  **After-edit re-warm (2026-11-03):** every `invalidateReportCaches()` (any
+  pipeline write) expires the production report for every brand, so the next
+  In Production load blocked on a 1.5–6 s recompute (sentry-tx p95 4.7 s on
+  `/api/reports/production`, p50 65 ms). It now also calls
+  `scheduleProductionRewarm()` (`src/lib/report-rewarm.ts`): 4 s after the
+  last invalidation the web dyno requests its own
+  `GET /api/warm?only=production` (Bearer `CRON_SECRET`, `127.0.0.1:$PORT`),
+  which rebuilds only In Production's `excludeIdea=true` key per enabled brand,
+  sequentially. Bursts coalesce, one warm at a time, warms ≥30 s apart (an edit
+  during a warm queues exactly one more). A self-request rather than an
+  in-process call so it runs in its own request scope after the revalidation
+  is applied. Noop without `CRON_SECRET` and under Vitest. Unit:
+  `src/lib/report-rewarm.test.ts`, `src/app/api/warm/route.test.ts`; e2e
+  `tests/e2e/production-rewarm.spec.ts`.
   Why: the first user after every deploy paid ~2.3s of lazy route-module
   init PLUS cold caches on every dashboard route ("everything feels slow
   right after a deploy" — 2026-08-09). Re-callable any time; safe noop
