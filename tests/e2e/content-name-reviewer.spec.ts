@@ -60,7 +60,8 @@ test("name the reviewer after moving a post to Review from the status menu", asy
 
     const hand = page.getByRole("button", { name: "Hand to Rita for review" });
     await expect(hand).toBeVisible();
-    if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT, fullPage: true });
+    await expect(page.getByRole("listbox")).toBeHidden();
+    if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT });
     await hand.click();
     await expect(hand).toBeHidden();
 
