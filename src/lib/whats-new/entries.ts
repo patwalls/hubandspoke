@@ -13,6 +13,12 @@ import type { FeatureFlag } from "@/lib/feature-flags";
  *   read whether it landed.
  * - `audience` narrows who sees it: a feature behind a flag must name the
  *   flag, an admin-only screen must say `adminOnly`.
+ * - `audience.usersOf` = the screens the feature is FOR. The pop-up shows the
+ *   card only to people who opened one of them in the last 30 days (an
+ *   editor who never opens In Production doesn't hear about its shortcuts);
+ *   it stays in the full list for everyone. Set it whenever a card is about
+ *   one screen — leave it off only for news everyone needs. Matching rules:
+ *   `usesAnyScreen` in ./index.ts.
  * - `id` is unique and never reused: `<YYYY-MM-DD>-<slug>`.
  */
 export interface WhatsNewEntry {
@@ -24,7 +30,12 @@ export interface WhatsNewEntry {
   body: string;
   href?: string;
   screen?: string;
-  audience?: { flag?: FeatureFlag; adminOnly?: boolean };
+  audience?: {
+    flag?: FeatureFlag;
+    adminOnly?: boolean;
+    /** `usage_events.screen` values this card is for (see the rules above). */
+    usersOf?: string[];
+  };
 }
 
 export const WHATS_NEW: WhatsNewEntry[] = [
@@ -36,7 +47,7 @@ export const WHATS_NEW: WhatsNewEntry[] = [
     body: "When you fix a misspelled word in one clip's transcript (like \"chat gpt\" to \"ChatGPT\"), the next clip you open from the same video starts with that fix already in its captions. A short line above the transcript lists the fixes it brought over.",
     href: "/[brand]/queue",
     screen: "clip-editor:carried-fixes",
-    audience: { flag: "clipEditor" },
+    audience: { flag: "clipEditor", usersOf: ["modal:clip-editor"] },
   },
   {
     id: "2026-11-01-content-list-step",
@@ -46,6 +57,7 @@ export const WHATS_NEW: WhatsNewEntry[] = [
     body: "Open a post from the Content list and the top of the page shows where you are, like \"3 of 40\", with arrows (or the j and k keys) for the next or previous post, in the same order and filters as your list. The list also opens faster now and comes back to where you left it.",
     href: "/[brand]/content",
     screen: "content:list-run",
+    audience: { usersOf: ["/[brand]/content"] },
   },
   {
     id: "2026-10-31-production-keys-peek",
@@ -55,6 +67,7 @@ export const WHATS_NEW: WhatsNewEntry[] = [
     body: "On In Production, press j and k to move down the list, Space to peek at a post (video, draft, latest comments) without opening it, and Enter to open it. When you change a post's status, a card offers the next one in that list, so you don't have to go back for it.",
     href: "/[brand]/production",
     screen: "production:peek",
+    audience: { usersOf: ["/[brand]/production"] },
   },
   {
     id: "2026-10-31-production-run",
@@ -64,6 +77,7 @@ export const WHATS_NEW: WhatsNewEntry[] = [
     body: "Open a post from In Production and the top of the page now shows where you are, like \"Review · 3 of 12\", with arrows (or the j and k keys) to open the next or previous post in that list. \"← In Production\" takes you back to the list with your filters.",
     href: "/[brand]/production",
     screen: "content:production-run",
+    audience: { usersOf: ["/[brand]/production"] },
   },
   {
     id: "2026-10-31-format-scoreboard",
@@ -73,6 +87,7 @@ export const WHATS_NEW: WhatsNewEntry[] = [
     body: "Under Beat their usual on your brand dashboard, a new list ranks the formats whose posts most often did better than their account's normal over the last 4 weeks, like \"3 of 4 posts\". A format that wins week after week now stands out from one lucky post.",
     href: "/[brand]",
     screen: "home:winners",
+    audience: { usersOf: ["/[brand]"] },
   },
   {
     id: "2026-10-31-why-it-won",
@@ -82,6 +97,7 @@ export const WHATS_NEW: WhatsNewEntry[] = [
     body: "Each post on the dashboard's Beat their usual list now has a one-line note on what it did differently from that account's usual posts, like its hook, on-screen text or format. New winners get their note within a few hours.",
     href: "/[brand]",
     screen: "home:winners",
+    audience: { usersOf: ["/[brand]"] },
   },
   {
     id: "2026-10-31-winners-likes",
@@ -91,6 +107,7 @@ export const WHATS_NEW: WhatsNewEntry[] = [
     body: "Those platforms don't report views, so their posts on the dashboard's Beat their usual list are now compared on likes against the account's usual likes, and a post with only a few likes no longer makes the list.",
     href: "/[brand]",
     screen: "home:winners",
+    audience: { usersOf: ["/[brand]"] },
   },
   {
     id: "2026-10-31-dashboard-winners",
@@ -101,6 +118,7 @@ export const WHATS_NEW: WhatsNewEntry[] = [
       "Your brand dashboard now lists the week's posts that did best against their own account's normal, so a small account's breakout isn't buried under a big account's average day. Each one shows how many times its usual views it got. Click one to open it.",
     href: "/[brand]",
     screen: "home:winners",
+    audience: { usersOf: ["/[brand]"] },
   },
   {
     id: "2026-10-30-api-writes-webhooks",
@@ -131,6 +149,7 @@ export const WHATS_NEW: WhatsNewEntry[] = [
       "Formats now list what editors keep fixing in that format's AI drafts (a line split, a different opener, a fresh comment keyword). Look for \"edit rules\" on the Formats page, then add a rule to the Skill in one click so every draft follows it.",
     href: "/[brand]/formats",
     screen: "formats:editor-rules",
+    audience: { usersOf: ["/[brand]/formats/*"] },
   },
   {
     id: "2026-10-30-drafts-learn-cross-posts",
@@ -141,6 +160,7 @@ export const WHATS_NEW: WhatsNewEntry[] = [
       "When you fix a copied caption on a cross-post before publishing (a name instead of \"He\", a line split in two), the next AI draft in that format now learns from it, the same way it learns from drafts you rewrite.",
     href: "/[brand]/production",
     screen: "drafts:learned-peek",
+    audience: { usersOf: ["/[brand]/production", "/[brand]/content/[id]"] },
   },
   {
     id: "2026-10-30-learned-edits-peek",
@@ -151,6 +171,7 @@ export const WHATS_NEW: WhatsNewEntry[] = [
       "Above a post's AI draft, a \"Learned from N recent edits\" chip now shows the latest drafts editors rewrote in that format: the AI's version, then what was published. It's how your rewrites shape the next draft.",
     href: "/[brand]/production",
     screen: "drafts:learned-peek",
+    audience: { usersOf: ["/[brand]/production", "/[brand]/content/[id]"] },
   },
   {
     id: "2026-10-29-drafts-learn-edits",
