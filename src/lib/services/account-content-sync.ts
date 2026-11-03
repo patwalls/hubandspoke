@@ -33,7 +33,8 @@ import { findCrossAccountDuplicate } from "@/lib/services/production-items-dedup
 import { recordItemCreated } from "@/lib/services/item-created";
 import { scheduleVelocitySnapshots } from "@/jobs/tasks/capture-velocity-snapshot";
 import type { PostType } from "@/lib/platform-field-schemas";
-import { SC_BASE, headers } from "@/lib/services/sc-client";
+import { scGetWithRetry } from "@/lib/services/sc-client";
+export { SC_RETRY_DELAYS_MS } from "@/lib/services/sc-client";
 import type { SCTweet } from "@/lib/services/sc-fetchers";
 import { extractContentId, looseUrlKey } from "@/lib/platform-url";
 import { estimateViewsFromLikes } from "@/lib/services/view-estimator";
@@ -332,34 +333,20 @@ function unixToDate(ts: number): string | null {
 // ─── Paginated fetchers (per platform) ────────────────────────────────────
 // Each returns a list of normalized items plus the number of SC calls made.
 
-async function scGetJson(path: string, query: Record<string, string>) {
-  const qs = new URLSearchParams(query).toString();
-  const url = `${SC_BASE}${path}${qs ? `?${qs}` : ""}`;
-  const res = await fetch(url, { headers: headers() });
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`SC ${path} ${res.status}: ${body.slice(0, 500)}`);
-  }
-  return res.json();
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function scGetJson(path: string, query: Record<string, string>): Promise<any> {
+  return scGetWithRetry(path, query);
 }
 
 /** `scGetJson` variant that returns null on a 404 instead of throwing. Use
  *  only for endpoints where "not found" is a legitimate empty state — e.g.
  *  the YouTube Shorts feed on a channel that only posts long-form. Any
- *  other non-OK status still surfaces as an error. */
+ *  other non-OK status still surfaces as an error (after 5xx retries). */
 async function scGetJsonNullOn404(
   path: string,
   query: Record<string, string>
 ): Promise<Record<string, unknown> | null> {
-  const qs = new URLSearchParams(query).toString();
-  const url = `${SC_BASE}${path}${qs ? `?${qs}` : ""}`;
-  const res = await fetch(url, { headers: headers() });
-  if (res.status === 404) return null;
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`SC ${path} ${res.status}: ${body.slice(0, 500)}`);
-  }
-  return res.json();
+  return scGetWithRetry(path, query, { nullOn404: true });
 }
 
 async function fetchYouTubeLong(
@@ -1197,6 +1184,7 @@ export async function syncAccountContent(
     const fetched: NormalizedItem[] = [];
     let credits = 0;
     let pages = 0;
+    let partialError: string | null = null;
 
     switch (row.platform) {
       case "youtube": {
@@ -1204,12 +1192,19 @@ export async function syncAccountContent(
         fetched.push(...long.items);
         credits += long.credits;
         pages += long.credits; // 1 page per credit for the long endpoint
-        const shorts =
-          effectiveMode === "backfill"
-            ? await fetchYouTubeShortsBackfill(row.handle)
-            : await fetchYouTubeShortsLatest(row.handle);
-        fetched.push(...shorts.items);
-        credits += shorts.credits;
+        // A shorts failure (still 5xx after retries) must not throw away
+        // the long-form page we already paid for: save what we have and
+        // log the run as an error so the shorts gap stays visible.
+        try {
+          const shorts =
+            effectiveMode === "backfill"
+              ? await fetchYouTubeShortsBackfill(row.handle)
+              : await fetchYouTubeShortsLatest(row.handle);
+          fetched.push(...shorts.items);
+          credits += shorts.credits;
+        } catch (err) {
+          partialError = err instanceof Error ? err.message : String(err);
+        }
         pages += 1;
         break;
       }
@@ -1304,8 +1299,9 @@ export async function syncAccountContent(
         // Surface skipped cross-account duplicates as a soft warning so
         // operators see a non-null error chip even when the sync "succeeded".
         // A real upstream error overwrites this in the catch below.
-        lastContentSyncError:
-          upsert.skippedDuplicates > 0
+        lastContentSyncError: partialError
+          ? partialError
+          : upsert.skippedDuplicates > 0
             ? `${upsert.skippedDuplicates} cross-account duplicate${upsert.skippedDuplicates === 1 ? "" : "s"} skipped — see logs`
             : null,
         // Restore an account that was auto-deactivated by a previous
@@ -1314,6 +1310,11 @@ export async function syncAccountContent(
         updatedAt: new Date(),
       })
       .where(eq(accounts.id, accountId));
+    if (partialError) {
+      result.errorMessage = partialError;
+      result.errorKind = "transient";
+      result.errors++;
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     const kind: "permanent" | "transient" = isPermanentSyncFailure(msg)

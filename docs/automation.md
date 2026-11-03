@@ -321,6 +321,15 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
     throws if it's missing
   - Sweeps use jobKey + `unsafe_dedupe` so overlapping ticks don't
     double-enqueue a pending account
+  - **SC 5xx is retried in-call** (2026-11-02, issue #139): every SC GET goes
+    through `scGetWithRetry` in `src/lib/services/sc-client.ts` — a 5xx is
+    retried after 1s then 3s (`SC_RETRY_DELAYS_MS`); 4xx is never retried.
+    Same helper backs
+    `scFetchJson`, so the per-post enrichers get the retry too.
+  - **YouTube shorts failure is partial, not fatal:** if `/channel/shorts`
+    still 5xx after retries, the long-form items already fetched are upserted
+    and the run is logged to `sync_logs` as `error` (transient, account stays
+    active) with the shorts message in `accounts.last_content_sync_error`.
 
 ### `schedule-reconcile-sweep` — tie live posts back to Scheduled items (every 10 min)
 - **Trigger:** cron `*/10 * * * *`
