@@ -33,6 +33,8 @@ import {
 } from "@/lib/s3";
 import { downloadToFile, safeUnlink } from "./descript-upload-helpers";
 import { punctuateWords } from "@/lib/transcripts/punctuate-words";
+import { composeWhisperPrompt, PROMPT_MAX_CHARS } from "@/lib/transcripts/whisper-prompt";
+import { loadBrandVocabulary } from "@/lib/services/clip-editor/brand-spellings";
 
 const FFMPEG_TIMEOUT_MS = 10 * 60 * 1000;
 const SEGMENT_SECONDS = 600; // 10 min
@@ -40,9 +42,8 @@ const SEGMENT_SECONDS = 600; // 10 min
 // bitrate drift shouldn't push us near this, but fail loudly if it does.
 const CHUNK_MAX_BYTES = 24 * 1024 * 1024;
 const WHISPER_MODEL = "whisper-1";
-// Whisper's `prompt` is capped at 224 tokens (~800 chars English).
-const PROMPT_MAX_CHARS = 800;
-const PROMPT_CONTINUATION_CHARS = 300;
+// Whisper's `prompt` is capped at 224 tokens (~800 chars English); the
+// budget split lives in `@/lib/transcripts/whisper-prompt`.
 
 export class WhisperTranscribeError extends Error {
   constructor(
@@ -365,11 +366,23 @@ export async function transcribeFromS3Audio(
         description: productionItems.description,
         authorHandle: productionItems.authorHandle,
         authorDisplayName: productionItems.authorDisplayName,
+        brand: productionItems.brand,
       })
       .from(productionItems)
       .where(eq(productionItems.id, productionItemId))
       .limit(1);
     const basePrompt = item ? buildItemPrompt(item) : "";
+    // Names the team fixed by hand in this brand's clips (fix-names-once M4).
+    // Best-effort: a failed lookup never blocks a transcript.
+    let vocabulary: string[] = [];
+    if (item?.brand) {
+      try {
+        vocabulary = await loadBrandVocabulary(item.brand);
+      } catch (err) {
+        logger.info(`whisper brand vocabulary skipped: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    if (vocabulary.length > 0) logger.info(`whisper brand vocabulary names=${vocabulary.length}`);
 
     const mergedSegments: Array<{ startSec: number; endSec: number; text: string }> = [];
     const mergedWords: Array<{ word: string; startSec: number; endSec: number }> = [];
@@ -386,14 +399,11 @@ export async function transcribeFromS3Audio(
         const getUrl = await getPresignedGetUrl(chunk.key, 3600);
         await downloadToFile(getUrl, audioPath);
 
-        const continuation =
-          i > 0
-            ? mergedFullText.slice(-PROMPT_CONTINUATION_CHARS).trim()
-            : "";
-        const prompt = [basePrompt, continuation]
-          .filter((s) => s.length > 0)
-          .join(" ")
-          .slice(-PROMPT_MAX_CHARS);
+        const prompt = composeWhisperPrompt({
+          item: basePrompt,
+          vocabulary,
+          continuation: i > 0 ? mergedFullText : "",
+        });
 
         const resp = await callWhisperOnChunk({
           audioPath,

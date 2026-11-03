@@ -29,14 +29,30 @@ export function clearBrandSpellingsCache() {
 }
 
 export async function loadBrandSpellings(brand: string, now = Date.now()): Promise<BrandSpelling[]> {
-  const hit = cache.get(brand);
+  return cached(`offer:${brand}`, now, () => learn(brand, now, 2));
+}
+
+/**
+ * The brand's vocabulary for transcription (fix-names-once M4): every name
+ * the team fixed by hand in a recent clip of this brand — ONE video is
+ * enough here, unlike the editor offer, because a Whisper prompt only nudges
+ * spelling (a wrong entry costs nothing), while a missing one means the next
+ * video gets the same name wrong in every clip. Most-fixed first.
+ */
+export async function loadBrandVocabulary(brand: string, now = Date.now()): Promise<string[]> {
+  const spellings = await cached(`vocab:${brand}`, now, () => learn(brand, now, 1));
+  return [...spellings].sort((a, b) => b.videos - a.videos).map((s) => s.replacement);
+}
+
+async function cached(key: string, now: number, run: () => Promise<BrandSpelling[]>) {
+  const hit = cache.get(key);
   if (hit && now - hit.at < TTL_MS) return hit.spellings;
-  const spellings = await learn(brand, now);
-  cache.set(brand, { at: now, spellings });
+  const spellings = await run();
+  cache.set(key, { at: now, spellings });
   return spellings;
 }
 
-async function learn(brand: string, now: number): Promise<BrandSpelling[]> {
+async function learn(brand: string, now: number, minVideos: number): Promise<BrandSpelling[]> {
   const since = new Date(now - LOOKBACK_DAYS * 86_400_000);
   const rows = await db
     .select({ sourceId: clipIdeas.sourceProductionItemId, doc: clipEdits.doc, updatedAt: clipEdits.updatedAt })
@@ -52,10 +68,10 @@ async function learn(brand: string, now: number): Promise<BrandSpelling[]> {
     )
     .orderBy(desc(clipEdits.updatedAt))
     .limit(200);
-  // The most recent videos with corrections; one video alone can't make a
-  // brand spelling, so there's nothing to learn below two.
+  // The most recent videos with corrections; fewer videos than a spelling
+  // needs means there's nothing to learn.
   const videos = [...new Set(rows.map((r) => r.sourceId))].slice(0, MAX_VIDEOS);
-  if (videos.length < 2) return [];
+  if (videos.length < minVideos) return [];
 
   const ts = await db
     .select({ productionItemId: transcripts.productionItemId, words: transcripts.words, segments: transcripts.segments })
@@ -71,5 +87,5 @@ async function learn(brand: string, now: number): Promise<BrandSpelling[]> {
     const parsed = parseDoc(r.doc);
     if (parsed.ok) edits.push({ sourceId: r.sourceId, doc: parsed.doc, words });
   }
-  return learnBrandSpellings(edits);
+  return learnBrandSpellings(edits, minVideos);
 }

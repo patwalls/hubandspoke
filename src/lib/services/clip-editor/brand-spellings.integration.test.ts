@@ -11,7 +11,7 @@ import {
   createTestProductionItem,
   createTestTranscript,
 } from "@/test/factories";
-import { clearBrandSpellingsCache, loadBrandSpellings } from "./brand-spellings";
+import { clearBrandSpellingsCache, loadBrandSpellings, loadBrandVocabulary } from "./brand-spellings";
 
 const docWith = (wordEdits: Record<string, string>) => ({
   ...createDefaultDoc({ startSec: 0, endSec: 30, hook: "vitest" }),
@@ -45,5 +45,22 @@ describe("loadBrandSpellings", () => {
     const spellings = await loadBrandSpellings("starter-story");
     expect(spellings).toContainEqual({ said: "zorbleq", replacement: "Zorblek", videos: 2 });
     expect(spellings.find((s) => s.said === "quuxly")).toBeUndefined();
+  });
+
+  // fix-names-once M4: the transcription vocabulary takes a name fixed in ONE
+  // video too (a prompt only nudges Whisper), most-fixed first.
+  it("gives transcription every name fixed in a clip of the brand, most-fixed first", async () => {
+    const a = await video(["we", "use", "zorbleq", "daily"]);
+    const b = await video(["zorbleq", "is", "how", "we", "quuxly", "ship"]);
+    const ideaA = await createTestClipIdea({ sourceProductionItemId: a.id });
+    const ideaB = await createTestClipIdea({ sourceProductionItemId: b.id });
+    await createTestClipEdit({ clipIdeaId: ideaA.id, doc: docWith({ "2000": "Zorblek" }) });
+    await createTestClipEdit({ clipIdeaId: ideaB.id, doc: docWith({ "0": "Zorblek", "4000": "Quuxlee" }) });
+
+    const vocab = await loadBrandVocabulary("starter-story");
+    expect(vocab).toContain("Quuxlee");
+    expect(vocab.indexOf("Zorblek")).toBeGreaterThanOrEqual(0);
+    expect(vocab.indexOf("Zorblek")).toBeLessThan(vocab.indexOf("Quuxlee"));
+    expect(await loadBrandVocabulary("some-other-brand")).not.toContain("Zorblek");
   });
 });
