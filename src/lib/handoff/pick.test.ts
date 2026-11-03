@@ -47,6 +47,20 @@ describe("pickHandoff", () => {
     expect(pickHandoff({ me: "john", status: "Review", editorUserId: "john", brandStatuses: all, reviewers: [], sentToReviewBy: john })).toBeNull();
   });
 
+  it("names the reviewer on a post I moved to Review from the status menu and still hold", () => {
+    const h = pickHandoff({ me: ME, status: "Review", editorUserId: ME, brandStatuses: all, reviewers: [andrew, saj], sentToReviewBy: { id: ME, name: "Me" } });
+    expect(h).toEqual({ kind: "name-reviewer", to: "Review", person: andrew, others: [saj] });
+  });
+
+  it("names the reviewer on a post in Review I hold with no known sender", () => {
+    const h = pickHandoff({ me: ME, status: "Review", editorUserId: ME, brandStatuses: all, reviewers: [{ id: ME, name: "Me" }, andrew], sentToReviewBy: null });
+    expect(h).toEqual({ kind: "name-reviewer", to: "Review", person: andrew, others: [] });
+  });
+
+  it("offers nothing on a post in Review someone else holds that I sent", () => {
+    expect(pickHandoff({ me: ME, status: "Review", editorUserId: "andrew", brandStatuses: all, reviewers: [andrew, saj], sentToReviewBy: { id: ME, name: "Me" } })).toBeNull();
+  });
+
   it("offers nothing in Review without a known sender, or in other statuses", () => {
     expect(pickHandoff({ me: ME, status: "Review", editorUserId: "andrew", brandStatuses: all, reviewers: [andrew], sentToReviewBy: null })).toBeNull();
     expect(pickHandoff({ me: ME, status: "Ready To Publish", editorUserId: ME, brandStatuses: all, reviewers: [andrew], sentToReviewBy: john })).toBeNull();

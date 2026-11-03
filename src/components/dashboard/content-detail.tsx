@@ -1345,6 +1345,9 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
   const [repurposeAnyOpen, setRepurposeAnyOpen] = useState(false);
   const [repurposeAnySearch, setRepurposeAnySearch] = useState("");
   const [status, setStatus] = useState("");
+  // Bumped after a status/handoff save lands: the handoff button re-reads
+  // "who sent it to review" then, not while the save is in flight.
+  const [handoffKey, setHandoffKey] = useState(0);
   // My Work's next card is up (UpNext); the production run's card yields to it.
   const [upNextCard, setUpNextCard] = useState(false);
   const [pillar, setPillar] = useState<PillarOption | null>(null);
@@ -2555,6 +2558,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                 setStatus(next);
                 void persistField({ status: next || null }).then((ok) => {
                   if (!ok) setStatus(prev);
+                  else setHandoffKey((k) => k + 1);
                 });
               }}
             >
@@ -2601,14 +2605,21 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
               status={status}
               editorUserId={editorUserId}
               brandStatuses={statusNameSet}
+              refreshKey={handoffKey}
               onHandoff={async (patch) => {
                 const prev = { status, editorUserId };
                 setStatus(patch.status);
                 setEditorUserId(patch.editorUserId);
-                const ok = await persistField(patch);
+                // Naming the reviewer keeps the status: send only the editor,
+                // so no Review → Review status event is written.
+                const ok = await persistField(
+                  patch.status === prev.status ? { editorUserId: patch.editorUserId } : patch,
+                );
                 if (!ok) {
                   setStatus(prev.status);
                   setEditorUserId(prev.editorUserId);
+                } else {
+                  setHandoffKey((k) => k + 1);
                 }
                 return ok;
               }}

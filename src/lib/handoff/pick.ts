@@ -5,7 +5,11 @@
  * AND moving its status, two clicks every time (~200 a month):
  * - the editor finishes → editor = the brand's reviewer, status Review;
  * - the reviewer approves → editor = whoever sent it to review, status Ready
- *   To Publish (if they're already the editor, only the status moves).
+ *   To Publish (if they're already the editor, only the status moves);
+ * - the editor moved it to Review from the status menu and still holds it →
+ *   name the reviewer: editor = the brand's reviewer, status stays Review.
+ *   (A post handed to a named reviewer left Review in ~2 h at the median vs
+ *   ~1 day for one left with its editor, 21 days to 2026-11-03.)
  * Nobody is assigned as a reviewer in the data, so the history is the
  * assignment: a brand's reviewer is whoever moved its posts out of Review most
  * in the last 30 days (same rule as My Work's To review).
@@ -17,12 +21,12 @@ export interface HandoffPerson {
 }
 
 export interface Handoff {
-  kind: "send-to-review" | "approve";
+  kind: "send-to-review" | "name-reviewer" | "approve";
   /** Status the item moves to. */
   to: string;
   /** Who it's handed to (the new editor). */
   person: HandoffPerson;
-  /** Other people it could go to (send-to-review only), best first. */
+  /** Other people it could go to (send-to-review / name-reviewer), best first. */
   others: HandoffPerson[];
 }
 
@@ -50,6 +54,16 @@ export function pickHandoff(input: {
     if (candidates.length === 0) return null;
     const [person, ...others] = candidates;
     return { kind: "send-to-review", to: REVIEW, person, others };
+  }
+
+  // In Review, still mine, and I'm the one who sent it (or nobody did): the
+  // reviewer was never named (moved from the status menu). Same people as
+  // send-to-review; only the editor moves.
+  if (status === REVIEW && editorUserId === me && (!sentToReviewBy || sentToReviewBy.id === me)) {
+    const candidates = reviewers.filter((r) => r.id !== me);
+    if (candidates.length === 0) return null;
+    const [person, ...others] = candidates;
+    return { kind: "name-reviewer", to: REVIEW, person, others };
   }
 
   if (status === REVIEW && has(READY) && sentToReviewBy) {
