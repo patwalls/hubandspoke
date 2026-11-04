@@ -9,6 +9,7 @@ import { postTypeDisplay } from "@/lib/platforms";
 import { cn } from "@/lib/utils";
 import { trackUsage } from "@/lib/usage/track";
 import { rememberNextRows } from "@/lib/my-work/next-rows";
+import { sentOnLine } from "@/lib/my-work/sent-on";
 
 interface NextPost {
   id: string;
@@ -61,10 +62,18 @@ export function UpNext({
   const [data, setData] = useState<UpNextData | null>(null);
   // The post you just sent on (keyed, so the card never follows you to the next page).
   const [sentOnId, setSentOnId] = useState<string | null>(null);
+  // What happened to it, in the card's first words ("Killed.", "Sent to review.").
+  const [doneLine, setDoneLine] = useState("Off your plate.");
   const sentOn = sentOnId === itemId;
   // Was this post waiting on you at the last fetch? Only a true → false flip
   // shows the card, so opening a post that was never yours shows nothing.
-  const wasWaiting = useRef<{ itemId: string; waiting: boolean } | null>(null);
+  // Status and editor at that fetch say what changed when it flips.
+  const wasWaiting = useRef<{
+    itemId: string;
+    waiting: boolean;
+    status: string;
+    editorUserId: string;
+  } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -74,9 +83,16 @@ export function UpNext({
         if (cancelled || !d) return;
         const before = wasWaiting.current;
         const flipped = before?.itemId === itemId && before.waiting && !d.currentWaiting;
-        wasWaiting.current = { itemId, waiting: d.currentWaiting };
+        wasWaiting.current = { itemId, waiting: d.currentWaiting, status, editorUserId };
         setData(d);
         if (flipped) {
+          setDoneLine(
+            sentOnLine({
+              status,
+              prevStatus: before.status,
+              editorChanged: before.editorUserId !== editorUserId,
+            }),
+          );
           setSentOnId(itemId);
           // The curator goes back to the production list anyway: mark the
           // same posts there (production-pipeline-table).
@@ -109,7 +125,7 @@ export function UpNext({
     <>
       <UpNextLink data={data} />
       {sentOn && data && (
-        <NextCard data={data} published={status === "Published"} onClose={() => setSentOnId(null)} />
+        <NextCard data={data} done={doneLine} onClose={() => setSentOnId(null)} />
       )}
     </>
   );
@@ -117,16 +133,16 @@ export function UpNext({
 
 function NextCard({
   data,
-  published,
+  done,
   onClose,
 }: {
   data: UpNextData;
-  published: boolean;
+  /** What just happened to the post you're on (sentOnLine). */
+  done: string;
   onClose: () => void;
 }) {
   const { next, remaining, sameSource } = data;
   const siblings = sameSource ? (data.siblings ?? []) : [];
-  const done = published ? "Published." : "Sent on.";
   // Two or more siblings with a platform each: list them all, so you pick
   // the platform instead of going back to the list to find it.
   const byPlatform = siblings.length > 1 && siblings.every((r) => postTypeDisplay(r.postType).label);

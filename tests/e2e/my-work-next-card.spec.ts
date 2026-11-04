@@ -46,6 +46,9 @@ test("sending a post on offers the next one waiting on you", async ({ page }) =>
     await page.getByRole("option", { name: "Review" }).click();
 
     const card = page.getByTestId("up-next-card");
+    // It says what happened: a status move to Review, nobody handed it.
+    await expect(card).toContainText("Sent to review.");
+    await expect(card).not.toContainText("Sent on.");
     await expect(card).toContainText("Next waiting on you");
     await expect(card).toContainText(next);
     if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT });
