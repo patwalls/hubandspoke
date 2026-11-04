@@ -31,6 +31,9 @@ import { DesignTemplateDialog } from "./design-editor-dialog";
 import { PageCanvas } from "./page-canvas";
 import { DesignStoreContext, createDesignStore } from "./store";
 import { invalidateDesignTemplates } from "./use-design-templates";
+import { describeTemplateEditRow } from "@/lib/design-editor/design-edits";
+import type { TemplateEdits } from "@/lib/services/design-editor/template-edits";
+import { trackUsage } from "@/lib/usage/track";
 
 const VIEW_ONLY_TITLE = "View only — you don't have edit access to this brand";
 
@@ -38,6 +41,7 @@ interface TemplateResponse {
   template: { doc: DesignDoc; source: "stored" | "preset"; updatedAt: string | null } | null;
   imageUrls?: Record<string, string>;
   channels?: ChannelInfo[];
+  edits?: TemplateEdits | null;
 }
 
 export function FormatTemplatesSection({ brand, formatId, formatName, isClippableFormat }: { brand: string; formatId: string; formatName: string; isClippableFormat: boolean }) {
@@ -102,6 +106,7 @@ function DesignTemplateCard({ brand, formatId, formatName }: { brand: string; fo
           <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
             <span>{t.doc.pages.length} slides · {t.source === "stored" ? `custom${t.updatedAt ? `, updated ${new Date(t.updatedAt).toLocaleDateString()}` : ""}` : "built-in preset (edit to customise)"}</span>
           </div>
+          {data.edits && <EditorsChange edits={data.edits} brand={brand} />}
           <div className="flex flex-wrap gap-2">
             <Button type="button" size="sm" className="h-7 text-xs" disabled={!canEdit} title={canEdit ? undefined : VIEW_ONLY_TITLE} onClick={() => setEditing(true)}>
               <PencilIcon className="mr-1 size-3" /> Edit template
@@ -129,6 +134,51 @@ function DesignTemplateCard({ brand, formatId, formatName }: { brand: string; fo
       {data && canEdit && <ImportFromPdf formatId={formatId} hasCustomTemplate={t?.source === "stored"} onOpen={(d) => { setDraft(d); setEditing(true); }} />}
       <DesignTemplateDialog open={editing} onOpenChange={(o) => { setEditing(o); if (!o) setDraft(null); }} formatId={formatId} formatName={formatName} brand={brand} initial={draft} onSaved={() => { invalidateDesignTemplates(); void load(); }} />
     </Card>
+  );
+}
+
+const EDITS_OPEN_KEY = "formats:design-edits:open";
+
+/** "Editors change: Headline words on 4 of 9 posts ›" — one quiet line under
+ *  the template (design-edits M2); click opens one row per element. The
+ *  choice is remembered per browser. Nothing to show → the route sends null. */
+function EditorsChange({ edits, brand }: { edits: TemplateEdits; brand: string }) {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    setOpen(localStorage.getItem(EDITS_OPEN_KEY) === "1");
+  }, []);
+  const top = edits.rows[0];
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    localStorage.setItem(EDITS_OPEN_KEY, next ? "1" : "0");
+    if (next) trackUsage("formats:design-edits", brand);
+  };
+  return (
+    <div className="text-[11px] text-muted-foreground" data-testid="design-template-edits">
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={open}
+        title={`From the last ${edits.posts} designs of this format: what editors changed in the AI's draft before export. Words count on every design; moved/resized/restyled only on designs drafted since Nov 3.`}
+        className="inline-flex max-w-full items-center gap-1 text-left hover:text-foreground"
+      >
+        <span className="truncate">
+          Editors change: <span className="text-foreground">{top.element}</span> {describeTemplateEditRow(top).split(" · ")[0]} posts
+          {edits.rows.length > 1 && !open ? ` · +${edits.rows.length - 1} more` : ""}
+        </span>
+        <span aria-hidden>{open ? "▾" : "›"}</span>
+      </button>
+      {open && (
+        <ul className="mt-1 space-y-0.5 pl-2">
+          {edits.rows.map((r) => (
+            <li key={r.element}>
+              <span className="text-foreground">{r.element}</span>: {describeTemplateEditRow(r)}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 

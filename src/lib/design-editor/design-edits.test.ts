@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { designEdits, summarizeDesignEdits } from "./design-edits";
+import { describeTemplateEditRow, designEdits, rollUpTemplateEdits, summarizeDesignEdits, type DesignEditSample } from "./design-edits";
 import { buildPlaybookTemplate } from "./playbook-template";
 import type { DesignDoc, DesignTextElement } from "./doc";
 
@@ -66,5 +66,53 @@ describe("designEdits", () => {
     const edits = designEdits(generated, fin);
     expect(edits).toEqual([{ kind: "pages", page: -1, element: "pages", fields: [`${generated.pages.length} → ${fin.pages.length}`] }]);
     expect(summarizeDesignEdits(edits)).toEqual([`pages pages (${generated.pages.length} → ${fin.pages.length})`]);
+  });
+});
+
+describe("rollUpTemplateEdits (format page: what editors change)", () => {
+  const template = buildPlaybookTemplate();
+  const aiTexts = (d: DesignDoc) =>
+    d.pages.flatMap((p) => p.elements).filter((e): e is DesignTextElement => e.type === "text" && e.slot?.kind === "ai");
+  const words = (d: DesignDoc) => aiTexts(d).map((e) => e.spans.map((s) => s.text).join(""));
+  const sample = (final: DesignDoc, generated: DesignDoc | null = null, briefTexts = words(template)): DesignEditSample => ({ briefTexts, generated, final });
+
+  it("fixture has AI text slots", () => {
+    expect(aiTexts(template).length).toBeGreaterThan(0);
+  });
+
+  it("a design shipped as drafted shows nothing", () => {
+    expect(rollUpTemplateEdits([sample(clone(template), clone(template))])).toEqual([]);
+  });
+
+  it("counts a rewrite once per post, out of the posts the element was on, even without a kept draft", () => {
+    const a = clone(template);
+    const target = aiTexts(a)[0];
+    target.spans = [{ text: "EDITOR WROTE THIS" }];
+    const rows = rollUpTemplateEdits([sample(a), sample(clone(template)), sample(clone(template))]);
+    const row = rows.find((r) => r.element === (target.name || "text"))!;
+    expect(row.text).toBe(1);
+    expect(row.posts).toBeGreaterThanOrEqual(3);
+    expect(row.layoutPosts).toBe(0);
+    expect(describeTemplateEditRow(row)).toMatch(/^words rewritten on 1 of \d+$/);
+  });
+
+  it("whitespace-only differences are not a rewrite", () => {
+    const a = clone(template);
+    const t = aiTexts(a)[0];
+    t.spans = [{ text: `  ${t.spans.map((s) => s.text).join("")}  ` }];
+    expect(rollUpTemplateEdits([sample(a)])).toEqual([]);
+  });
+
+  it("look changes come only from posts with a kept draft, out of those posts", () => {
+    const gen = clone(template);
+    const fin = clone(gen);
+    const t = aiTexts(fin)[0];
+    t.style = { ...t.style, sizePx: t.style.sizePx - 10 };
+    t.y += 50;
+    const rows = rollUpTemplateEdits([sample(fin, gen), sample(clone(template))]);
+    const row = rows.find((r) => r.element === (t.name || "text"))!;
+    expect(row).toMatchObject({ style: 1, moved: 1, resized: 0, text: 0, layoutPosts: 1 });
+    expect(row.posts).toBeGreaterThanOrEqual(2);
+    expect(describeTemplateEditRow(row)).toBe("moved on 1 of 1 · restyled on 1 of 1");
   });
 });

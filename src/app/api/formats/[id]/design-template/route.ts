@@ -7,20 +7,22 @@ import { clearFormatTemplate, createFormatTemplateFromPreset, loadFormatTemplate
 import { resolveImageUrls } from "@/lib/services/design-editor/session";
 import { listBrandLogos } from "@/lib/services/brand-logos";
 import { loadBrandChannels } from "@/lib/services/design-editor/channels";
+import { loadTemplateEdits } from "@/lib/services/design-editor/template-edits";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
 }
 
 /** The format's design template (stored, or the built-in preset), with
- *  browser-loadable image URLs — what the editor's template mode opens. */
+ *  browser-loadable image URLs — what the editor's template mode opens —
+ *  and what editors changed in its recent posts (`edits`, null when too few). */
 export async function GET(_request: NextRequest, context: RouteContext) {
   const guard = await requireFeature("designEditor");
   if (guard.response) return guard.response;
   const { id } = await context.params;
   const t = await loadFormatTemplateById(id);
   if (!t) return NextResponse.json({ template: null });
-  return NextResponse.json({ template: { doc: t.doc, source: t.source, updatedAt: t.updatedAt }, imageUrls: await resolveImageUrls(t.doc), images: await listBrandLogos(t.brand), channels: await loadBrandChannels(t.brand) });
+  return NextResponse.json({ template: { doc: t.doc, source: t.source, updatedAt: t.updatedAt }, imageUrls: await resolveImageUrls(t.doc), images: await listBrandLogos(t.brand), channels: await loadBrandChannels(t.brand), edits: await loadTemplateEdits(t.brand, t.name).catch((err) => (console.error("[design-template] edits failed:", err), null)) });
 }
 
 /** Save the template. Body: `{ doc }`. */

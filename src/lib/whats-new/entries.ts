@@ -40,6 +40,16 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-11-04-design-template-edits",
+    shippedAt: "2026-11-04T02:00:00Z",
+    kind: "feature",
+    title: "See what editors change in a format's AI designs",
+    body: "A format's page now says, under its design template, which AI-written parts editors keep changing before they export, like \"Headline words rewritten on 4 of 9 posts\". Click it for every part. Fix the template or its AI hints there, and new designs start closer to done.",
+    href: "/[brand]/formats",
+    screen: "formats:design-edits",
+    audience: { flag: "designEditor", usersOf: ["modal:design-editor", "/[brand]/formats/[id]"] },
+  },
+  {
     id: "2026-11-02-carry-spelling-fixes",
     shippedAt: "2026-11-02T11:15:00Z",
     kind: "feature",
