@@ -141,3 +141,96 @@ export function designEdits(generated: DesignDoc, final: DesignDoc): DesignEdit[
 export function summarizeDesignEdits(edits: DesignEdit[]): string[] {
   return edits.map((e) => `${e.kind} ${e.element}${e.page >= 0 ? ` p${e.page + 1}` : ""}${e.fields?.length ? ` (${e.fields.join(", ")})` : ""}`);
 }
+
+// ── Per-format roll-up (design-edits M2) ────────────────────────────────────
+
+/** One post's design as the format page reads it. `generated` is only there
+ *  for designs drafted after 2026-11-03 (design_docs.generated_doc); the AI's
+ *  words (`briefTexts`, from design_docs.brief) are there for every draft. */
+export interface DesignEditSample {
+  briefTexts: string[];
+  generated: DesignDoc | null;
+  final: DesignDoc;
+}
+
+/** One template element across recent posts: on how many posts it was there,
+ *  and on how many of those editors changed its words / place / size / look. */
+export interface TemplateEditRow {
+  element: string;
+  posts: number;
+  text: number;
+  moved: number;
+  resized: number;
+  style: number;
+  /** Posts compared against the kept draft (moved/resized/style are out of these). */
+  layoutPosts: number;
+}
+
+const norm = (s: string) => s.replace(/\s+/g, " ").trim();
+
+/**
+ * Roll a format's recent designs up per AI-filled element ("Headline").
+ *
+ * Words: an element the AI filled (slot `ai`, has spans) whose text matches
+ * none of the brief's values was rewritten — this works for every draft,
+ * because the slot and the brief survive the editor's saves. Look (moved,
+ * resized, style): only where the draft was kept (`generated`), via
+ * `designEdits`. An element counts once per post however many pages it is on.
+ * Sorted by most-changed first; elements nobody changed are dropped.
+ */
+export function rollUpTemplateEdits(samples: DesignEditSample[]): TemplateEditRow[] {
+  const rows = new Map<string, TemplateEditRow>();
+  const row = (element: string) => {
+    let r = rows.get(element);
+    if (!r) rows.set(element, (r = { element, posts: 0, text: 0, moved: 0, resized: 0, style: 0, layoutPosts: 0 }));
+    return r;
+  };
+  for (const s of samples) {
+    const brief = new Set(s.briefTexts.map(norm).filter(Boolean));
+    const seen = new Set<string>();
+    const rewritten = new Set<string>();
+    for (const page of s.final.pages) {
+      for (const el of page.elements) {
+        if (el.slot?.kind !== "ai") continue;
+        const text = spansText(el);
+        if (text === null) continue;
+        const name = label(el);
+        seen.add(name);
+        if (!brief.has(norm(text))) rewritten.add(name);
+      }
+    }
+    for (const name of seen) {
+      const r = row(name);
+      r.posts++;
+      if (rewritten.has(name)) r.text++;
+    }
+    if (!s.generated) continue;
+    const kinds = new Map<string, Set<DesignEditKind>>();
+    for (const e of designEdits(s.generated, s.final)) {
+      if (!seen.has(e.element)) continue;
+      if (e.kind !== "moved" && e.kind !== "resized" && e.kind !== "style") continue;
+      if (!kinds.has(e.element)) kinds.set(e.element, new Set());
+      kinds.get(e.element)!.add(e.kind);
+    }
+    for (const name of seen) {
+      const r = row(name);
+      r.layoutPosts++;
+      const k = kinds.get(name);
+      if (k?.has("moved")) r.moved++;
+      if (k?.has("resized")) r.resized++;
+      if (k?.has("style")) r.style++;
+    }
+  }
+  const changed = (r: TemplateEditRow) => Math.max(r.text, r.moved, r.resized, r.style);
+  return [...rows.values()].filter((r) => changed(r) > 0).sort((a, b) => changed(b) / b.posts - changed(a) / a.posts || b.posts - a.posts);
+}
+
+/** "words rewritten on 4 of 9 posts · made smaller… " for one row. */
+export function describeTemplateEditRow(r: TemplateEditRow): string {
+  const parts: string[] = [];
+  if (r.text) parts.push(`words rewritten on ${r.text} of ${r.posts}`);
+  if (r.moved) parts.push(`moved on ${r.moved} of ${r.layoutPosts}`);
+  if (r.resized) parts.push(`resized on ${r.resized} of ${r.layoutPosts}`);
+  if (r.style) parts.push(`restyled on ${r.style} of ${r.layoutPosts}`);
+  return parts.join(" · ");
+}
