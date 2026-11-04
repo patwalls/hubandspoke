@@ -40,7 +40,8 @@ interface UpNextData {
  * The moment this post leaves your plate (you approved it, sent it to review,
  * handed it on), a card offers the next one: reviewers kept going back to the
  * production list after every approval and never noticed the small link.
- * After a Publish the card says so, and offers the same post's next
+ * Its first words say what happened ("Killed.", "Sent to review.",
+ * "Approved."; `sentOnLine`). After a Publish it offers the same post's next
  * cross-post (or the same video's next clip) first. Cross-posts of one post
  * share its title, so the card names each by platform and lists every one
  * still waiting — the curator went back to the production list to pick the
