@@ -234,3 +234,75 @@ export function describeTemplateEditRow(r: TemplateEditRow): string {
   if (r.style) parts.push(`restyled on ${r.style} of ${r.layoutPosts}`);
   return parts.join(" · ");
 }
+
+// ── The AI's words → the editor's words, per slot (design-edits M4) ─────────
+
+/** One AI-filled text the editor rewrote before shipping: what the brief
+ *  wrote and what the post went out with. Teaches the next fill. */
+export interface SlotRewrite {
+  /** The element's editor label ("Headline"). */
+  slot: string;
+  ai: string;
+  edited: string;
+}
+
+/** Where a brief key sat in the format's template (listSlots: key, name, page). */
+export interface SlotPlace {
+  key: string;
+  name: string;
+  pageIndex: number;
+}
+
+/**
+ * The (AI wrote → editor shipped) pairs in one post's design.
+ *
+ * With the kept draft (`generated`, 2026-11-03+) the match is exact: the
+ * same element id in the draft and the final, its words changed. Without it
+ * (older drafts) the brief's value is placed through the format's template —
+ * key → slot name + page — and paired with the final's ONE AI element of
+ * that name on that page; ambiguous or missing matches are skipped rather
+ * than guessed. Words the editor only re-spaced are not a rewrite, and a
+ * final text that is some other brief value (the editor swapped two slots'
+ * words) is not one either. Pure.
+ */
+export function slotRewrites(args: {
+  final: DesignDoc;
+  generated: DesignDoc | null;
+  brief: Array<{ key: string; text: string }>;
+  places: SlotPlace[];
+}): SlotRewrite[] {
+  const out: SlotRewrite[] = [];
+  const briefSet = new Set(args.brief.map((b) => norm(b.text)).filter(Boolean));
+  const aiTexts = (doc: DesignDoc) =>
+    doc.pages.flatMap((p, page) =>
+      p.elements.flatMap((el) => {
+        if (el.slot?.kind !== "ai") return [];
+        const text = spansText(el);
+        return text === null ? [] : [{ id: el.id, page, name: label(el), text }];
+      }),
+    );
+  const finals = aiTexts(args.final);
+  const push = (slot: string, ai: string, edited: string) => {
+    const a = norm(ai);
+    const e = norm(edited);
+    if (!a || !e || a === e || briefSet.has(e)) return;
+    out.push({ slot, ai: a, edited: e });
+  };
+  if (args.generated) {
+    const byId = new Map(finals.map((f) => [f.id, f]));
+    for (const g of aiTexts(args.generated)) {
+      const f = byId.get(g.id);
+      if (f) push(g.name, g.text, f.text);
+    }
+    return out;
+  }
+  const placeByKey = new Map(args.places.map((p) => [p.key, p]));
+  for (const b of args.brief) {
+    const place = placeByKey.get(b.key);
+    if (!place) continue;
+    const matches = finals.filter((f) => f.page === place.pageIndex && f.name === place.name);
+    if (matches.length !== 1) continue;
+    push(place.name, b.text, matches[0].text);
+  }
+  return out;
+}
