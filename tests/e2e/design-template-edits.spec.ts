@@ -69,6 +69,8 @@ test("format page says what editors change in the design template", async ({ pag
 
     // The open/closed choice is remembered in this browser.
     await page.reload();
+    await dismissWhatsNew(page);
+    await expect(page.getByTestId("design-template-edits")).toBeVisible({ timeout: 15000 });
     await expect(page.getByTestId("design-template-edits").getByRole("listitem").first()).toBeVisible();
   } finally {
     await sql.end();
