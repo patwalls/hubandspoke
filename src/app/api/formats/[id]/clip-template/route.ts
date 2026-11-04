@@ -6,23 +6,31 @@ import { db } from "@/lib/db";
 import { formats } from "@/lib/db/schema";
 import { clipLookSchema } from "@/lib/clip-editor/doc";
 import { resolveClipAspectRatio } from "@/lib/db/formats";
+import { loadLookEdits } from "@/lib/services/clip-editor/look-edits";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
 }
 
-/** The format's clip look (what new clip edits start from), if any. */
+/** The format's clip look (what new clip edits start from), if any, and
+ *  what editors changed in the clips that started from it (`edits`, null
+ *  when too few). */
 export async function GET(_request: NextRequest, context: RouteContext) {
   const guard = await requireFeature("clipEditor");
   if (guard.response) return guard.response;
   const { id } = await context.params;
   const [row] = await db
-    .select({ look: formats.clipTemplate, updatedAt: formats.clipTemplateUpdatedAt, clipAspectRatio: formats.clipAspectRatio, clipTargetPostType: formats.clipTargetPostType })
+    .select({ brand: formats.brand, name: formats.name, look: formats.clipTemplate, updatedAt: formats.clipTemplateUpdatedAt, clipAspectRatio: formats.clipAspectRatio, clipTargetPostType: formats.clipTargetPostType })
     .from(formats)
     .where(eq(formats.id, id))
     .limit(1);
   if (!row) return NextResponse.json({ error: "Format not found" }, { status: 404 });
-  return NextResponse.json({ look: row.look ?? null, updatedAt: row.updatedAt, aspectRatio: resolveClipAspectRatio(row) });
+  const look = row.look ? clipLookSchema.safeParse(row.look) : null;
+  const edits =
+    look?.success && row.updatedAt
+      ? await loadLookEdits({ brand: row.brand, formatName: row.name, look: look.data, lookSavedAt: row.updatedAt }).catch((err) => (console.error("[clip-template] edits failed:", err), null))
+      : null;
+  return NextResponse.json({ look: row.look ?? null, updatedAt: row.updatedAt, aspectRatio: resolveClipAspectRatio(row), edits });
 }
 
 /** Save the look from the format page's look editor. Body: `{ look: ClipLook }`. */

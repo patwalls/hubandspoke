@@ -34,6 +34,7 @@ import { invalidateDesignTemplates } from "./use-design-templates";
 import { describeTemplateEditRow } from "@/lib/design-editor/design-edits";
 import type { TemplateEdits } from "@/lib/services/design-editor/template-edits";
 import { trackUsage } from "@/lib/usage/track";
+import type { LookEdits } from "@/lib/services/clip-editor/look-edits";
 
 const VIEW_ONLY_TITLE = "View only — you don't have edit access to this brand";
 
@@ -291,14 +292,14 @@ function Filmstrip({ doc, imageUrls, channels }: { doc: DesignDoc; imageUrls: Re
 
 function ClipLookCard({ brand, formatId, formatName }: { brand: string; formatId: string; formatName: string }) {
   const canEdit = useCanEditBrand(brand);
-  const [look, setLook] = useState<{ look: ClipLook | null; updatedAt: string | null; aspectRatio: AspectRatio } | null>(null);
+  const [look, setLook] = useState<{ look: ClipLook | null; updatedAt: string | null; aspectRatio: AspectRatio; edits: LookEdits | null } | null>(null);
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
   const load = useCallback(async () => {
     const res = await fetch(`/api/formats/${formatId}/clip-template`);
     if (res.ok) {
-      const json = (await res.json()) as { look: ClipLook | null; updatedAt: string | null; aspectRatio?: AspectRatio };
-      setLook({ look: json.look, updatedAt: json.updatedAt, aspectRatio: json.aspectRatio ?? "9:16" });
+      const json = (await res.json()) as { look: ClipLook | null; updatedAt: string | null; aspectRatio?: AspectRatio; edits?: LookEdits | null };
+      setLook({ look: json.look, updatedAt: json.updatedAt, aspectRatio: json.aspectRatio ?? "9:16", edits: json.edits ?? null });
     }
   }, [formatId]);
   useEffect(() => {
@@ -341,6 +342,7 @@ function ClipLookCard({ brand, formatId, formatName }: { brand: string; formatId
               <p className="text-[12px] text-muted-foreground">No look saved — new edits use the default Reels layout (shown). Create a look to set this format&apos;s fonts, captions and video placement.</p>
             )}
           </div>
+          {look.edits && <ClipLookEditorsChange edits={look.edits} brand={brand} />}
           <div className="flex flex-wrap gap-2">
             <Button type="button" size="sm" className="h-7 text-xs" disabled={!canEdit} title={canEdit ? undefined : VIEW_ONLY_TITLE} onClick={() => setEditing(true)}>
               <PencilIcon className="mr-1 size-3" /> {l ? "Edit look" : "Create look"}
@@ -356,6 +358,51 @@ function ClipLookCard({ brand, formatId, formatName }: { brand: string; formatId
         </>
       )}
     </Card>
+  );
+}
+
+const CLIP_EDITS_OPEN_KEY = "formats:clip-look-edits:open";
+
+/** "Editors change: hook hidden on 29 of 42 clips ›" — one quiet line under
+ *  the clip look; click opens one row per change. Same shape as the design
+ *  template's line; remembered per browser. Nothing to show → null. */
+function ClipLookEditorsChange({ edits, brand }: { edits: LookEdits; brand: string }) {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    setOpen(localStorage.getItem(CLIP_EDITS_OPEN_KEY) === "1");
+  }, []);
+  const top = edits.rows[0];
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    localStorage.setItem(CLIP_EDITS_OPEN_KEY, next ? "1" : "0");
+    if (next) trackUsage("formats:clip-look-edits", brand);
+  };
+  return (
+    <div className="text-[11px] text-muted-foreground" data-testid="clip-look-edits">
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={open}
+        title={`From the last ${edits.clips} edited clips that started from this look: what editors changed before export. Hook words and video framing are each clip's own, so they don't count.`}
+        className="inline-flex max-w-full items-center gap-1 text-left hover:text-foreground"
+      >
+        <span className="truncate">
+          Editors change: <span className="text-foreground">{top.label}</span> on {top.clips} of {edits.clips} clips
+          {edits.rows.length > 1 && !open ? ` · +${edits.rows.length - 1} more` : ""}
+        </span>
+        <span aria-hidden>{open ? "▾" : "›"}</span>
+      </button>
+      {open && (
+        <ul className="mt-1 space-y-0.5 pl-2">
+          {edits.rows.map((r) => (
+            <li key={r.change}>
+              <span className="text-foreground">{r.label}</span> on {r.clips} of {edits.clips} clips
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 
