@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildTechStackTemplate } from "@/lib/design-editor/tech-stack-template";
 import { listSlots } from "@/lib/design-editor/template-fill";
-import { buildFillPrompt, coerceFill, describeExemplars, describeSlots, exemplarContent, parseTimestamp, stripFormatPrefix } from "./fill-brief";
+import { buildFillPrompt, coerceFill, describeRewrites, describeExemplars, describeSlots, exemplarContent, parseTimestamp, stripFormatPrefix } from "./fill-brief";
 import { snapClipToWords } from "./session";
 
 const slots = listSlots(buildTechStackTemplate());
@@ -81,5 +81,22 @@ describe("snapClipToWords", () => {
   });
   it("leaves a clip alone when no word is near its edges", () => {
     expect(snapClipToWords({ startSec: 100, endSec: 130, label: "l" }, words)).toEqual({ startSec: 100, endSec: 130, label: "l" });
+  });
+});
+
+describe("buildFillPrompt: editor rewrites (design-edits M4)", () => {
+  const base = { title: "T", formatName: "Tech Stack", skill: null, exemplars: [], transcript: "[00:00] hi", slots, instruction: null };
+  it("shows the format's past (AI → editor) pairs before the slots, and says not to copy their facts", () => {
+    const blocks = buildFillPrompt({ ...base, rewrites: [{ slot: "Headline", ai: "This guy makes $40K/mo with 3 apps", edited: "3 apps. $40K/mo." }] });
+    const texts = blocks.map((b) => b.text);
+    const i = texts.findIndex((t) => t.startsWith("## HOW EDITORS REWROTE"));
+    expect(i).toBeGreaterThan(-1);
+    expect(i).toBeLessThan(texts.findIndex((t) => t.startsWith("## SLOTS TO FILL")));
+    expect(texts[i]).toContain("Never copy their facts");
+    expect(texts[i]).toContain(describeRewrites([{ slot: "Headline", ai: "This guy makes $40K/mo with 3 apps", edited: "3 apps. $40K/mo." }]));
+  });
+  it("no pairs, no block", () => {
+    expect(buildFillPrompt({ ...base, rewrites: [] }).some((b) => b.text.includes("HOW EDITORS REWROTE"))).toBe(false);
+    expect(buildFillPrompt(base).some((b) => b.text.includes("HOW EDITORS REWROTE"))).toBe(false);
   });
 });

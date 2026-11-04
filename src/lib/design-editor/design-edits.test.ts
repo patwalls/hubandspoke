@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { describeTemplateEditRow, designEdits, rollUpTemplateEdits, summarizeDesignEdits, type DesignEditSample } from "./design-edits";
+import { describeTemplateEditRow, designEdits, rollUpTemplateEdits, slotRewrites, summarizeDesignEdits, type DesignEditSample, type SlotPlace } from "./design-edits";
 import { buildPlaybookTemplate } from "./playbook-template";
 import type { DesignDoc, DesignTextElement } from "./doc";
 
@@ -114,5 +114,56 @@ describe("rollUpTemplateEdits (format page: what editors change)", () => {
     expect(row).toMatchObject({ style: 1, moved: 1, resized: 0, text: 0, layoutPosts: 1 });
     expect(row.posts).toBeGreaterThanOrEqual(2);
     expect(describeTemplateEditRow(row)).toBe("moved on 1 of 1 · restyled on 1 of 1");
+  });
+});
+
+describe("slotRewrites (design-edits M4: the AI's words → the editor's)", () => {
+  const template = buildPlaybookTemplate();
+  const aiTexts = (d: DesignDoc) =>
+    d.pages.flatMap((p) => p.elements).filter((e): e is DesignTextElement => e.type === "text" && e.slot?.kind === "ai");
+  const text = (e: DesignTextElement) => e.spans.map((s) => s.text).join("");
+  // The template as listSlots sees it: brief keys are its element ids.
+  const places: SlotPlace[] = template.pages.flatMap((p, pageIndex) =>
+    p.elements.filter((e) => e.slot?.kind === "ai" && e.type === "text").map((e) => ({ key: e.id, name: e.name || e.type, pageIndex })),
+  );
+  const brief = aiTexts(template).map((e) => ({ key: e.id, text: text(e) }));
+  // fillTemplate gives every element a fresh id: a post's doc never shares ids with the template.
+  const filled = () => {
+    const d = clone(template);
+    for (const e of d.pages.flatMap((p) => p.elements)) e.id = `${e.id}-post`;
+    return d;
+  };
+
+  it("with the kept draft: pairs by element id, only where the words changed", () => {
+    const gen = filled();
+    const fin = clone(gen);
+    const t = aiTexts(fin)[0];
+    t.spans = [{ text: "Shorter, the editor's way" }];
+    expect(slotRewrites({ final: fin, generated: gen, brief, places })).toEqual([
+      { slot: t.name || "text", ai: text(aiTexts(gen)[0]).replace(/\s+/g, " ").trim(), edited: "Shorter, the editor's way" },
+    ]);
+  });
+
+  it("without it: places the brief through the template (name + page), even though ids changed", () => {
+    const fin = filled();
+    const t = aiTexts(fin)[0];
+    t.spans = [{ text: "Editor's headline" }];
+    const out = slotRewrites({ final: fin, generated: null, brief, places });
+    expect(out).toEqual([{ slot: t.name || "text", ai: brief[0].text.replace(/\s+/g, " ").trim(), edited: "Editor's headline" }]);
+  });
+
+  it("a design shipped as drafted, re-spaced words, or words moved from another slot teach nothing", () => {
+    const fin = filled();
+    const [a, b] = aiTexts(fin);
+    a.spans = [{ text: `  ${text(a)}  ` }];
+    if (b) b.spans = [{ text: brief[0].text }];
+    expect(slotRewrites({ final: filled(), generated: null, brief, places })).toEqual([]);
+    expect(slotRewrites({ final: fin, generated: null, brief, places })).toEqual([]);
+  });
+
+  it("skips a brief value whose slot is gone from the template (the template changed since)", () => {
+    const fin = filled();
+    aiTexts(fin)[0].spans = [{ text: "Editor's headline" }];
+    expect(slotRewrites({ final: fin, generated: null, brief, places: [] })).toEqual([]);
   });
 });

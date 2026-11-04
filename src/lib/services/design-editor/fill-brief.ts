@@ -16,6 +16,12 @@
  * server tool means `pause_turn` can come back mid-search; the loop resumes
  * it. What was looked up lands in `notes`, with the URL, for the editor.
  *
+ * Editor rewrites (design-edits M4, 2026-11-04): editors rewrite the AI's
+ * words on a share of every format's designs (the format page's "Editors
+ * change" line). The format's recent (AI wrote → editor shipped) pairs per
+ * slot go into the prompt so the next fill makes those changes up front —
+ * the design counterpart of the text drafts' editor-rewrites.
+ *
  * Opus 5.5 (adaptive thinking, effort high): one judgment-heavy call per post that decides
  * whether the post works; past-post exemplars are the style anchor the same
  * way derivative-hook.ts uses them.
@@ -26,6 +32,8 @@ import { db } from "@/lib/db";
 import { brands, contentDrafts, formats, productionItems } from "@/lib/db/schema";
 import { getTranscriptForPrompt } from "@/lib/services/whisper-transcribe";
 import type { DesignDoc } from "@/lib/design-editor/doc";
+import type { SlotRewrite } from "@/lib/design-editor/design-edits";
+import { loadSlotRewrites } from "./template-edits";
 import { HIGHLIGHT_COLORS, listSlots, type DesignFill, type DesignFillValue, type DesignSlotSpec, type HighlightColor } from "@/lib/design-editor/template-fill";
 
 const MODEL = "claude-opus-5-5";
@@ -211,6 +219,10 @@ export function describeExemplars(exemplars: Exemplar[]): string {
     .join("\n");
 }
 
+export function describeRewrites(rewrites: SlotRewrite[]): string {
+  return rewrites.map((r) => `- ${r.slot}\n  AI wrote:      ${r.ai}\n  Editor shipped: ${r.edited}`).join("\n");
+}
+
 export function buildFillPrompt(args: {
   title: string | null;
   formatName: string;
@@ -222,6 +234,8 @@ export function buildFillPrompt(args: {
   slots: DesignSlotSpec[];
   instruction: string | null;
   dmKeyword?: string | null;
+  /** The format's recent (AI wrote → editor shipped) pairs, newest first. */
+  rewrites?: SlotRewrite[];
 }): Anthropic.TextBlockParam[] {
   const blocks: Anthropic.TextBlockParam[] = [];
   blocks.push({ type: "text", text: `## SOURCE VIDEO\nTitle: ${args.title ?? "(untitled)"}\nFormat: ${args.formatName}` });
@@ -229,6 +243,14 @@ export function buildFillPrompt(args: {
   if (args.skill?.trim()) blocks.push({ type: "text", text: `## FORMAT SKILL\n${args.skill.trim().slice(0, 4000)}` });
   if (args.exemplars.length > 0) {
     blocks.push({ type: "text", text: "## PAST POSTS OF THIS FORMAT (best first) — match this voice and build the slides the way they do\n" + describeExemplars(args.exemplars) });
+  }
+  if (args.rewrites?.length) {
+    blocks.push({
+      type: "text",
+      text:
+        "## HOW EDITORS REWROTE THIS FORMAT'S PAST AI DRAFTS (newest first)\nEach pair is one slot of an earlier post of this format: what the AI wrote, then what the editor changed it to before it shipped. Make the same kinds of change up front — length, wording, voice, what they add or cut. Never copy their facts: those belong to other videos.\n" +
+        describeRewrites(args.rewrites),
+    });
   }
   blocks.push({ type: "text", text: `## SLOTS TO FILL\n${describeSlots(args.slots)}` });
   blocks.push({ type: "text", text: `## TRANSCRIPT\n${args.transcript.slice(0, TRANSCRIPT_CHAR_BUDGET)}` });
@@ -302,6 +324,11 @@ export async function generateDesignFill(args: GenerateFillArgs): Promise<Genera
   const formatName = item.format ?? "";
   const [format] = await db.select({ skill: formats.instructions }).from(formats).where(and(eq(formats.brand, item.brand ?? ""), eq(formats.name, formatName))).limit(1);
   const exemplars = await loadExemplars(item.brand ?? "", formatName, item.id);
+  // Fail-soft: a fill without the lesson beats no fill.
+  const rewrites = await loadSlotRewrites({ brand: item.brand ?? "", formatName, excludeItemId: item.id, places: slots }).catch((err) => {
+    console.error("[design-fill] loadSlotRewrites failed:", err);
+    return [];
+  });
   const [brandRow] = item.brand ? await db.select({ label: brands.label }).from(brands).where(eq(brands.slug, item.brand)).limit(1) : [];
   const brandLabel = brandRow?.label ?? "the brand";
   const [pillar] = await db.select({ title: productionItems.title, description: productionItems.description }).from(productionItems).where(eq(productionItems.id, sourceId)).limit(1);
@@ -318,6 +345,7 @@ export async function generateDesignFill(args: GenerateFillArgs): Promise<Genera
     slots,
     instruction: args.instruction ?? null,
     dmKeyword: args.dmKeyword ?? null,
+    rewrites,
   });
   // Opus 5.5 rejects forced tool_choice ("tool"/"any" → 400), so the call
   // runs on "auto" with the prompt naming fill_design — and "auto" doesn't
@@ -366,7 +394,7 @@ export async function generateDesignFill(args: GenerateFillArgs): Promise<Genera
     if (call) {
       const fill = coerceFill(call.input, slots);
       if (fill) {
-        if (research) console.info(`[design-fill] item=${item.id} searches=${searches} resumes=${resumes} notes=${fill.notes ? JSON.stringify(fill.notes.slice(0, 200)) : "none"}`);
+        if (research) console.info(`[design-fill] item=${item.id} searches=${searches} resumes=${resumes} rewrites=${rewrites.length} notes=${fill.notes ? JSON.stringify(fill.notes.slice(0, 200)) : "none"}`);
         return { ok: true, fill, usage, searches };
       }
     }
