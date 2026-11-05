@@ -38,7 +38,22 @@ function leakyErrorEvent() {
       { category: "fetch", message: `GET /users?email=${EMAIL}`, data: { url: `/users?email=${EMAIL}`, status_code: 200 } },
     ],
     exception: {
-      values: [{ type: "Error", value: `duplicate key (email)=(${EMAIL}) from ${IP}` }],
+      values: [{
+        type: "Error",
+        value: `duplicate key (email)=(${EMAIL}) from ${IP}`,
+        // What @sentry/node's ContextLines integration attaches — found leaking
+        // the literals of a live test event on 2026-11-05.
+        stacktrace: {
+          frames: [{
+            filename: "/app/src/lib/invite.ts",
+            lineno: 12,
+            pre_context: [`const who = "${EMAIL}";`],
+            context_line: `throw new Error("dup " + "${IP}");`,
+            post_context: [`// Jane Editor`],
+            vars: { email: EMAIL, attempt: 2 },
+          }],
+        },
+      }],
     },
   };
 }
@@ -77,7 +92,12 @@ describe("sentry privacy scrubber", () => {
     expect(Object.keys(out.request.headers)).toEqual(["Content-Type"]);
     expect(out.request.cookies).toBeUndefined();
     expect(out.request.data).toBeUndefined();
-    expect(out.exception.values[0]).toEqual({ type: "Error", value: "duplicate key (email)=([email]) from [ip]" });
+    expect(out.exception.values[0].value).toBe("duplicate key (email)=([email]) from [ip]");
+    expect(out.exception.values[0].stacktrace.frames[0]).toEqual({
+      filename: "/app/src/lib/invite.ts",
+      lineno: 12,
+      vars: { email: "[filtered]", attempt: 2 },
+    });
     expect(out.extra.attempts).toBe(3);
     expect(out.tags.task).toBe("send-digest");
     expect(out.contexts.runtime).toEqual({ name: "node", version: "v22" });

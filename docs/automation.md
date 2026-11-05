@@ -2255,7 +2255,8 @@ spreads `sentryPrivacyOptions` from `src/lib/sentry-privacy.ts`:
 request cookies/body/query/env and all but a few safe headers, filters values
 under PII-named keys (email, name, phone, address, ip, password, token,
 session, …) and redacts emails + IPv4 in every string (exception values,
-messages, breadcrumbs, span descriptions). The old `setSentrySessionUser` /
+messages, breadcrumbs, span descriptions, stack-frame vars), and drops
+stack-frame source lines (they echoed literals in the live check). The old `setSentrySessionUser` /
 `<SentryUser>` identity stamping is deleted. Spec:
 `src/lib/sentry-privacy.test.ts`. The home-Mac yt-archive wrapper redacts its
 log tail the same way before posting.

@@ -17,7 +17,8 @@
  * DROPPED: the `user` interface; request cookies, body, query string, env and
  * all headers but a short allowlist; any value under a PII-named key; email
  * addresses and IPv4 addresses inside ANY string (exception values, messages,
- * breadcrumbs, span descriptions = raw SQL / outbound URLs).
+ * breadcrumbs, stack-frame vars, span descriptions = raw SQL / outbound
+ * URLs); stack-frame source lines are dropped.
  */
 
 export const FILTERED = "[filtered]";
@@ -94,9 +95,27 @@ type AnyEvent = {
     [k: string]: unknown;
   };
   breadcrumbs?: Array<{ message?: string; data?: Record<string, unknown>; [k: string]: unknown }>;
-  exception?: { values?: Array<{ value?: string; [k: string]: unknown }> };
+  exception?: { values?: Array<{ value?: string; stacktrace?: unknown; [k: string]: unknown }> };
+  threads?: { values?: Array<{ stacktrace?: unknown; [k: string]: unknown }> };
   spans?: Array<{ description?: string; data?: Record<string, unknown>; [k: string]: unknown }>;
 };
+
+// Stack frames carry source lines (the Node ContextLines integration) and, if
+// local-variable capture is ever on, `vars` — both can hold literal data, and a
+// free-text name in a source line cannot be redacted reliably. So source lines
+// are DROPPED (filename + lineno + function still locate the code; the live
+// 2026-11-05 check caught them echoing literals) and vars are scrubbed.
+type Frame = { context_line?: string; pre_context?: string[]; post_context?: string[]; vars?: Record<string, unknown> };
+function scrubFrames(stacktrace: unknown): void {
+  const frames = (stacktrace as { frames?: Frame[] } | undefined)?.frames;
+  if (!Array.isArray(frames)) return;
+  for (const f of frames) {
+    delete f.context_line;
+    delete f.pre_context;
+    delete f.post_context;
+    if (f.vars) f.vars = scrubValue(f.vars) as Record<string, unknown>;
+  }
+}
 
 export function scrubEvent<E>(event: E): E {
   if (!event || typeof event !== "object") return event;
@@ -149,7 +168,9 @@ export function scrubEvent<E>(event: E): E {
 
   for (const v of e.exception?.values ?? []) {
     if (typeof v.value === "string") v.value = scrubString(v.value);
+    scrubFrames(v.stacktrace);
   }
+  for (const t of e.threads?.values ?? []) scrubFrames(t.stacktrace);
 
   if (Array.isArray(e.spans)) {
     e.spans = e.spans.map((s) => {
