@@ -60,6 +60,14 @@ want, and really anticipate based on data … and more research about what other
 - **Two kinds of lap.** A *project lap* builds the next milestone of the ONE active project in
   `~/.loops/notes/hubandspoke-build/projects/<slug>.md`. A *polish lap* ships a one-lap feature. Two of every three
   building laps are project laps; there is always one active project, never two.
+- **Never idle on a project that is waiting for data** (retro 2026-11-05: 3 of 6 laps shipped
+  nothing because the active project's next milestone needed rows that hadn't arrived). A project
+  whose next milestone can't be built until data arrives gets **parked**: its first line becomes
+  `Status: parked — waiting on <the exact data, e.g. ≥10 generated_doc pairs> (re-check <date>)`.
+  A parked project is not the active one, so you start the next project and ship its first milestone
+  **that lap** (§2). Parked projects wait in a line. Any project lap where a parked project's data
+  has arrived, it goes back to active as soon as the current active project parks or finishes.
+  Keep one `Status: candidate` project with its evidence written, so a park never costs a lap of research.
 - **What ambitious means here.** The test: would the people who live in this app all day say
   "whoa" or "fine"? Ambitious = it removes a step they repeat dozens of times a day, answers a
   question they currently answer by hand (what's waiting on me, what's performing, what to cut
@@ -157,7 +165,8 @@ hubandspoke`. Title = what people get, under 90 characters, plain words.
 ## 1. Read what people actually do (≈15 minutes, every lap)
 
 Start with `~/.loops/notes/hubandspoke-build/scout.md` (everything considered, built or rejected — never re-propose) and
-the active file in `~/.loops/notes/hubandspoke-build/projects/`. Then the saved reads — run them as files, never
+the active file in `~/.loops/notes/hubandspoke-build/projects/` (plus each `Status: parked` file's first line:
+has the data it waits on arrived?). Then the saved reads — run them as files, never
 re-author them from memory:
 
 1. `hk psql hubandspoke -f docs/build/sql/people.sql` — who is active, how much, doing what, and
@@ -203,6 +212,20 @@ Add 3–5 lines to `~/.loops/notes/hubandspoke-build/scout.md`: source URL, what
 **Project lap** (two of three): the active project's next milestone. No active project? This lap
 writes its file (§0 evidence), files the idea (`loops idea add --repo hubandspoke --source "…"
 --why "<milestones>" "<Name>"`), and builds milestone 1.
+
+**Waiting on data? Park it and start the next one, decided in the first 20 minutes.** If the
+active project's next milestone needs data that isn't there yet (0 rows, no batch since the last
+lap, a "re-check" date still ahead), don't wait for it: park the project (§0), then pick the next
+one in this order:
+1. a parked project whose data has now arrived: resume its next milestone;
+2. the `Status: candidate` project: mark it `Status: active` and build milestone 1;
+3. otherwise the best scout.md lead with usage evidence: write the §0 evidence in about 15
+   minutes and build milestone 1.
+
+Settle this before the outward read; that read is the part to skip when time is short. If milestone 1
+of the new project is too big for the time left, split off a smaller first step that ships today.
+"No-op: the project is waiting on data" is never a lap result. The only time a project lap ships
+nothing is the clock (§⏱), with the work-in-progress branch named in `--next`.
 
 **Polish lap** (the third): the best candidate that is
 - **felt by real people** — name who and how often (from §1), a daily screen beats a monthly one;
@@ -273,7 +296,7 @@ tokens, the patterns in `docs/conventions.md`). Rules:
 ```
 loops emit --loop hubandspoke-build --status done \
   --inspected "<reads: people/screens/pipeline/friction/sentry/signals/scout sources, one line>" \
-  --did "shipped: <title> (<project> milestone N of M | polish; for: <who>; source: …)" | "no-op: <why>" \
+  --did "shipped: <title> (<project> milestone N of M | polish; for: <who>; source: …)[; parked <slug>: waiting on <data>]" | "no-op: <why>" \
   --verified "<tsc/unit/e2e+screenshot looked at/PR merged/deploy 200>" \
   --next "<what the next lap should look at first>" \
   [--blocked "<the one thing only Pat can do, plain words>"]
