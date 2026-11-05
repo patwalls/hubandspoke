@@ -51,7 +51,7 @@ function fail(err: unknown): ToolResult {
 }
 
 /** A model reads this — drop the hypermedia links, keep what it would ask for. */
-function compact(item: ApiContentItem) {
+export function compact(item: ApiContentItem) {
   return {
     id: item.id,
     title: item.title,

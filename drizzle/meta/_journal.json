@@ -1058,6 +1058,13 @@
       "when": 1793918020394,
       "tag": "0150_academy_coming_soon",
       "breakpoints": true
+    },
+    {
+      "idx": 151,
+      "version": "7",
+      "when": 1793920149816,
+      "tag": "0151_assistant_messages",
+      "breakpoints": true
     }
   ]
 }

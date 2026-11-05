@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowDown, ArrowUp, CheckCircle2, Clock, GraduationCap, Pencil, PlayCircle, Plus, SearchIcon, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, CheckCircle2, Clock, GraduationCap, Pencil, PlayCircle, Plus, SearchIcon, Sparkles, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { AcademyCategory, AcademyProgressMap, AcademyVideo } from "@/lib/academy/queries";
@@ -12,6 +12,7 @@ import { VideoFormDialog } from "@/components/academy/video-form-dialog";
 import { CategoryFormDialog } from "@/components/academy/category-form-dialog";
 import { AcademySidebar } from "@/components/academy/academy-sidebar";
 import { VideoBadge } from "@/components/academy/video-badge";
+import { openAssistant } from "@/components/assistant/assistant-panel";
 
 type Editing =
   | { kind: "video"; video?: AcademyVideo; categoryId?: string }
@@ -101,6 +102,13 @@ export function AcademyHome({
             className="h-11 w-full rounded-xl border border-border bg-background pl-9 pr-3 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
         </div>
+        <button
+          type="button"
+          onClick={() => openAssistant(query.trim() || undefined)}
+          className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium text-orange-700 hover:underline dark:text-orange-300"
+        >
+          <Sparkles className="size-3.5" /> Can&apos;t find it? Ask the assistant
+        </button>
         {total > 0 && (
           <p className="mt-4 text-xs text-muted-foreground">
             {done} of {total} videos completed

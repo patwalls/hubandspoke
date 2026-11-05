@@ -3044,3 +3044,33 @@ export const academyProgress = pgTable(
   },
   (table) => [primaryKey({ columns: [table.userId, table.videoId] })],
 );
+
+// ---------------------------------------------------------------------------
+// Hub & Spoke Assistant — the in-app "ask how things work" chat. One row per
+// question: what was asked, the answer, which read-only tools it used, and
+// token usage. Drives the per-user daily limit (src/lib/assistant/limits.ts)
+// and shows what people ask (gaps for the Academy). See docs/features.md.
+// ---------------------------------------------------------------------------
+
+export type AssistantToolCall = { name: string; ok: boolean; ms: number };
+
+export const assistantMessages = pgTable(
+  "assistant_messages",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    question: text("question").notNull(),
+    answer: text("answer"),
+    toolCalls: jsonb("tool_calls").$type<AssistantToolCall[]>().notNull().default([]),
+    model: text("model").notNull(),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    cacheReadTokens: integer("cache_read_tokens").notNull().default(0),
+    error: text("error"),
+    durationMs: integer("duration_ms"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index("idx_assistant_messages_user_created").on(table.userId, table.createdAt)],
+);

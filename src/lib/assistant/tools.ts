@@ -1,0 +1,203 @@
+import type Anthropic from "@anthropic-ai/sdk";
+import { listAccounts, listBrands, listFormats, listStatuses, listUsers } from "@/lib/api/catalog";
+import { getContent, getTranscript, listComments, listContent, listDerivatives, renderTranscript, SOURCE_TYPES } from "@/lib/api/content";
+import { searchTranscripts } from "@/lib/api/transcript-search";
+import { ApiError } from "@/lib/api/http";
+import { compact } from "@/lib/mcp/server";
+import { getMyWork } from "@/lib/my-work/queries";
+import { flattenVideos, getAcademyLibrary } from "@/lib/academy/queries";
+import { rankPassages, searchFeatureDocs } from "@/lib/assistant/help-search";
+
+/**
+ * The assistant's tools. READ-ONLY by design: help search (docs + Academy)
+ * plus the same read functions behind /api/v1 and the MCP server
+ * (src/lib/api/*), so answers match what the API returns. No write tools —
+ * the assistant explains and looks things up; people make changes in the app.
+ */
+
+export interface AssistantToolContext {
+  userId: string;
+  baseUrl: string;
+}
+
+/** Keep tool results small: a model reads them and they cost tokens. */
+const MAX_RESULT_CHARS = 12_000;
+
+const str = (description: string) => ({ type: "string" as const, description });
+const uuid = str("Content item id (UUID) from search_content or my_work");
+
+export const ASSISTANT_TOOLS: Anthropic.Tool[] = [
+  {
+    name: "search_help",
+    description:
+      "Search Hub & Spoke's own help: Academy training videos (with their learn points, action items and guides) and the product's feature documentation. Use this FIRST for any 'how does X work' / 'how do I' / 'what does Y mean' question. Search again with different words if the first results don't answer it.",
+    input_schema: { type: "object", properties: { query: str("Keywords, e.g. 'cross post queue' or 'ready to publish status'") }, required: ["query"] },
+  },
+  {
+    name: "my_work",
+    description: "What's on the signed-in person's plate right now: items where it's their turn, items waiting for their review, and items waiting on others.",
+    input_schema: { type: "object", properties: {} },
+  },
+  {
+    name: "search_content",
+    description:
+      "Find content items (hub videos and the clips/posts made from them). Returns compact rows newest first. Filter by brand slug, post_type, status, format, source_type, text, or publish dates.",
+    input_schema: {
+      type: "object",
+      properties: {
+        brand: str("Brand slug from list_brands; omit for all brands"),
+        post_type: str("youtube_long, youtube_shorts, instagram_reel, instagram_post, x, tiktok, linkedin, threads, newsletter"),
+        status: str("Workflow status, e.g. Published, Review, Ready to Publish, Scheduled"),
+        format: str("Format name from list_formats"),
+        source_type: { type: "string", enum: [...SOURCE_TYPES], description: "original = hub piece; repurposed = clip; cross_post / repost" },
+        q: str("Search titles, hooks and post bodies"),
+        published_after: str("ISO date, inclusive"),
+        published_before: str("ISO date, inclusive"),
+        sort: { type: "string", enum: ["published_at", "updated_at", "views"], description: "Always descending; default published_at" },
+        limit: { type: "integer", minimum: 1, maximum: 25, description: "Default 10" },
+      },
+    },
+  },
+  { name: "get_content", description: "Full detail for one content item.", input_schema: { type: "object", properties: { id: uuid }, required: ["id"] } },
+  {
+    name: "get_transcript",
+    description: "What was said in a video (plain text, may be truncated for long videos).",
+    input_schema: { type: "object", properties: { id: uuid }, required: ["id"] },
+  },
+  { name: "list_derivatives", description: "The clips/posts made from a hub item.", input_schema: { type: "object", properties: { id: uuid }, required: ["id"] } },
+  { name: "list_comments", description: "Comments on a content item.", input_schema: { type: "object", properties: { id: uuid }, required: ["id"] } },
+  {
+    name: "search_transcripts",
+    description: "Find where something was said across video transcripts. Quotes force a phrase; -word excludes.",
+    input_schema: { type: "object", properties: { q: str("Words or a quoted phrase"), brand: str("Brand slug; optional") }, required: ["q"] },
+  },
+  { name: "list_brands", description: "Brands (slug, name).", input_schema: { type: "object", properties: {} } },
+  {
+    name: "list_accounts",
+    description: "Social accounts per brand.",
+    input_schema: { type: "object", properties: { brand: str("Brand slug; optional"), platform: str("youtube, instagram, x, tiktok, linkedin, threads, newsletter; optional") } },
+  },
+  { name: "list_formats", description: "Content formats per brand.", input_schema: { type: "object", properties: { brand: str("Brand slug; optional") } } },
+  { name: "list_statuses", description: "Workflow statuses (in order) per brand.", input_schema: { type: "object", properties: { brand: str("Brand slug; optional") } } },
+  { name: "list_users", description: "People on the team (name, role).", input_schema: { type: "object", properties: {} } },
+];
+
+type Args = Record<string, unknown>;
+const s = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
+const date = (v: unknown) => {
+  const raw = s(v);
+  if (!raw) return undefined;
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) throw new ApiError("invalid_request", `"${raw}" is not an ISO date.`);
+  return d;
+};
+const strip = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
+
+async function searchHelp(query: string, baseUrl: string) {
+  const videos = flattenVideos(await getAcademyLibrary()).filter((v) => !v.comingSoon);
+  const academy = rankPassages(
+    videos.map((v) => ({
+      v,
+      title: v.title,
+      text: [v.summary, ...v.learnPoints.map((p) => p.text), ...v.actionItems, v.notes ? strip(v.notes) : ""].join(" "),
+    })),
+    query,
+    3,
+  ).map(({ v }) => ({
+    title: v.title,
+    url: `${baseUrl}/academy/${v.slug}`,
+    summary: v.summary,
+    you_will_learn: v.learnPoints.map((p) => (p.time ? `${p.time} ${p.text}` : p.text)),
+    action_items: v.actionItems,
+    guide: v.notes ? strip(v.notes).slice(0, 2500) : null,
+  }));
+  return { academy_videos: academy, feature_docs: searchFeatureDocs(query, 5) };
+}
+
+async function run(name: string, a: Args, ctx: AssistantToolContext): Promise<unknown> {
+  const id = s(a.id) ?? "";
+  switch (name) {
+    case "search_help":
+      return searchHelp(s(a.query) ?? "", ctx.baseUrl);
+    case "my_work": {
+      const work = await getMyWork(ctx.userId);
+      const row = (r: { id: string; title: string | null; brand: string; status: string | null; format: string | null; postType: string | null }) => ({
+        id: r.id,
+        title: r.title,
+        brand: r.brand,
+        status: r.status,
+        format: r.format,
+        post_type: r.postType,
+        app_url: `${ctx.baseUrl}/${r.brand}/content/${r.id}`,
+      });
+      return { your_turn: work.yourTurn.map(row), to_review: work.toReview.map(row), waiting_on_others: work.waitingOnOthers.map(row) };
+    }
+    case "search_content": {
+      const page = await listContent(
+        {
+          brand: s(a.brand),
+          post_type: s(a.post_type),
+          status: s(a.status),
+          format: s(a.format),
+          source_type: s(a.source_type),
+          q: s(a.q),
+          published_after: date(a.published_after),
+          published_before: date(a.published_before),
+          sort: (s(a.sort) as "published_at" | "updated_at" | "views" | undefined) ?? undefined,
+          limit: Math.min(Number(a.limit) || 10, 25),
+        },
+        ctx.baseUrl,
+      );
+      return { items: page.data.map(compact), has_more: page.has_more };
+    }
+    case "get_content":
+      return getContent(id, ctx.baseUrl);
+    case "get_transcript":
+      return renderTranscript(await getTranscript(id), "text").body;
+    case "list_derivatives":
+      return (await listDerivatives(id, ctx.baseUrl)).data.map(compact);
+    case "list_comments":
+      return (await listComments(id)).data;
+    case "search_transcripts":
+      return (await searchTranscripts({ q: s(a.q) ?? "", brand: s(a.brand), limit: 10 }, ctx.baseUrl)).data;
+    case "list_brands":
+      return (await listBrands()).data;
+    case "list_accounts":
+      return (await listAccounts({ brand: s(a.brand), platform: s(a.platform) })).data;
+    case "list_formats":
+      return (await listFormats({ brand: s(a.brand) })).data;
+    case "list_statuses":
+      return (await listStatuses({ brand: s(a.brand) })).data;
+    case "list_users":
+      return (await listUsers()).data;
+    default:
+      throw new Error(`Unknown tool ${name}`);
+  }
+}
+
+/** Runs one tool call; always returns text for the model (errors included). */
+export async function runAssistantTool(name: string, args: Args, ctx: AssistantToolContext): Promise<{ text: string; ok: boolean }> {
+  try {
+    const value = await run(name, args ?? {}, ctx);
+    const text = typeof value === "string" ? value : JSON.stringify(value);
+    return { text: text.length > MAX_RESULT_CHARS ? `${text.slice(0, MAX_RESULT_CHARS)}… [truncated]` : text, ok: true };
+  } catch (err) {
+    const message = err instanceof ApiError ? `${err.type}: ${err.message}` : err instanceof Error ? err.message : String(err);
+    return { text: `Error: ${message}`, ok: false };
+  }
+}
+
+/** Short status line shown in the chat while a tool runs. */
+export function toolStatus(name: string): string {
+  switch (name) {
+    case "search_help":
+      return "Searching the help…";
+    case "my_work":
+      return "Checking your work…";
+    case "get_transcript":
+    case "search_transcripts":
+      return "Reading transcripts…";
+    default:
+      return "Looking up your content…";
+  }
+}

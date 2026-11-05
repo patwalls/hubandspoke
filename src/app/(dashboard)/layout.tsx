@@ -9,6 +9,7 @@ import { DescriptCreditsBanner } from "@/components/dashboard/descript-credits-b
 import { ScheduledAttentionBanner } from "@/components/dashboard/scheduled-attention-banner";
 import { UsageTracker } from "@/components/dashboard/usage-tracker";
 import { WhatsNewDialog, type WhatsNewCard } from "@/components/dashboard/whats-new-dialog";
+import { AssistantPanel } from "@/components/assistant/assistant-panel";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { getBrands, getDefaultBrandSlug } from "@/lib/db/brands";
@@ -132,6 +133,7 @@ export default async function DashboardLayout({
         <UsageTracker />
       </Suspense>
       <WhatsNewDialog unseen={whatsNewUnseen} all={whatsNewAll} />
+      <AssistantPanel />
       <Toaster position="bottom-right" richColors closeButton />
     </div>
     </BrandAccessProvider>
