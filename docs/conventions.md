@@ -529,7 +529,7 @@ It needs no secrets (Sentry source-map upload skips itself without
 ## Shipping a user-facing feature: What's new + usage
 
 - **Tell people.** Add a card at the TOP of `src/lib/whats-new/entries.ts` (newest first, unique
-  `<YYYY-MM-DD>-<slug>` id, `shippedAt` = now in ISO). Plain words for editors, not engineers.
+  `<YYYY-MM-DD>-<slug>` id, `shippedAt` = now in ISO — never a time ahead: dismissing stores the newest stamp as "seen up to", so a card stamped ahead hides the cards shipped before it; `index.test.ts` fails on one). Plain words for editors, not engineers.
   A feature behind a flag or admin-only names it in `audience`, or people who can't use it get the pop-up.
   A card about one screen names it in `audience.usersOf` (e.g. `["/[brand]/production"]`, `["/[brand]/queue/*"]`,
   `["modal:clip-editor"]`) so only people who opened it in the last 30 days get the pop-up; leave it off only

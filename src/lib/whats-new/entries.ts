@@ -20,6 +20,9 @@ import type { FeatureFlag } from "@/lib/feature-flags";
  *   one screen — leave it off only for news everyone needs. Matching rules:
  *   `usesAnyScreen` in ./index.ts.
  * - `id` is unique and never reused: `<YYYY-MM-DD>-<slug>`.
+ * - `shippedAt` is the real time it ships (now, UTC), never a guess ahead:
+ *   dismissing the pop-up stores the newest stamp as "seen up to", so a card
+ *   stamped at noon hides every card shipped before noon (a test guards it).
  */
 export interface WhatsNewEntry {
   id: string;
@@ -41,7 +44,7 @@ export interface WhatsNewEntry {
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
     id: "2026-11-05-hook-rewrites-format-page",
-    shippedAt: "2026-11-05T12:00:00Z",
+    shippedAt: "2026-11-05T03:15:20Z",
     kind: "feature",
     title: "See how editors rewrite a format's AI hooks",
     body: "A video format's page now says, under its clip look, how often editors replace the AI hook, like \"Editors rewrite the AI hook on 18 of 20 clips\". Click it to see each AI hook next to the words the clip shipped with. New clip ideas learn from these.",
