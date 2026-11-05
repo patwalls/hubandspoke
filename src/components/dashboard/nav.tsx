@@ -317,13 +317,14 @@ export function DashboardNav({
               </kbd>
             </button>
             <MyWorkButton />
+            <NotificationBell />
             <DropdownMenu>
               <DropdownMenuTrigger
                 aria-label="Learn: Academy, What's new, API & MCP"
                 title="Academy"
                 className="inline-flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
-                <GraduationCap className="h-4 w-4" />
+                <GraduationCap className="size-[15px]" strokeWidth={1.75} />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="min-w-56">
                 <DropdownMenuItem
@@ -346,7 +347,6 @@ export function DashboardNav({
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-            <NotificationBell />
             <DropdownMenu>
               <DropdownMenuTrigger
                 aria-label="Account menu"

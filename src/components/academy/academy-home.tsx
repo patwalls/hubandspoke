@@ -80,7 +80,7 @@ export function AcademyHome({
 
   return (
     <div className="mx-auto flex max-w-7xl gap-8">
-    <AcademySidebar library={library} progress={progress} activeVideoId={null} />
+    <AcademySidebar library={library} progress={progress} activeVideoId={null} canEdit={canEdit} />
     <div className="min-w-0 flex-1 max-w-5xl space-y-10 pb-16">
       {/* Hero */}
       <section className="rounded-2xl border border-border bg-gradient-to-br from-orange-50 via-background to-amber-50 px-6 py-10 text-center dark:from-orange-950/30 dark:to-amber-950/20 sm:px-10">

@@ -83,6 +83,7 @@ export function AcademyVideoPage({
         library={library}
         progress={{ ...progress, [video.id]: { checkedItems: checked, completed } }}
         activeVideoId={video.id}
+        canEdit={canEdit}
       />
 
       {/* Main */}
@@ -140,9 +141,7 @@ export function AcademyVideoPage({
             <a href={video.videoUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-sm font-medium text-orange-600 hover:underline">
               Open video <ExternalLink className="size-3.5" />
             </a>
-          ) : (
-            <div className="flex aspect-video items-center justify-center rounded-xl border border-dashed border-border text-sm text-muted-foreground">Video coming soon</div>
-          )}
+          ) : null /* no video link: no player box at all */}
         </div>
 
         {/* You'll learn */}

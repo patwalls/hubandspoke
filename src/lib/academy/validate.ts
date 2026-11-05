@@ -34,6 +34,8 @@ export const categoryInputSchema = z.object({
 export const reorderSchema = z.object({
   kind: z.enum(["videos", "categories"]),
   ids: z.array(z.string().uuid()).min(1).max(500),
+  // videos only: the category these ids now belong to (drag into another category).
+  categoryId: z.string().uuid().optional(),
 });
 
 export const progressSchema = z.object({
