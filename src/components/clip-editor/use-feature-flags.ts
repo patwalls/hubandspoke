@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import type { FeatureFlag } from "@/lib/feature-flags";
 
 type Flags = Record<FeatureFlag, boolean>;
@@ -12,8 +12,9 @@ type Flags = Record<FeatureFlag, boolean>;
  */
 let cached: Flags | null = null;
 let inflight: Promise<Flags | null> | null = null;
+const listeners = new Set<() => void>();
 
-function load(): Promise<Flags | null> {
+export function loadFeatureFlags(): Promise<Flags | null> {
   if (!inflight) {
     inflight = fetch("/api/feature-flags")
       .then((res) => (res.ok ? res.json() : null))
@@ -21,27 +22,43 @@ function load(): Promise<Flags | null> {
         cached = json?.flags ?? null;
         return cached;
       })
-      .catch(() => null);
+      .catch(() => null)
+      .then((flags) => {
+        for (const notify of listeners) notify();
+        return flags;
+      });
   }
   return inflight;
+}
+
+function subscribe(onChange: () => void): () => void {
+  listeners.add(onChange);
+  void loadFeatureFlags();
+  return () => {
+    listeners.delete(onChange);
+  };
 }
 
 /**
  * Feature flags for the signed-in user. `null` while loading or on error —
  * callers MUST treat null as "every flag off", so a failed or slow request
  * can only ever show the existing UI, never the unreleased one.
+ *
+ * useSyncExternalStore, NOT useState(cached): the server always renders with
+ * no flags, and a Suspense boundary that hydrates after the fetch resolved
+ * would otherwise start from the warm cache and render flag-on markup over
+ * flag-off HTML — React #418 (GlitchTip HUBANDSPOKE-4, /:brand/queue,
+ * 2026-11-05). The server snapshot is what hydration renders; React then
+ * re-renders with the real flags.
  */
 export function useFeatureFlags(): Flags | null {
-  const [flags, setFlags] = useState<Flags | null>(cached);
-  useEffect(() => {
-    if (cached) return;
-    let cancelled = false;
-    void load().then((f) => {
-      if (!cancelled) setFlags(f);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-  return flags;
+  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+}
+
+function getSnapshot(): Flags | null {
+  return cached;
+}
+
+function getServerSnapshot(): Flags | null {
+  return null;
 }
