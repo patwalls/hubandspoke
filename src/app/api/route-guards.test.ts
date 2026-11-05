@@ -23,7 +23,8 @@ const routes: string[] = [];
   }
 })(API);
 
-const GUARD = /\b(requireSession|requireAdmin|requireFeature|requireBrandEdit)\(|\bv1Handler\(|\bauthenticateApi\(/;
+// requireAcademyEditor (src/lib/academy/editor-guard.ts) runs requireSession() and then checks the editor list.
+const GUARD = /\b(requireSession|requireAdmin|requireFeature|requireBrandEdit|requireAcademyEditor)\(|\bv1Handler\(|\bauthenticateApi\(/;
 
 /** Public on purpose — each has its own check, named here. */
 const PUBLIC: Record<string, string> = {
