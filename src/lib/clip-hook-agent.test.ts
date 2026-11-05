@@ -185,6 +185,19 @@ describe("writeFormatHookForSection — wiring", () => {
     expect(systemPrompt).toMatch(/do not relabel/i);
   });
 
+  it("tells the writer how editors rewrote this format's hooks, and says nothing when there are none", async () => {
+    const { client, create } = makeClient([{ eligible: false, reason: "n/a" }, { eligible: false, reason: "n/a" }]);
+    await writeFormatHookForSection(
+      baseArgs({ client, editorRewrites: [{ ai: "Instead of building, he spent most of his week on the sales floor", shipped: "We started cold calling ourselves." }] }),
+    );
+    const withPairs = (create.mock.calls[0][0] as { system: string }).system;
+    expect(withPairs).toContain("HOW EDITORS REWRITE THIS FORMAT'S HOOKS");
+    expect(withPairs).toContain('Editor shipped: "We started cold calling ourselves."');
+    await writeFormatHookForSection(baseArgs({ client }));
+    const without = (create.mock.calls[1][0] as { system: string }).system;
+    expect(without).not.toContain("HOW EDITORS REWRITE");
+  });
+
   it("falls back to the default block (no subject Skill) but keeps the strict eligibility rule", async () => {
     const { client, create } = makeClient([
       { eligible: false, reason: "n/a" },
@@ -285,8 +298,8 @@ describe("writeFormatHookForSection — wiring", () => {
     expect(candidate.reason).toMatch(/agent error/i);
   });
 
-  it("is attributed to the fixed prompt version (hook-v2)", () => {
-    expect(HOOK_PROMPT_VERSION).toBe(2);
-    expect(HOOK_GENERATED_BY).toMatch(/:hook-v2$/);
+  it("is attributed to the prompt version that learns editors' rewrites (hook-v3)", () => {
+    expect(HOOK_PROMPT_VERSION).toBe(3);
+    expect(HOOK_GENERATED_BY).toMatch(/:hook-v3$/);
   });
 });

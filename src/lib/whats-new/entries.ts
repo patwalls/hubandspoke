@@ -40,6 +40,16 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-11-05-hooks-learn-rewrites",
+    shippedAt: "2026-11-05T03:15:00Z",
+    kind: "feature",
+    title: "New clip ideas write hooks the way you ship them",
+    body: "When you replace a clip's AI hook with your own line, like a short title or a line the guest says, new clip ideas for that brand and format now learn from it. Formats where editors keep the AI hook stay as they were.",
+    href: "/[brand]/queue",
+    screen: "/[brand]/queue",
+    audience: { flag: "clipEditor", usersOf: ["modal:clip-editor"] },
+  },
+  {
     id: "2026-11-04-design-template-edits",
     shippedAt: "2026-11-04T02:00:00Z",
     kind: "feature",
