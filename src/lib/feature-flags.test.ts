@@ -75,12 +75,15 @@ describe("resolveFeatureFlags", () => {
       newsletterTemplateAdmin: false,
       winnersEmail: false,
       myWorkDigest: true,
+      assistant: false,
     });
     expect(resolveFeatureFlags({ email: "Sam@StarterStory.com" }, {}).newsletterDrafter).toBe(true);
+    expect(resolveFeatureFlags({ email: "Sam@StarterStory.com" }, {}).assistant).toBe(true);
+    expect(resolveFeatureFlags({ email: "timjohn2002@gmail.com" }, {}).assistant).toBe(true);
     expect(resolveFeatureFlags({ email: "Sam@StarterStory.com" }, {}).newsletterTemplateAdmin).toBe(true);
     expect(resolveFeatureFlags({ email: "patrickswalls@gmail.com" }, {}).newsletterTemplateAdmin).toBe(false);
     expect(resolveFeatureFlags({ email: "patrickswalls@gmail.com" }, {}).newsletterDrafter).toBe(true);
     expect(resolveFeatureFlags({ email: "patrickswalls@gmail.com" }, {}).myWorkDigest).toBe(true);
-    expect(resolveFeatureFlags(null, {})).toEqual({ clipEditor: false, designEditor: false, newsletterDrafter: false, newsletterTemplateAdmin: false, myWorkDigest: false, winnersEmail: false });
+    expect(resolveFeatureFlags(null, {})).toEqual({ clipEditor: false, designEditor: false, newsletterDrafter: false, newsletterTemplateAdmin: false, myWorkDigest: false, winnersEmail: false, assistant: false });
   });
 });

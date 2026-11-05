@@ -117,8 +117,8 @@ export function AssistantPanel() {
           setTimeout(() => inputRef.current?.focus(), 50);
         }}
         className="fixed bottom-5 right-5 z-40 flex size-12 items-center justify-center rounded-full bg-orange-500 text-white shadow-lg ring-4 ring-orange-500/15 transition-transform hover:scale-105 focus:outline-none focus-visible:ring-orange-500/40"
-        aria-label="Ask the Hub & Spoke Assistant"
-        title="Ask the assistant"
+        aria-label="Ask the Hub & Spoke Assistant (beta)"
+        title="Ask the assistant (beta)"
       >
         <MessageCircle className="size-5" />
       </button>
@@ -133,7 +133,10 @@ export function AssistantPanel() {
       >
         <header className="flex items-start justify-between border-b border-border px-5 py-4">
           <div>
-            <div className="text-[11px] font-semibold uppercase tracking-wider text-orange-600">Assistant</div>
+            <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-orange-600">
+              Assistant
+              <span className="rounded-full bg-orange-100 px-1.5 py-px text-[10px] tracking-wide text-orange-700 dark:bg-orange-950/60 dark:text-orange-300">Beta</span>
+            </div>
             <div className="text-base font-semibold text-foreground">Ask about Hub &amp; Spoke</div>
           </div>
           <div className="flex items-center gap-1">
@@ -245,7 +248,7 @@ export function AssistantPanel() {
             <ArrowUp className="size-4" />
           </button>
         </form>
-        <p className="px-4 pb-2 text-center text-[11px] text-muted-foreground/70">Answers can be wrong — check the Academy for the full walkthrough.</p>
+        <p className="px-4 pb-2 text-center text-[11px] text-muted-foreground/70">Beta — answers can be wrong. Check the Academy for the full walkthrough.</p>
       </aside>
     </>
   );
