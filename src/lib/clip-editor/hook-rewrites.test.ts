@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createDefaultDoc, createTextLayer, type ClipEditDoc, type TextLayer } from "./doc";
-import { collectHookRewrites, hookKey, hookRewrite, hookRewritesBlock, shippedHookLine } from "./hook-rewrites";
+import { collectHookRewrites, hookKey, hookRewrite, hookRewritesBlock, shippedHookLine, summarizeHookRewrites } from "./hook-rewrites";
 
 const AI = "Instead of building, he spent 60 to 70 percent of his week on the sales floor watching his team";
 const clip = (hook = AI): ClipEditDoc => structuredClone(createDefaultDoc({ startSec: 0, endSec: 30, hook }));
@@ -68,5 +68,28 @@ describe("collectHookRewrites + hookRewritesBlock", () => {
   it("hookKey folds case, emoji and punctuation only", () => {
     expect(hookKey("Bro's app…🤯 ")).toBe(hookKey("bro s app"));
     expect(hookKey("Line one")).not.toBe(hookKey("Line two"));
+  });
+});
+
+describe("summarizeHookRewrites (the format page's line, hooks-learn M2)", () => {
+  const shipped = (t: string) => {
+    const d = clip();
+    hookOf(d).text = t;
+    return { aiHook: AI, doc: d };
+  };
+  const hidden = () => {
+    const d = clip();
+    hookOf(d).visible = false;
+    return { aiHook: AI, doc: d };
+  };
+
+  it("counts only clips that started from an AI hook and show words; pairs are the writer's pairs", () => {
+    const rows = [shipped("Line one"), shipped("Line one"), { aiHook: AI, doc: clip() }, hidden(), { aiHook: null, doc: clip() }];
+    expect(summarizeHookRewrites(rows)).toEqual({ clips: 3, rewritten: 2, pairs: [{ ai: AI, shipped: "Line one" }] });
+  });
+
+  it("too few clips, or editors kept every AI hook → nothing to say", () => {
+    expect(summarizeHookRewrites([shipped("Line one"), shipped("Line two")])).toBeNull();
+    expect(summarizeHookRewrites([0, 1, 2].map(() => ({ aiHook: AI, doc: clip() })))).toBeNull();
   });
 });

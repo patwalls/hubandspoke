@@ -40,6 +40,16 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-11-05-hook-rewrites-format-page",
+    shippedAt: "2026-11-05T12:00:00Z",
+    kind: "feature",
+    title: "See how editors rewrite a format's AI hooks",
+    body: "A video format's page now says, under its clip look, how often editors replace the AI hook, like \"Editors rewrite the AI hook on 18 of 20 clips\". Click it to see each AI hook next to the words the clip shipped with. New clip ideas learn from these.",
+    href: "/[brand]/formats",
+    screen: "formats:hook-rewrites",
+    audience: { flag: "clipEditor", usersOf: ["modal:clip-editor", "/[brand]/formats/[id]"] },
+  },
+  {
     id: "2026-11-05-hooks-learn-rewrites",
     shippedAt: "2026-11-05T03:15:00Z",
     kind: "feature",

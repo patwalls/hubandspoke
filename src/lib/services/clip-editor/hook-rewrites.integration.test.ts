@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { createDefaultDoc } from "@/lib/clip-editor/doc";
 import { createTestClipEdit, createTestClipIdea, createTestProductionItem } from "@/test/factories";
-import { loadHookRewrites } from "./hook-rewrites";
+import { loadHookRewriteSummary, loadHookRewrites } from "./hook-rewrites";
 
 const FORMAT = `vitest hooks-learn ${Date.now()}`;
 const AI = "A long AI hook sentence that the editor will not keep on screen";
@@ -27,5 +27,16 @@ describe("loadHookRewrites", () => {
     expect(await loadHookRewrites({ brand: "starter-story", formatName: FORMAT })).toEqual([
       { ai: AI, shipped: "We started cold calling ourselves." },
     ]);
+  });
+
+  it("the format page's summary counts the same clips the writer reads (M2)", async () => {
+    const format = `${FORMAT} m2`;
+    await clipWith({ format, shipped: "We started cold calling ourselves.", revision: 3 });
+    await clipWith({ format, shipped: "Short title", revision: 2 });
+    await clipWith({ format, shipped: AI, revision: 2 });
+    await clipWith({ format, shipped: "Never saved past the first draft", revision: 1 });
+    const summary = await loadHookRewriteSummary({ brand: "starter-story", formatName: format });
+    expect(summary).toMatchObject({ clips: 3, rewritten: 2 });
+    expect(summary?.pairs.map((p) => p.shipped).sort()).toEqual(["Short title", "We started cold calling ourselves."]);
   });
 });

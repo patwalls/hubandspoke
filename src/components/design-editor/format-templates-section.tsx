@@ -35,6 +35,7 @@ import { describeTemplateEditRow } from "@/lib/design-editor/design-edits";
 import type { TemplateEdits } from "@/lib/services/design-editor/template-edits";
 import { trackUsage } from "@/lib/usage/track";
 import type { LookEdits } from "@/lib/services/clip-editor/look-edits";
+import type { HookRewriteSummary } from "@/lib/clip-editor/hook-rewrites";
 
 const VIEW_ONLY_TITLE = "View only — you don't have edit access to this brand";
 
@@ -292,14 +293,14 @@ function Filmstrip({ doc, imageUrls, channels }: { doc: DesignDoc; imageUrls: Re
 
 function ClipLookCard({ brand, formatId, formatName }: { brand: string; formatId: string; formatName: string }) {
   const canEdit = useCanEditBrand(brand);
-  const [look, setLook] = useState<{ look: ClipLook | null; updatedAt: string | null; aspectRatio: AspectRatio; edits: LookEdits | null } | null>(null);
+  const [look, setLook] = useState<{ look: ClipLook | null; updatedAt: string | null; aspectRatio: AspectRatio; edits: LookEdits | null; hookRewrites: HookRewriteSummary | null } | null>(null);
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
   const load = useCallback(async () => {
     const res = await fetch(`/api/formats/${formatId}/clip-template`);
     if (res.ok) {
-      const json = (await res.json()) as { look: ClipLook | null; updatedAt: string | null; aspectRatio?: AspectRatio; edits?: LookEdits | null };
-      setLook({ look: json.look, updatedAt: json.updatedAt, aspectRatio: json.aspectRatio ?? "9:16", edits: json.edits ?? null });
+      const json = (await res.json()) as { look: ClipLook | null; updatedAt: string | null; aspectRatio?: AspectRatio; edits?: LookEdits | null; hookRewrites?: HookRewriteSummary | null };
+      setLook({ look: json.look, updatedAt: json.updatedAt, aspectRatio: json.aspectRatio ?? "9:16", edits: json.edits ?? null, hookRewrites: json.hookRewrites ?? null });
     }
   }, [formatId]);
   useEffect(() => {
@@ -343,6 +344,7 @@ function ClipLookCard({ brand, formatId, formatName }: { brand: string; formatId
             )}
           </div>
           {look.edits && <ClipLookEditorsChange edits={look.edits} brand={brand} />}
+          {look.hookRewrites && <HookRewritesLine summary={look.hookRewrites} brand={brand} />}
           <div className="flex flex-wrap gap-2">
             <Button type="button" size="sm" className="h-7 text-xs" disabled={!canEdit} title={canEdit ? undefined : VIEW_ONLY_TITLE} onClick={() => setEditing(true)}>
               <PencilIcon className="mr-1 size-3" /> {l ? "Edit look" : "Create look"}
@@ -358,6 +360,54 @@ function ClipLookCard({ brand, formatId, formatName }: { brand: string; formatId
         </>
       )}
     </Card>
+  );
+}
+
+const HOOK_REWRITES_OPEN_KEY = "formats:hook-rewrites:open";
+
+/** "Editors rewrite the AI hook on 18 of 20 clips ›" — one quiet line under
+ *  the clip look; click opens the pairs (AI hook → words the clip shipped),
+ *  the same ones new clip ideas learn from (hooks-learn M2). Remembered per
+ *  browser, like the line above it. */
+function HookRewritesLine({ summary, brand }: { summary: HookRewriteSummary; brand: string }) {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    setOpen(localStorage.getItem(HOOK_REWRITES_OPEN_KEY) === "1");
+  }, []);
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    localStorage.setItem(HOOK_REWRITES_OPEN_KEY, next ? "1" : "0");
+    if (next) trackUsage("formats:hook-rewrites", brand);
+  };
+  return (
+    <div className="text-[11px] text-muted-foreground" data-testid="hook-rewrites">
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={open}
+        title={`From the last ${summary.clips} edited clips: how often the words on screen differ from the AI hook. Tidying emoji, case or punctuation doesn't count. New clip ideas learn from these.`}
+        className="inline-flex max-w-full items-center gap-1 text-left hover:text-foreground"
+      >
+        <span className="truncate">
+          Editors rewrite the AI hook on <span className="text-foreground">{summary.rewritten} of {summary.clips} clips</span>
+        </span>
+        <span aria-hidden>{open ? "▾" : "›"}</span>
+      </button>
+      {open && (
+        <>
+          <ul className="mt-1 space-y-1.5 pl-2">
+            {summary.pairs.map((p) => (
+              <li key={p.shipped}>
+                <div className="line-through decoration-muted-foreground/50">{p.ai}</div>
+                <div className="text-foreground">→ {p.shipped}</div>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1 pl-2">New clip ideas for this format learn from these.</p>
+        </>
+      )}
+    </div>
   );
 }
 
