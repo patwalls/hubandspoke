@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { classifyLocks, type LockRow } from "./lock-reconcile";
+import { classifyLocks, shouldReportReconcile, type LockRow } from "./lock-reconcile";
 
 const boot = new Date("2026-10-15T17:28:00Z");
 const now = new Date("2026-10-15T17:40:00Z");
@@ -69,5 +69,29 @@ describe("classifyLocks", () => {
       inFlightJobIds: new Set(["7"]), inFlightQueueIds: new Set(["1"]),
     });
     expect(out).toEqual({ orphanHolders: [], ghostJobIds: [], ghostQueueIds: [], foreignLiveHolders: [] });
+  });
+});
+
+describe("shouldReportReconcile", () => {
+  const clean = { orphanHolders: [], ghostJobIds: [], ghostQueueIds: [], foreignLiveHolders: [], acted: false };
+
+  it("logs, not pages, a boot pass that only released the previous process's orphans", () => {
+    // HUBANDSPOKE-6: deploy restart at 19:02Z left pool-86a8… holding a lock.
+    expect(shouldReportReconcile("boot", { ...clean, orphanHolders: ["pool-old"], acted: true })).toBe(false);
+  });
+
+  it("pages an orphan found on an interval pass (a lock sat wedged while we were up)", () => {
+    expect(shouldReportReconcile("interval", { ...clean, orphanHolders: ["pool-old"], acted: true })).toBe(true);
+  });
+
+  it("pages ghosts and foreign live holders even at boot", () => {
+    expect(shouldReportReconcile("boot", { ...clean, ghostJobIds: ["7"], acted: true })).toBe(true);
+    expect(shouldReportReconcile("boot", { ...clean, ghostQueueIds: ["3"], acted: true })).toBe(true);
+    expect(shouldReportReconcile("boot", { ...clean, foreignLiveHolders: ["pool-other"] })).toBe(true);
+  });
+
+  it("stays quiet on a clean pass", () => {
+    expect(shouldReportReconcile("interval", clean)).toBe(false);
+    expect(shouldReportReconcile("boot", clean)).toBe(false);
   });
 });
