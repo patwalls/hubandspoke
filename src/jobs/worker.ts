@@ -18,7 +18,7 @@ import {
   markJobStarted,
   setPoolId,
 } from "./worker-identity";
-import { RECONCILE_INTERVAL_MS, reconcileLocks } from "./lock-reconcile";
+import { RECONCILE_INTERVAL_MS, reconcileLocks, shouldReportReconcile } from "./lock-reconcile";
 import { workerLogger } from "./worker-logger";
 import { isBlockedError } from "./blocked";
 
@@ -109,9 +109,10 @@ async function main() {
           `foreignLive=${r.foreignLiveHolders.join(",") || "-"}`;
         console.warn(`[worker] lock-reconcile(${reason}) acted=${r.acted} ${summary}`);
         // Warning, not error: the worker healed itself. The point is a
-        // visible trail of HOW OFTEN this happens, since each one is a
-        // render that sat queued until this pass ran.
-        Sentry.captureMessage(`graphile lock reconciled (${reason})`, {
+        // visible trail of HOW OFTEN a lock wedged a live worker. A boot pass
+        // that only cleared the dead predecessor's locks (deploy caught a job
+        // mid-run) is a log line, not an event — see shouldReportReconcile.
+        if (shouldReportReconcile(reason, r)) Sentry.captureMessage(`graphile lock reconciled (${reason})`, {
           level: "warning",
           tags: { source: "graphile-worker", kind: "lock-reconcile" },
           fingerprint: ["graphile-lock-reconcile"],

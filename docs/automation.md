@@ -2370,8 +2370,13 @@ old worker dyno before starting the new one, so:
 Runs at boot (`lock-reconcile(boot)` log line) and every 60 s. Every action
 logs `[worker] lock-reconcile(...) acted=true …` and sends one Sentry
 *warning* (fingerprint `graphile-lock-reconcile`) — the point is a visible
-count of how often this still happens, since each one was a render that sat
-queued until the pass ran. Unit-tested classifier
+count of how often a lock wedged a **live** worker, since each one was a
+render that sat queued until the pass ran. **Exception (2026-11-05,
+HUBANDSPOKE-6):** a *boot* pass that only released the dead predecessor's
+orphans is log-only. That's a deploy or daily-cycle restart that caught a job
+mid-run, cleared seconds after boot, with nothing waiting on it. Ghosts,
+foreign live holders, and any action on an interval pass still send the
+warning (`shouldReportReconcile` in `lock-reconcile.ts`, unit-tested). Unit-tested classifier
 (`lock-reconcile.test.ts`), integration-tested against the real graphile
 tables (`lock-reconcile.integration.test.ts`).
 

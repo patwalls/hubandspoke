@@ -199,3 +199,21 @@ export async function reconcileLocks(deps: ReconcileDeps): Promise<ReconcileResu
   }
   return { ...classification, acted };
 }
+
+/**
+ * Does this reconcile pass deserve an error-tracker event, or just a log line?
+ *
+ * A boot pass that only cleared the previous process's locks is the normal
+ * aftermath of a restart that caught a job mid-run (every deploy, the daily
+ * cycle): the lock is released seconds after the new worker boots, so nothing
+ * sat queued behind it. Paging on it (HUBANDSPOKE-6, 2026-11-05, a deploy
+ * restart) is noise. Everything else stays loud: a ghost, a foreign live
+ * holder, or ANY action on an interval pass means a lock was wedged while a
+ * worker was up — renders really did wait.
+ */
+export function shouldReportReconcile(reason: string, r: ReconcileResult): boolean {
+  if (r.ghostJobIds.length > 0 || r.ghostQueueIds.length > 0) return true;
+  if (r.foreignLiveHolders.length > 0) return true;
+  if (!r.acted) return false;
+  return reason !== "boot";
+}
