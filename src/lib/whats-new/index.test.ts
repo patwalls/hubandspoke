@@ -95,6 +95,16 @@ describe("WHATS_NEW", () => {
     expect(times.every((t) => !Number.isNaN(t))).toBe(true);
     expect([...times].sort((a, b) => b - a)).toEqual(times);
   });
+
+  it("has no card stamped ahead of the clock", () => {
+    // A card stamped hours ahead (12:00 written at 03:15) silences every card
+    // shipped before that time for anyone who dismisses it: /api/whats-new/seen
+    // stores the newest card's stamp as "seen up to", and newest-first order
+    // forces the next card to be stamped ahead too. Stamp the real ship time.
+    const slackMs = 15 * 60_000;
+    const ahead = WHATS_NEW.filter((e) => new Date(e.shippedAt).getTime() > Date.now() + slackMs).map((e) => e.id);
+    expect(ahead).toEqual([]);
+  });
 });
 
 describe("cards about one screen (audience.usersOf)", () => {
