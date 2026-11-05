@@ -7,6 +7,7 @@ import { formats } from "@/lib/db/schema";
 import { clipLookSchema } from "@/lib/clip-editor/doc";
 import { resolveClipAspectRatio } from "@/lib/db/formats";
 import { loadLookEdits } from "@/lib/services/clip-editor/look-edits";
+import { loadHookRewriteSummary } from "@/lib/services/clip-editor/hook-rewrites";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -14,7 +15,8 @@ interface RouteContext {
 
 /** The format's clip look (what new clip edits start from), if any, and
  *  what editors changed in the clips that started from it (`edits`, null
- *  when too few). */
+ *  when too few), and how editors rewrite its AI hooks (`hookRewrites`,
+ *  null when too few or none — hooks-learn M2). */
 export async function GET(_request: NextRequest, context: RouteContext) {
   const guard = await requireFeature("clipEditor");
   if (guard.response) return guard.response;
@@ -26,11 +28,13 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     .limit(1);
   if (!row) return NextResponse.json({ error: "Format not found" }, { status: 404 });
   const look = row.look ? clipLookSchema.safeParse(row.look) : null;
-  const edits =
+  const [edits, hookRewrites] = await Promise.all([
     look?.success && row.updatedAt
-      ? await loadLookEdits({ brand: row.brand, formatName: row.name, look: look.data, lookSavedAt: row.updatedAt }).catch((err) => (console.error("[clip-template] edits failed:", err), null))
-      : null;
-  return NextResponse.json({ look: row.look ?? null, updatedAt: row.updatedAt, aspectRatio: resolveClipAspectRatio(row), edits });
+      ? loadLookEdits({ brand: row.brand, formatName: row.name, look: look.data, lookSavedAt: row.updatedAt }).catch((err) => (console.error("[clip-template] edits failed:", err), null))
+      : null,
+    loadHookRewriteSummary({ brand: row.brand, formatName: row.name }).catch((err) => (console.error("[clip-template] hook rewrites failed:", err), null)),
+  ]);
+  return NextResponse.json({ look: row.look ?? null, updatedAt: row.updatedAt, aspectRatio: resolveClipAspectRatio(row), edits, hookRewrites });
 }
 
 /** Save the look from the format page's look editor. Body: `{ look: ClipLook }`. */

@@ -81,3 +81,27 @@ export function hookRewritesBlock(pairs: HookRewrite[]): string | null {
     `Write your hook the way they ship it: match their length, voice and kind of line (if they swap a long sentence for a short line the speaker says, do that). Never copy their facts or words into a different clip — each clip's hook comes from its own section. The REFERENCE LIBRARY rule still applies.`,
   ].join("\n");
 }
+
+/** The format page's view of it (hooks-learn M2): how many of the format's
+ *  edited clips shipped their own words instead of the AI hook, and the
+ *  pairs new clip ideas learn from. Same pairs the hook writer sees. */
+export interface HookRewriteSummary {
+  /** Edited clips that started from an AI hook and show words on screen. */
+  clips: number;
+  /** Of those, how many shipped other words. */
+  rewritten: number;
+  /** One per distinct shipped line, newest first, capped. */
+  pairs: HookRewrite[];
+}
+
+/** Below this many clips a share ("1 of 2") says nothing. */
+export const MIN_SUMMARY_CLIPS = 3;
+
+/** Null when there are too few clips or editors kept every AI hook. */
+export function summarizeHookRewrites(rows: Array<{ aiHook: string | null; doc: ClipEditDoc }>): HookRewriteSummary | null {
+  const counted = rows.filter((r) => r.aiHook?.trim() && shippedHookLine(r.doc) !== null);
+  if (counted.length < MIN_SUMMARY_CLIPS) return null;
+  const rewritten = counted.filter((r) => hookRewrite(r.aiHook, r.doc) !== null).length;
+  if (rewritten === 0) return null;
+  return { clips: counted.length, rewritten, pairs: collectHookRewrites(counted) };
+}
