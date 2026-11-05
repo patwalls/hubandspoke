@@ -5,6 +5,7 @@ import {
   type TranscriptSegment,
   type TranscriptWord,
 } from "./clip-anchor-utils";
+import { hookRewritesBlock, type HookRewrite } from "./clip-editor/hook-rewrites";
 
 // Haiku 5.5 (was Haiku 4.5). Splice v10 hook writer (2026-05-22). Reads ONE pre-detected
 // section and ONE format's skill section. Decides if the format applies
@@ -21,7 +22,8 @@ const MODEL = "claude-haiku-5-5";
 // would relabel an app-feature demo as a "feature stack" to satisfy the Tech
 // Stack format's name; v2 forbids that reframing and matches on the section's
 // actual subject. See clip-hook-agent.eval.test.ts.
-export const HOOK_PROMPT_VERSION = 2;
+// v3 (2026-11-05): + editors' recent hook rewrites for the format (hooks-learn M1).
+export const HOOK_PROMPT_VERSION = 3;
 export const HOOK_GENERATED_BY = `${MODEL}:hook-v${HOOK_PROMPT_VERSION}`;
 
 const DEFAULT_FORMAT_BLOCK = `FORMAT — narrator-overlay hook, 30–60s vertical Reel.
@@ -165,6 +167,9 @@ export interface HookGenerateArgs {
   /** 5 sanitized top-performing hooks for this format, for the reference
    *  library that anchors `blueprintAnchorHook`. */
   referenceHooks: Array<{ hook: string; views: number | null }>;
+  /** This format's recent (AI hook → line the editor shipped) pairs, from
+   *  `loadHookRewrites` (hooks-learn M1). Empty/absent = no block. */
+  editorRewrites?: HookRewrite[];
   /** The section being evaluated. */
   section: {
     id: string;
@@ -469,12 +474,15 @@ ${DEFAULT_FORMAT_BLOCK}`;
 
   const refLib = formatReferenceLibrary(args.referenceHooks);
 
+  const rewritesBlock = hookRewritesBlock(args.editorRewrites ?? []);
+
   const systemPrompt = [
     SYSTEM_PROMPT_BASE,
     "",
     formatBlock,
     "",
     refLib.block,
+    ...(rewritesBlock ? ["", rewritesBlock] : []),
   ].join("\n");
 
   const userMessage = [

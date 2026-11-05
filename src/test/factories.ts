@@ -703,6 +703,8 @@ export interface CreateTestClipEditOptions {
   clipIdeaId: string;
   doc?: ClipEditDoc;
   createdByUserId?: string | null;
+  /** >1 = someone saved edits after the first draft. */
+  revision?: number;
 }
 
 /**
@@ -721,6 +723,7 @@ export async function createTestClipEdit(
         opts.doc ??
         createDefaultDoc({ startSec: 0, endSec: 30, hook: "vitest clip hook" }),
       createdByUserId: opts.createdByUserId ?? null,
+      ...(opts.revision != null ? { revision: opts.revision } : {}),
     })
     .returning();
   return row;

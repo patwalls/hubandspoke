@@ -28,6 +28,7 @@ import {
   HOOK_PROMPT_VERSION,
   writeFormatHookForSection,
 } from "@/lib/clip-hook-agent";
+import { loadHookRewrites } from "@/lib/services/clip-editor/hook-rewrites";
 
 const HOOK_WRITER_CONCURRENCY = 5;
 
@@ -273,6 +274,13 @@ export async function generateClipIdeasForItem(
     .filter((r) => r.hook && r.hook.trim() !== "")
     .map((r) => ({ hook: r.hook as string, views: r.views }));
 
+  // How editors rewrote this format's recent AI hooks (hooks-learn M1).
+  // Fail-soft: a failed read means a normal run without the block.
+  const editorRewrites = await loadHookRewrites({ brand: item.brand, formatName: format.name }).catch((err) => {
+    console.warn(`[clip-idea-generate] format=${format.name} hook rewrites read failed: ${err instanceof Error ? err.message : err}`);
+    return [];
+  });
+
   // Pass 2: per-(section, format) hook writer, parallel with concurrency cap.
   const candidates = await mapWithConcurrency(
     liveSections,
@@ -283,6 +291,7 @@ export async function generateClipIdeasForItem(
         formatSkillSection: clipIdeaSection,
         extrasSchema,
         referenceHooks,
+        editorRewrites,
         section: {
           id: section.id,
           startSec: section.startSec,
