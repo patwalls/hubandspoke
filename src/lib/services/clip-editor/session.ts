@@ -9,6 +9,7 @@ import {
   clipEdits,
   clipIdeas,
   clipRenders,
+  clipSections,
   formats,
   productionItems,
   transcripts,
@@ -24,6 +25,7 @@ import { toRenderStatus, type ClipRenderStatus } from "./render-status";
 import { ensureClipPostDraft, type ClipPost } from "./post-draft";
 import { previewUrlFor } from "@/lib/services/design-editor/assets";
 import { loadEditorReviewNotes, type EditorReviewNotes } from "./review-notes";
+import type { SupportingMoment } from "@/lib/clip-stitch";
 
 export class ClipEditorIdeaNotFoundError extends Error {
   constructor() {
@@ -107,6 +109,10 @@ export interface ClipEditorSession {
   /** Open review notes on the clip's post, for the timeline (M3). Null
    *  before the idea has a post. */
   reviewNotes: EditorReviewNotes | null;
+  /** Lines from elsewhere in the source the section picker suggests
+   *  stitching into this clip (clip stitching M2) — offered with one-click
+   *  Add, never added on their own. Empty for pre-v2 or killed sections. */
+  supportingMoments: SupportingMoment[];
 }
 
 export async function loadClipEditorSession(args: {
@@ -125,6 +131,8 @@ export async function loadClipEditorSession(args: {
       hookSegments: clipIdeas.hookSegments,
       targetFormat: clipIdeas.targetFormat,
       acceptedProductionItemId: clipIdeas.acceptedProductionItemId,
+      supportingMoments: clipSections.supportingMoments,
+      sectionKilledAt: clipSections.killedAt,
       sourceProductionItemId: clipIdeas.sourceProductionItemId,
       sourceTitle: productionItems.title,
       sourceBrand: productionItems.brand,
@@ -137,6 +145,7 @@ export async function loadClipEditorSession(args: {
       productionItems,
       eq(productionItems.id, clipIdeas.sourceProductionItemId),
     )
+    .leftJoin(clipSections, eq(clipSections.id, clipIdeas.clipSectionId))
     .where(eq(clipIdeas.id, args.clipIdeaId))
     .limit(1);
   if (!row) throw new ClipEditorIdeaNotFoundError();
@@ -277,6 +286,7 @@ export async function loadClipEditorSession(args: {
     reviewNotes: row.acceptedProductionItemId
       ? await loadEditorReviewNotes(row.acceptedProductionItemId)
       : null,
+    supportingMoments: row.sectionKilledAt ? [] : (row.supportingMoments ?? []),
   };
 }
 

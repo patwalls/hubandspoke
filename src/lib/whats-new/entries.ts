@@ -43,6 +43,16 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-11-05-clip-stitch-lines",
+    shippedAt: "2026-11-05T19:16:11Z",
+    kind: "feature",
+    title: "Clip ideas suggest lines to stitch in",
+    body: "When you open a clip in the editor, it can now suggest up to 3 short lines from elsewhere in the video that belong with it: the setup it needs, a detail that proves it, or the payoff. They sit above the transcript. Click Add and the line goes in where it fits. Setups play before the clip, payoffs at the end. Undo takes it out again.",
+    href: "/[brand]/queue",
+    screen: "modal:clip-editor",
+    audience: { flag: "clipEditor", usersOf: ["modal:clip-editor"] },
+  },
+  {
     id: "2026-11-05-hook-rewrites-format-page",
     shippedAt: "2026-11-05T03:15:20Z",
     kind: "feature",

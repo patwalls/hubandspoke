@@ -67,6 +67,7 @@ import {
 } from "./store";
 import { framingFor, useFraming } from "./framing";
 import { TranscriptEditor, type SpeakerLabels } from "./transcript-editor";
+import { StitchSuggestions } from "./stitch-suggestions";
 import { speakerColor, speakerLabel } from "@/components/dashboard/transcript-speakers";
 import { Transport } from "./transport";
 import type { TimelineNote } from "./timeline";
@@ -826,6 +827,13 @@ function EditorWorkspace({
               )}
             </p>
           )}
+          <StitchSuggestions
+            moments={session.supportingMoments ?? []}
+            doc={doc}
+            apply={apply}
+            locked={locked}
+            brand={brand}
+          />
           <TranscriptEditor
             view={view}
             doc={doc}
