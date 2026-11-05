@@ -628,6 +628,8 @@ export interface CreateTestClipIdeaOptions {
   /** Name-string link to a format (brand derived via the source item). */
   targetFormat?: string | null;
   acceptedTargetFormat?: string | null;
+  /** The pass-1 section the idea was written from. */
+  clipSectionId?: string | null;
 }
 
 /**
@@ -655,6 +657,7 @@ export async function createTestClipIdea(
       estimatedViews: opts.estimatedViews ?? null,
       targetFormat: opts.targetFormat ?? null,
       acceptedTargetFormat: opts.acceptedTargetFormat ?? null,
+      clipSectionId: opts.clipSectionId ?? null,
     })
     .returning();
   trackCleanup("clipIdeas", row.id);
@@ -668,6 +671,8 @@ export async function createTestClipIdea(
 export async function createTestClipSection(opts: {
   pillarId: string;
   createdAt?: Date;
+  supportingMoments?: (typeof clipSections.$inferInsert)["supportingMoments"];
+  killedAt?: Date;
 }): Promise<typeof clipSections.$inferSelect> {
   const [row] = await db
     .insert(clipSections)
@@ -680,6 +685,8 @@ export async function createTestClipSection(opts: {
       topic: "vitest topic",
       summary: "vitest summary",
       generatedBy: "vitest",
+      supportingMoments: opts.supportingMoments ?? null,
+      killedAt: opts.killedAt ?? null,
       ...(opts.createdAt ? { createdAt: opts.createdAt } : {}),
     })
     .returning();
