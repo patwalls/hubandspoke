@@ -2976,3 +2976,71 @@ export const newsletterDrafts = pgTable(
     uniqueIndex("newsletter_drafts_slot_key_uniq").on(table.slotKey).where(sql`${table.slotKey} IS NOT NULL`),
   ],
 );
+
+// ---------------------------------------------------------------------------
+// Hub & Spoke Academy — internal training-video library (/academy).
+// Admins add/edit/reorder videos in-app; every signed-in user can watch.
+// Each user's per-video progress (ticked action items + "completed") lives in
+// academy_progress. See docs/features.md → Academy.
+// ---------------------------------------------------------------------------
+
+export type AcademyLearnPoint = { time: string | null; text: string };
+
+export const academyCategories = pgTable("academy_categories", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  name: text("name").notNull(),
+  description: text("description"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const academyVideos = pgTable(
+  "academy_videos",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    categoryId: uuid("category_id")
+      .notNull()
+      .references(() => academyCategories.id, { onDelete: "restrict" }),
+    slug: text("slug").notNull().unique(),
+    title: text("title").notNull(),
+    // One line shown on the library card and under the page title.
+    summary: text("summary"),
+    // Loom / YouTube / Vimeo / Google Drive share link; embedded via
+    // src/lib/academy/video-embed.ts.
+    videoUrl: text("video_url"),
+    durationLabel: text("duration_label"),
+    // "Coming soon": listed, but no player / checklist yet.
+    comingSoon: boolean("coming_soon").notNull().default(false),
+    // When it became watchable (added, or "coming soon" unticked) — drives
+    // the "New" badge (src/lib/academy/queries.ts NEW_FOR_DAYS). Null for
+    // the seeded starter videos.
+    availableAt: timestamp("available_at", { withTimezone: true }),
+    // "In this video, you'll learn" — optional timestamp + text per point.
+    learnPoints: jsonb("learn_points").$type<AcademyLearnPoint[]>().notNull().default([]),
+    // The yellow "Action items" checklist; progress keys on the item text.
+    actionItems: jsonb("action_items").$type<string[]>().notNull().default([]),
+    // Optional step-by-step guide below the video: sanitized HTML from
+    // GuideEditor (src/lib/academy/guide-html.ts).
+    notes: text("notes"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index("idx_academy_videos_category").on(table.categoryId, table.sortOrder)],
+);
+
+export const academyProgress = pgTable(
+  "academy_progress",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    videoId: uuid("video_id")
+      .notNull()
+      .references(() => academyVideos.id, { onDelete: "cascade" }),
+    checkedItems: jsonb("checked_items").$type<string[]>().notNull().default([]),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.videoId] })],
+);

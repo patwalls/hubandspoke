@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { signOut } from "next-auth/react";
 import { OPEN_WHATS_NEW_EVENT } from "@/components/dashboard/whats-new-dialog";
 import { READY_CHANGED_EVENT } from "@/lib/publish/events";
-import { Check, ChevronDown, LayoutGrid, SearchIcon } from "lucide-react";
+import { Check, ChevronDown, LayoutGrid, GraduationCap, SearchIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NotificationBell } from "@/components/notifications/notification-bell";
 import { MyWorkButton } from "@/components/my-work/my-work-button";
@@ -317,6 +317,35 @@ export function DashboardNav({
               </kbd>
             </button>
             <MyWorkButton />
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                aria-label="Learn: Academy, What's new, API & MCP"
+                title="Academy"
+                className="inline-flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <GraduationCap className="h-4 w-4" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-56">
+                <DropdownMenuItem
+                  onClick={() => router.push("/academy")}
+                  className="cursor-pointer"
+                >
+                  Hub &amp; Spoke Academy
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => window.dispatchEvent(new Event(OPEN_WHATS_NEW_EVENT))}
+                  className="cursor-pointer"
+                >
+                  What&apos;s new
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => router.push("/developers")}
+                  className="cursor-pointer"
+                >
+                  API &amp; MCP
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <NotificationBell />
             <DropdownMenu>
               <DropdownMenuTrigger
@@ -367,18 +396,6 @@ export function DashboardNav({
                   className="cursor-pointer"
                 >
                   Settings
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => window.dispatchEvent(new Event(OPEN_WHATS_NEW_EVENT))}
-                  className="cursor-pointer"
-                >
-                  What&apos;s new
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => router.push("/developers")}
-                  className="cursor-pointer"
-                >
-                  API &amp; MCP
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
