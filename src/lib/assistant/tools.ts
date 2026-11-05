@@ -7,6 +7,9 @@ import { compact } from "@/lib/mcp/server";
 import { getMyWork } from "@/lib/my-work/queries";
 import { flattenVideos, getAcademyLibrary } from "@/lib/academy/queries";
 import { rankPassages, searchFeatureDocs } from "@/lib/assistant/help-search";
+import { getContentReportCached } from "@/lib/db/queries-cached";
+import { getContentReport } from "@/lib/db/queries";
+import { todayInclusiveOfUtc } from "@/lib/dates";
 
 /**
  * The assistant's tools. READ-ONLY by design: help search (docs + Academy)
@@ -56,6 +59,22 @@ export const ASSISTANT_TOOLS: Anthropic.Tool[] = [
         sort: { type: "string", enum: ["published_at", "updated_at", "views"], description: "Always descending; default published_at" },
         limit: { type: "integer", minimum: 1, maximum: 25, description: "Default 10" },
       },
+    },
+  },
+  {
+    name: "content_totals",
+    description:
+      "Totals for a period — the SAME numbers as the dashboard: number of posts published, and the views / clicks / leads of content published in that date range (latest synced counts), broken down by account and by format. Use this for ANY 'how many views/posts did X get in <period>' question instead of adding up search_content rows.",
+    input_schema: {
+      type: "object",
+      properties: {
+        brand: str("Brand slug from list_brands, or 'all' for every brand"),
+        start_date: str("YYYY-MM-DD, inclusive (e.g. 30 days ago for 'last 30 days')"),
+        end_date: str("YYYY-MM-DD, inclusive; default today"),
+        platform: str("Optional: youtube, instagram, x, tiktok, linkedin, threads, facebook, newsletter"),
+        post_type: str("Optional post_type, e.g. youtube_shorts or instagram_reel"),
+      },
+      required: ["brand", "start_date"],
     },
   },
   { name: "get_content", description: "Full detail for one content item.", input_schema: { type: "object", properties: { id: uuid }, required: ["id"] } },
@@ -114,6 +133,73 @@ async function searchHelp(query: string, baseUrl: string) {
   return { academy_videos: academy, feature_docs: searchFeatureDocs(query, 5) };
 }
 
+const ymd = (v: unknown, fallback?: string) => {
+  const raw = s(v) ?? fallback;
+  if (!raw || !/^\d{4}-\d{2}-\d{2}$/.test(raw)) throw new ApiError("invalid_request", `Dates must be YYYY-MM-DD (got "${raw ?? ""}").`);
+  return raw;
+};
+
+/** Sum a MetricData table ({ row: { period: n } }) per row and overall. */
+function sumMetric(data: Record<string, Record<string, number>>) {
+  const rows: Record<string, number> = {};
+  let total = 0;
+  for (const [row, periods] of Object.entries(data)) {
+    const n = Object.values(periods).reduce((a, b) => a + (b || 0), 0);
+    rows[row] = n;
+    total += n;
+  }
+  return { total, rows };
+}
+
+/** Dashboard numbers for a period, via the dashboard's own report query. */
+async function contentTotals(a: Args) {
+  const brand = s(a.brand) ?? "all";
+  const startDate = ymd(a.start_date);
+  const endDate = ymd(a.end_date, todayInclusiveOfUtc());
+  const params = {
+    brand,
+    startDate,
+    endDate,
+    viewType: "monthly" as const,
+    platform: "all",
+    platformKey: s(a.platform) ?? "all",
+    accountId: "all",
+    postType: s(a.post_type) ?? "all",
+    channels: "all",
+    format: "all",
+    source: "all",
+    provenOnly: false,
+    origin: "all",
+    includeItems: false,
+  };
+  // Same (cached) query as the dashboard; outside the Next runtime (scripts,
+  // tests) the cache isn't available, so run it directly.
+  const report = await getContentReportCached(params).catch((err: unknown) => {
+    if (err instanceof Error && err.message.includes("incrementalCache missing")) return getContentReport(params);
+    throw err;
+  });
+  const posts = sumMetric(report.byPlatform.production);
+  const views = sumMetric(report.byPlatform.views);
+  const clicks = sumMetric(report.byPlatform.clicks);
+  const leads = sumMetric(report.byPlatform.leads);
+  const formatViews = sumMetric(report.byFormat.views);
+  const formatPosts = sumMetric(report.byFormat.production);
+  const top = (rows: Record<string, number>, n: number) =>
+    Object.entries(rows)
+      .filter(([, v]) => v > 0)
+      .sort((x, y) => y[1] - x[1])
+      .slice(0, n);
+  return {
+    brand,
+    start_date: report.clampedStartDate ?? startDate,
+    end_date: endDate,
+    meaning: "Posts = items published in the range. Views/clicks/leads = latest synced totals of the content published in the range (same as the dashboard), not views earned during the range by older content.",
+    totals: { posts: posts.total, views: views.total, clicks: clicks.total, leads: leads.total },
+    by_account: top(views.rows, 15).map(([account, v]) => ({ account, posts: posts.rows[account] ?? 0, views: v })),
+    by_format: top(formatViews.rows, 10).map(([format, v]) => ({ format, posts: formatPosts.rows[format] ?? 0, views: v })),
+  };
+}
+
 async function run(name: string, a: Args, ctx: AssistantToolContext): Promise<unknown> {
   const id = s(a.id) ?? "";
   switch (name) {
@@ -150,6 +236,8 @@ async function run(name: string, a: Args, ctx: AssistantToolContext): Promise<un
       );
       return { items: page.data.map(compact), has_more: page.has_more };
     }
+    case "content_totals":
+      return contentTotals(a);
     case "get_content":
       return getContent(id, ctx.baseUrl);
     case "get_transcript":
@@ -197,6 +285,8 @@ export function toolStatus(name: string): string {
     case "get_transcript":
     case "search_transcripts":
       return "Reading transcripts…";
+    case "content_totals":
+      return "Adding up the numbers…";
     default:
       return "Looking up your content…";
   }
