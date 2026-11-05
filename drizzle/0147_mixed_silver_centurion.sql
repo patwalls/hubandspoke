@@ -1,0 +1,1 @@
+ALTER TABLE "clip_sections" ADD COLUMN "supporting_moments" jsonb;
