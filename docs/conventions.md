@@ -470,8 +470,8 @@ change pool sizes.
 
 `.github/workflows/ci.yml` runs one job, **`build`**: `npm ci` → `tsc --noEmit`
 → `npm run test:unit` → `npm run build`, on every PR and every push to `main`.
-It needs no secrets (Sentry source-map upload skips itself without
-`SENTRY_AUTH_TOKEN`), so Dependabot and fork PRs run it too.
+It needs no secrets (source-map upload is disabled in `next.config.ts` —
+errors go to the self-hosted GlitchTip), so Dependabot and fork PRs run it too.
 
 - **Required on `main`** via the repository ruleset *"main: require build"*
   (Settings → Rules). PRs can't merge until `build` is green. Repo admins and

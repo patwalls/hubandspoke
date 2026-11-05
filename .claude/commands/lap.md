@@ -48,7 +48,7 @@ Optional focus: **$ARGUMENTS** (if set: that section + heartbeat only).
    reason: a due job waiting > 15 min, a lock held by a dead pool > 5 min, or a stalled
    clip render — that is the "media-heavy wedged" signal and it is **CRIT**, see the
    threshold table), and `/login` (200, and note the response time).
-2. **Sentry** (org `pat-walls`, project `hubandspoke`): `hk sentry --project hubandspoke --hours 24` — the token lives with the heroku broker on the MacBook Pro, never here; read-only (no Sentry event from this lap on closet-mbp: say CRIT in the escalation instead). Was: token in `~/.zshenv`.
+2. **Errors — GlitchTip** (self-hosted, Sentry-compatible, https://glitchtip.walls.sh since 2026-11-05; org `pat-walls`, project `hubandspoke`): `hk sentry --project hubandspoke --hours 24` — the token lives with the heroku broker on the MacBook Pro, never here; read-only (no Sentry event from this lap on closet-mbp: say CRIT in the escalation instead). Was: token in `~/.zshenv`.
    unresolved issues, `statsPeriod=24h`. Only NEW issues (vs health log) or event-count
    spikes matter.
 3. **Heroku (2 calls)** — `hk ps hubandspoke` (web+worker `up`) + `hk builds hubandspoke`
@@ -162,8 +162,8 @@ the 22-unresolved-issue backlog as of 2026-08-09 is what happens when everything
 ## 🔧 Self-healing ladder — try, verify, escalate
 
 Work DOWN this ladder; every action gets logged with evidence. Only a CRIT that survives
-the lap also gets a Sentry event (`fingerprint: ["hubandspoke-health-loop"]`, same DSN as
-`home-machine/yt-archive/wrapper.sh`) so Pat's alerting fires.
+the lap also gets an error event in GlitchTip (`fingerprint: ["hubandspoke-health-loop"]`, same DSN as
+`home-machine/yt-archive/wrapper.sh`; no user data in it) so Pat's alerting fires.
 
 **Rung 1 — ops actions (no code):**
 - worker/web dyno crashed → `hk restart hubandspoke <dyno>` once (3/h at the broker); verify it comes back `up`.

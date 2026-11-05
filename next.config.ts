@@ -28,15 +28,13 @@ const nextConfig: NextConfig = {
   },
 };
 
+// No source-map upload: errors go to the self-hosted GlitchTip since
+// 2026-11-05, and withSentryConfig's upload would call sentry.io (not an
+// approved vendor). The wrapper stays for the SDK's build-time instrumentation.
 export default withSentryConfig(nextConfig, {
-  org: "pat-walls",
-  project: "hubandspoke",
-
-  // Only print logs for uploading source maps in CI
-  silent: !process.env.CI,
-
-  // Upload a larger set of source maps for prettier stack traces (increases build time)
-  widenClientFileUpload: true,
+  silent: true,
+  sourcemaps: { disable: true },
+  telemetry: false,
 
   webpack: {
     treeshake: {

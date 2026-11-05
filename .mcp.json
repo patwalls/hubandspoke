@@ -1,13 +1,21 @@
 {
   "mcpServers": {
-    "sentry": {
+    "glitchtip": {
       "type": "http",
-      "url": "https://mcp.sentry.dev/mcp"
+      "url": "https://glitchtip.walls.sh/mcp",
+      "headers": {
+        "Authorization": "Bearer ${GLITCHTIP_TOKEN}"
+      }
     },
     "playwright": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "@playwright/mcp@latest", "--isolated", "--headless"]
+      "args": [
+        "-y",
+        "@playwright/mcp@latest",
+        "--isolated",
+        "--headless"
+      ]
     }
   }
 }

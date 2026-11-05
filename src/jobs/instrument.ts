@@ -1,22 +1,22 @@
-// Sentry init for the worker dyno. Imported as a side effect at the top of
-// worker.ts so it runs before graphile-worker and tasks load — keeps init
-// ahead of any module-level work that could throw.
+// Sentry SDK init for the worker dyno — reports to the self-hosted GlitchTip
+// (https://glitchtip.walls.sh) since 2026-11-05. Imported as a side effect at
+// the top of worker.ts so it runs before graphile-worker and tasks load.
 //
 // Mirrors sentry.server.config.ts but uses @sentry/node directly (the worker
-// is not a Next.js process). DSN is intentionally hardcoded — Sentry DSNs are
-// public identifiers, designed to be embedded.
+// is not a Next.js process). DSN from SENTRY_DSN; unset = nothing is sent.
+// NO USER DATA: sentryPrivacyOptions turns off default PII and logs and
+// scrubs every event and transaction.
 //
-// Gated on DYNO so local `npm run worker` crashes (e.g. missing DATABASE_URL
-// in a fresh checkout) don't pollute the prod Sentry feed — Sentry would
-// otherwise default the environment tag to "production" and report them as
-// real incidents (see HUBANDSPOKE-M).
+// Gated on DYNO so local `npm run worker` crashes don't pollute the prod feed
+// (the SDK would otherwise default the environment tag to "production" —
+// see HUBANDSPOKE-M).
 import * as Sentry from "@sentry/node";
+import { sentryPrivacyOptions } from "@/lib/sentry-privacy";
 
-if (process.env.DYNO) {
+if (process.env.DYNO && process.env.SENTRY_DSN) {
   Sentry.init({
-    dsn: "https://cc94e45339b831a683f41991a90e811f@o174111.ingest.us.sentry.io/4511350981328896",
+    dsn: process.env.SENTRY_DSN,
     tracesSampleRate: 1,
-    enableLogs: true,
-    sendDefaultPii: true,
+    ...sentryPrivacyOptions,
   });
 }

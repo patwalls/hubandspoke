@@ -7,7 +7,6 @@ import { DashboardNav, SectionTabs } from "@/components/dashboard/nav";
 import { ScCreditsBanner } from "@/components/dashboard/sc-credits-banner";
 import { DescriptCreditsBanner } from "@/components/dashboard/descript-credits-banner";
 import { ScheduledAttentionBanner } from "@/components/dashboard/scheduled-attention-banner";
-import { SentryUser } from "@/components/sentry-user";
 import { UsageTracker } from "@/components/dashboard/usage-tracker";
 import { WhatsNewDialog, type WhatsNewCard } from "@/components/dashboard/whats-new-dialog";
 import { db } from "@/lib/db";
@@ -15,7 +14,6 @@ import { users } from "@/lib/db/schema";
 import { getBrands, getDefaultBrandSlug } from "@/lib/db/brands";
 import { editableBrandSlugs } from "@/lib/brand-access";
 import { BrandAccessProvider } from "@/components/brand-access";
-import { setSentrySessionUser } from "@/lib/sentry-user";
 import { hrefFor, needsOpenedScreens, popupFor, visibleTo, type WhatsNewEntry, type WhatsNewViewer } from "@/lib/whats-new";
 import { getOpenedScreens } from "@/lib/whats-new/opened";
 
@@ -28,7 +26,6 @@ export default async function DashboardLayout({
   if (!session?.user) {
     redirect("/login");
   }
-  setSentrySessionUser(session);
 
   const [userRow] = session.user.id
     ? await db
@@ -115,11 +112,6 @@ export default async function DashboardLayout({
   return (
     <BrandAccessProvider editable={editable}>
     <div className="min-h-screen bg-background">
-      <SentryUser
-        id={session.user.id as string}
-        email={session.user.email || ""}
-        name={userRow?.name ?? null}
-      />
       <DashboardNav
         userEmail={session.user.email || ""}
         userName={userRow?.name ?? null}

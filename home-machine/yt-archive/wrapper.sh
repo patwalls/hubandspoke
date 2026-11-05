@@ -36,11 +36,14 @@
 
 set -uo pipefail
 
-# --- Sentry failure reporting --------------------------------------------
+# --- Error-tracker failure reporting (GlitchTip) ---------------------------
 
-# Same public DSN as src/jobs/instrument.ts (DSNs are public identifiers).
-SENTRY_KEY="cc94e45339b831a683f41991a90e811f"
-SENTRY_STORE_URL="https://o174111.ingest.us.sentry.io/api/4511350981328896/store/"
+# Same public DSN as the app's SENTRY_DSN: project hubandspoke on the
+# self-hosted GlitchTip (Sentry-protocol compatible) since 2026-11-05.
+# DSN keys are public identifiers. The log tail has emails/IPs redacted before
+# it is sent — no user data in error reports.
+SENTRY_KEY="481ff5700648451e85f2e6db28f86e17"
+SENTRY_STORE_URL="https://glitchtip.walls.sh/api/2/store/"
 LOG_FILE="$HOME/Library/Logs/hubandspoke-yt-archive.log"
 
 report_failure_to_sentry() {
@@ -61,6 +64,9 @@ try:
         log_tail = f.read().decode("utf-8", "replace")
 except OSError:
     log_tail = "(log file unreadable)"
+import re
+log_tail = re.sub(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", "[email]", log_tail)
+log_tail = re.sub(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", "[ip]", log_tail)
 print(json.dumps({
     "event_id": uuid.uuid4().hex,
     "message": f"yt-archive home cron failed (exit={exit_code})",

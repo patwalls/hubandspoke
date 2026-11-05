@@ -3,26 +3,21 @@
 // https://docs.sentry.io/platforms/javascript/guides/nextjs/
 
 import * as Sentry from "@sentry/nextjs";
+import { sentryPrivacyOptions } from "@/lib/sentry-privacy";
 
+// Reports to the self-hosted GlitchTip (https://glitchtip.walls.sh) since
+// 2026-11-05. NEXT_PUBLIC_SENTRY_DSN is inlined at BUILD time — set it on
+// Heroku before the build. NO USER DATA: sentryPrivacyOptions turns off
+// default PII and logs and scrubs every event (no Replay integration).
 // Gated on NODE_ENV — Next.js inlines this at build time, so the dev bundle
-// (NODE_ENV=development) skips Sentry init entirely while the Heroku prod
-// bundle (NODE_ENV=production) keeps it on. Mirrors the DYNO gate on the
-// server-side configs. See docs/automation.md → Error tracking.
-if (process.env.NODE_ENV === "production") {
+// skips Sentry init entirely while the Heroku prod bundle keeps it on.
+// See docs/automation.md → Error tracking.
+if (process.env.NODE_ENV === "production" && process.env.NEXT_PUBLIC_SENTRY_DSN) {
   Sentry.init({
-    dsn: "https://cc94e45339b831a683f41991a90e811f@o174111.ingest.us.sentry.io/4511350981328896",
-
-    // Define how likely traces are sampled. Adjust this value in production, or use tracesSampler for greater control.
-    // 10% perf-trace sampling (errors are still captured at 100% — this only
-    // affects performance traces). 1.0 was span-instrumenting every request
-    // on a Basic dyno and burning quota for traces nobody read.
+    dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
+    // 10% perf-trace sampling (errors are still captured at 100%).
     tracesSampleRate: 0.1,
-    // Enable logs to be sent to Sentry
-    enableLogs: true,
-
-    // Enable sending user PII (Personally Identifiable Information)
-    // https://docs.sentry.io/platforms/javascript/guides/nextjs/configuration/options/#sendDefaultPii
-    sendDefaultPii: true,
+    ...sentryPrivacyOptions,
 
     // Drop "TypeError: Failed to fetch" — never an app bug. The browser
     // throws this when a request never completes (offline, CORS preflight

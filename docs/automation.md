@@ -2238,14 +2238,31 @@ Identity is the **fingerprint**: a stable key for the *condition*, not the momen
 
 Labels `ops-loop`, `ops:warn`, `ops:crit` are created on demand by the script.
 
-## Error tracking (Sentry)
+## Error tracking (GlitchTip, Sentry SDK)
 
-Both dynos report unhandled errors to Sentry — org `pat-walls`, project
-`hubandspoke` (https://pat-walls.sentry.io/issues/?project=hubandspoke).
+Both dynos report unhandled errors through the Sentry SDK to a **self-hosted
+GlitchTip** (Sentry-protocol compatible) — org `pat-walls`, project
+`hubandspoke`, https://glitchtip.walls.sh (runs on closet-cloud; setup in
+`~/code/glitchtip`). Moved off sentry.io 2026-11-05: sentry.io is not a
+HubSpot-approved vendor. Agents read it through GlitchTip's built-in MCP
+(`.mcp.json` → `glitchtip`, token from `$GLITCHTIP_TOKEN`) or the `hk sentry*`
+broker verbs.
 
-**Sentry is reserved for CRIT.** The ops loop no longer files a Sentry event per finding
+**No user data, ever (Pat's condition for the move).** Every `Sentry.init`
+spreads `sentryPrivacyOptions` from `src/lib/sentry-privacy.ts`:
+`sendDefaultPii: false`, `enableLogs: false`, and a scrubber on `beforeSend`,
+`beforeSendTransaction` and `beforeBreadcrumb` that drops the `user` interface,
+request cookies/body/query/env and all but a few safe headers, filters values
+under PII-named keys (email, name, phone, address, ip, password, token,
+session, …) and redacts emails + IPv4 in every string (exception values,
+messages, breadcrumbs, span descriptions). The old `setSentrySessionUser` /
+`<SentryUser>` identity stamping is deleted. Spec:
+`src/lib/sentry-privacy.test.ts`. The home-Mac yt-archive wrapper redacts its
+log tail the same way before posting.
+
+**GlitchTip is reserved for CRIT.** The ops loop no longer files an event per finding
 — that practice produced a 22-issue unresolved backlog nobody triaged. Loop findings go
-to GitHub (above); Sentry fires only for a CRIT that should page someone.
+to GitHub (above); an event fires only for a CRIT that should page someone.
 
 - **Web dyno:** Next.js auto-instrumentation via `@sentry/nextjs` (configs in
   `sentry.{server,edge}.config.ts`, `src/instrumentation.ts`,
@@ -2262,9 +2279,11 @@ to GitHub (above); Sentry fires only for a CRIT that should page someone.
   - **Fatal worker crashes** (anything that escapes `main()`), with
     `Sentry.flush()` before exit so the event isn't lost on dyno restart.
 
-DSN is hardcoded in the config files (DSNs are public identifiers by design).
-Source maps are uploaded by `withSentryConfig` in `next.config.ts` for prod
-builds.
+**DSN** comes from Heroku config vars: `SENTRY_DSN` (server, edge, worker) and
+`NEXT_PUBLIC_SENTRY_DSN` (browser — inlined at BUILD time, so changing it needs a
+rebuild). Unset = nothing is sent. No source maps are uploaded:
+`withSentryConfig` in `next.config.ts` has `sourcemaps.disable` so builds never
+call sentry.io. (Issue ids HUBANDSPOKE-xx in older notes below are sentry.io ids.)
 
 **Local dev is muted:** every `Sentry.init` is gated. Server-side configs
 (`sentry.{server,edge}.config.ts`, `src/jobs/instrument.ts`) only init when
@@ -2272,20 +2291,14 @@ builds.
 (`src/instrumentation-client.ts`) gates on `process.env.NODE_ENV === "production"`,
 which Next.js inlines at build time. Without these gates, a local crash with
 `NODE_ENV` unset gets reported tagged `environment: production` because that
-is Sentry's fallback default — see HUBANDSPOKE-M for the incident that
-prompted this. Override locally by setting `DYNO=local` if you need to test
-Sentry capture.
+is the SDK's fallback default — see HUBANDSPOKE-M for the incident that
+prompted this. Override locally by setting `DYNO=local` and `SENTRY_DSN` if you
+need to test capture.
 
-**Span budget (2026-10-29):** the org's Team plan reserves **5M spans a month**,
-shared with starter-story and slope; at 100% new spans drop (errors are unaffected).
-Web traces 10% (`sentry.{server,edge}.config.ts`, `instrumentation-client.ts`); the
-worker traces 100% but only creates spans around LLM calls (~2k/day). Hubandspoke
-is ~0.8M/month in all, so it is not the lever. When Sentry emails a span alert,
-rank projects first — accepted spans by project:
-`GET /api/0/organizations/pat-walls/stats_v2/?field=sum(quantity)&groupBy=project&category=span&outcome=accepted&statsPeriod=3d`,
-then `span.op` within the top one (`/events/?dataset=spans&field=span.op&field=count_sample()`).
-The 2026-10-29 alert was starter-story's sentry-rails 5.23 upgrade adding a
-`cache.get` span per cache read (fixed in patwalls/starter-story#537).
+**Trace volume:** web traces 10% (`sentry.{server,edge}.config.ts`,
+`instrumentation-client.ts`); the worker traces 100% but only creates spans
+around LLM calls (~2k/day). GlitchTip has no span quota (it is self-hosted, 30-day
+retention) — the sentry.io 5M-span budget notes are history.
 
 ### Worker liveness (2026-05-15)
 

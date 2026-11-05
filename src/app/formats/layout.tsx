@@ -2,11 +2,9 @@ import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { DashboardNav } from "@/components/dashboard/nav";
-import { SentryUser } from "@/components/sentry-user";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { getBrands, getDefaultBrandSlug } from "@/lib/db/brands";
-import { setSentrySessionUser } from "@/lib/sentry-user";
 
 export default async function FormatsLayout({
   children,
@@ -17,7 +15,6 @@ export default async function FormatsLayout({
   if (!session?.user) {
     redirect("/login");
   }
-  setSentrySessionUser(session);
 
   const [userRow] = session.user.id
     ? await db
@@ -42,11 +39,6 @@ export default async function FormatsLayout({
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <SentryUser
-        id={session.user.id as string}
-        email={session.user.email || ""}
-        name={userRow?.name ?? null}
-      />
       <DashboardNav
         userEmail={session.user.email || ""}
         userName={userRow?.name ?? null}
