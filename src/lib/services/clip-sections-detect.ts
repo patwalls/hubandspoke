@@ -205,6 +205,8 @@ export async function detectClipSectionsForPillar(
           summary: s.summary,
           themeTags: s.themeTags,
           estimatedViews: s.estimatedViewsBaseline,
+          supportingMoments:
+            s.supportingMoments.length > 0 ? s.supportingMoments : null,
           promptVersion: SECTION_PROMPT_VERSION,
           generatedBy: SECTION_GENERATED_BY,
           modelUsage: agentResult.modelUsage,

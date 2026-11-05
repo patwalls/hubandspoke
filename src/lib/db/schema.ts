@@ -22,6 +22,7 @@ import type { ClipEditDoc, ClipLook } from "@/lib/clip-editor/doc";
 import type { DesignDoc } from "@/lib/design-editor/doc";
 import type { DiarizationState, TranscriptSpeaker } from "@/lib/diarization/types";
 import type { NewsletterSection, NewsletterTemplate } from "@/lib/newsletter-template";
+import type { SupportingMoment } from "@/lib/clip-stitch";
 
 export const productionItems = pgTable(
   "production_items",
@@ -1172,6 +1173,11 @@ export const clipSections = pgTable(
     /** Baseline view estimate the picker calibrated from brand bench
      *  performance. The per-format hook writer can adjust per format. */
     estimatedViews: bigint("estimated_views", { mode: "number" }),
+    /** Clip stitching (section-v2, 2026-11-05): 0-3 short lines from
+     *  OUTSIDE this section's window that an editor would stitch in
+     *  (setup / detail / payoff), cue-aligned by `src/lib/clip-stitch.ts`.
+     *  Null = none suggested, or a pre-v2 section. */
+    supportingMoments: jsonb("supporting_moments").$type<SupportingMoment[]>(),
     promptVersion: integer("prompt_version").notNull().default(1),
     /** e.g. "claude-sonnet-4-6:section-v1". Surfaces in algorithm-version
      *  badges on the operator UI alongside the hook writer's version. */

@@ -6,6 +6,7 @@ import {
   type TranscriptSegment,
   type TranscriptWord,
 } from "./clip-anchor-utils";
+import { locateSupportingMoments, type SupportingMoment } from "./clip-stitch";
 
 // Sonnet 5.5 (was Sonnet 4.6). Splice v10 (2026-05-22): the section picker. Format-agnostic
 // — picks 8-15 "interesting moments" from a pillar transcript with
@@ -15,7 +16,9 @@ import {
 // monolithic agent that picked sections AND wrote hooks AND emitted
 // per-format extras in a single Sonnet call.
 const MODEL = "claude-sonnet-5-5";
-export const SECTION_PROMPT_VERSION = 1;
+// v2 (2026-11-05): each section may name 0-3 supportingQuotes — lines from
+// elsewhere in the video an editor would stitch in (clip-stitch project).
+export const SECTION_PROMPT_VERSION = 2;
 export const SECTION_GENERATED_BY = `${MODEL}:section-v${SECTION_PROMPT_VERSION}`;
 export const SECTION_ALGORITHM_NAME = "Splice";
 
@@ -74,6 +77,20 @@ Each section also needs:
 - **themeTags** (array of 1–4 lower-snake-case tags): free-form classification of the section's subject matter. Common tags include: revenue_reveal, tactical_advice, founder_story, controversial_take, tech_stack, growth_tactic, mistake_story, list_of_tips, demo_walkthrough, mental_model. Coin new tags when the existing list doesn't fit — they're not validated, just useful for analytics + the hook writer's intuition.
 
 =====================================================
+SUPPORTING QUOTES — what an editor would stitch in
+=====================================================
+
+Editors often build a clip from the section PLUS one to three short lines from elsewhere in the video: the setup the payoff depends on, the concrete number or result that proves it, the demo step it skips over, the punchline that lands it. For each section, name 0–3 such lines as supportingQuotes.
+
+Rules:
+- OUTSIDE THE SECTION. Each line must come from before startSec or after endSec — never from inside the section's own window.
+- VERBATIM. Copy ≥ 6 consecutive words exactly as they appear in the transcript. No paraphrase, no ellipses.
+- SHORT. One or two cues — a line, not a passage.
+- EARNED. Only a line that makes THIS clip clearer or stronger when spliced in. Zero is the right answer when the section stands alone — never pad.
+- role: "setup" (context the payoff needs), "detail" (a number, step, or example that backs it up), or "payoff" (the result or punchline that lands it).
+- why: one short sentence an editor reads to decide whether to add it.
+
+=====================================================
 ESTIMATED VIEWS BASELINE
 =====================================================
 
@@ -92,6 +109,7 @@ Each section:
 - summary: 2-3 neutral sentences.
 - themeTags: 1-4 snake_case classification tags.
 - estimatedViewsBaseline: integer.
+- supportingQuotes: 0-3 { quote, role, why } lines from OUTSIDE the section (may be empty).
 
 Never respond with plain text. Always call the tool.`;
 
@@ -104,6 +122,7 @@ interface SectionToolInput {
     summary?: string;
     themeTags?: unknown;
     estimatedViewsBaseline?: number;
+    supportingQuotes?: unknown;
   }>;
 }
 
@@ -153,6 +172,27 @@ const tools: Anthropic.Tool[] = [
                 type: "integer",
                 minimum: 0,
               },
+              supportingQuotes: {
+                type: "array",
+                description:
+                  "0-3 short lines from OUTSIDE startSec/endSec an editor would stitch into this clip. Empty when the section stands alone.",
+                maxItems: 3,
+                items: {
+                  type: "object",
+                  properties: {
+                    quote: {
+                      type: "string",
+                      description: "≥ 6 consecutive words copied verbatim from the transcript.",
+                    },
+                    role: { type: "string", enum: ["setup", "detail", "payoff"] },
+                    why: {
+                      type: "string",
+                      description: "One short sentence: why this line belongs in the clip.",
+                    },
+                  },
+                  required: ["quote", "role", "why"],
+                },
+              },
             },
             required: [
               "startSec",
@@ -180,6 +220,10 @@ export interface ClipSection {
   summary: string;
   themeTags: string[];
   estimatedViewsBaseline: number;
+  /** Raw supportingQuotes from the tool call (validated after anchoring). */
+  supportingQuotes?: unknown;
+  /** Lines from elsewhere in the video to stitch in, cue-aligned. */
+  supportingMoments: SupportingMoment[];
 }
 
 export interface SectionGenerationResult {
@@ -285,6 +329,8 @@ function validateShape(
       summary,
       themeTags,
       estimatedViewsBaseline: baseline,
+      supportingQuotes: r.supportingQuotes,
+      supportingMoments: [],
     });
   }
   if (out.length < 4 || out.length > 15) return null;
@@ -467,6 +513,13 @@ export async function generateClipSections(
       startSec: r.startSec,
       endSec: r.endSec,
       transcriptAnchorStartSec: r.anchorStartSec,
+      supportingMoments: locateSupportingMoments({
+        quotes: s.supportingQuotes,
+        sectionStartSec: r.startSec,
+        sectionEndSec: r.endSec,
+        words: args.transcriptWords,
+        segments: args.transcriptSegments,
+      }),
     });
   }
 
@@ -513,6 +566,13 @@ export async function generateClipSections(
             startSec: r.startSec,
             endSec: r.endSec,
             transcriptAnchorStartSec: r.anchorStartSec,
+            supportingMoments: locateSupportingMoments({
+              quotes: s.supportingQuotes,
+              sectionStartSec: r.startSec,
+              sectionEndSec: r.endSec,
+              words: args.transcriptWords,
+              segments: args.transcriptSegments,
+            }),
           });
         }
       }
