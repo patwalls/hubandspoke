@@ -43,6 +43,16 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-11-06-clip-ideas-trimmed",
+    shippedAt: "2026-11-06T10:59:08Z",
+    kind: "feature",
+    title: "New clip ideas start where you'd cut them",
+    body: "On about half the clips you edit, you cut the run-up at the start and the wind-down at the end by hand. New clip ideas now learn from those cuts on each format: they start on the line where the point begins and end on the payoff, so there's less to trim.",
+    href: "/[brand]/queue",
+    screen: "modal:clip-editor",
+    audience: { flag: "clipEditor", usersOf: ["modal:clip-editor"] },
+  },
+  {
     id: "2026-11-05-clip-stitch-lines",
     shippedAt: "2026-11-05T19:16:11Z",
     kind: "feature",

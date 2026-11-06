@@ -29,6 +29,7 @@ import {
   writeFormatHookForSection,
 } from "@/lib/clip-hook-agent";
 import { loadHookRewrites } from "@/lib/services/clip-editor/hook-rewrites";
+import { loadTrimHabits } from "@/lib/services/clip-editor/trim-habits";
 
 const HOOK_WRITER_CONCURRENCY = 5;
 
@@ -280,6 +281,11 @@ export async function generateClipIdeasForItem(
     console.warn(`[clip-idea-generate] format=${format.name} hook rewrites read failed: ${err instanceof Error ? err.message : err}`);
     return [];
   });
+  // How editors trim this format's AI clip windows (clip-trim M1). Fail-soft.
+  const editorTrims = await loadTrimHabits({ brand: item.brand, formatName: format.name }).catch((err) => {
+    console.warn(`[clip-idea-generate] format=${format.name} trim habits read failed: ${err instanceof Error ? err.message : err}`);
+    return null;
+  });
 
   // Pass 2: per-(section, format) hook writer, parallel with concurrency cap.
   const candidates = await mapWithConcurrency(
@@ -292,6 +298,7 @@ export async function generateClipIdeasForItem(
         extrasSchema,
         referenceHooks,
         editorRewrites,
+        editorTrims,
         section: {
           id: section.id,
           startSec: section.startSec,

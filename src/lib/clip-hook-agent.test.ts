@@ -198,6 +198,20 @@ describe("writeFormatHookForSection — wiring", () => {
     expect(without).not.toContain("HOW EDITORS REWRITE");
   });
 
+  it("tells the writer how editors trim this format's clip windows, and says nothing when they don't", async () => {
+    const { client, create } = makeClient([{ eligible: false, reason: "n/a" }, { eligible: false, reason: "n/a" }]);
+    await writeFormatHookForSection(
+      baseArgs({ client, editorTrims: { clips: 20, headCut: 9, medianHeadSec: 21, tailCut: 2, medianTailSec: 5 } }),
+    );
+    const withTrims = (create.mock.calls[0][0] as { system: string }).system;
+    expect(withTrims).toContain("HOW EDITORS TRIM THIS FORMAT'S CLIPS");
+    expect(withTrims).toContain("tightStartSec up to ~21s later");
+    expect(withTrims).not.toContain("tightEndSec up to");
+    await writeFormatHookForSection(baseArgs({ client, editorTrims: null }));
+    const without = (create.mock.calls[1][0] as { system: string }).system;
+    expect(without).not.toContain("HOW EDITORS TRIM");
+  });
+
   it("falls back to the default block (no subject Skill) but keeps the strict eligibility rule", async () => {
     const { client, create } = makeClient([
       { eligible: false, reason: "n/a" },
@@ -298,8 +312,8 @@ describe("writeFormatHookForSection — wiring", () => {
     expect(candidate.reason).toMatch(/agent error/i);
   });
 
-  it("is attributed to the prompt version that learns editors' rewrites (hook-v3)", () => {
-    expect(HOOK_PROMPT_VERSION).toBe(3);
-    expect(HOOK_GENERATED_BY).toMatch(/:hook-v3$/);
+  it("is attributed to the prompt version that learns editors' trims (hook-v4)", () => {
+    expect(HOOK_PROMPT_VERSION).toBe(4);
+    expect(HOOK_GENERATED_BY).toMatch(/:hook-v4$/);
   });
 });
