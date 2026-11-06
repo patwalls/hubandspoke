@@ -10,7 +10,6 @@ import { ScheduledAttentionBanner } from "@/components/dashboard/scheduled-atten
 import { UsageTracker } from "@/components/dashboard/usage-tracker";
 import { WhatsNewDialog, type WhatsNewCard } from "@/components/dashboard/whats-new-dialog";
 import { AssistantPanel } from "@/components/assistant/assistant-panel";
-import { isFeatureEnabled } from "@/lib/feature-flags";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { getBrands, getDefaultBrandSlug } from "@/lib/db/brands";
@@ -134,7 +133,7 @@ export default async function DashboardLayout({
         <UsageTracker />
       </Suspense>
       <WhatsNewDialog unseen={whatsNewUnseen} all={whatsNewAll} />
-      {isFeatureEnabled("assistant", session.user) && <AssistantPanel />}
+      <AssistantPanel />
       <Toaster position="bottom-right" richColors closeButton />
     </div>
     </BrandAccessProvider>

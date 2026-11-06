@@ -31,12 +31,10 @@ export function AcademyHome({
   library,
   progress,
   canEdit,
-  canUseAssistant = false,
 }: {
   library: AcademyCategory[];
   progress: AcademyProgressMap;
   canEdit: boolean;
-  canUseAssistant?: boolean;
 }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
@@ -104,7 +102,6 @@ export function AcademyHome({
             className="h-11 w-full rounded-xl border border-border bg-background pl-9 pr-3 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
         </div>
-        {canUseAssistant && (
         <button
           type="button"
           onClick={() => openAssistant(query.trim() || undefined)}
@@ -112,7 +109,6 @@ export function AcademyHome({
         >
           <Sparkles className="size-3.5" /> Can&apos;t find it? Ask the assistant (beta)
         </button>
-        )}
         {total > 0 && (
           <p className="mt-4 text-xs text-muted-foreground">
             {done} of {total} videos completed

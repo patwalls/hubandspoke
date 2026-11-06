@@ -103,15 +103,6 @@ const FLAGS = {
     emails: ["patrickswalls@gmail.com", "e2e@local.test"],
     envVar: "FEATURE_WINNERS_EMAIL_EMAILS",
   },
-  /**
-   * Hub & Spoke Assistant (beta): the chat bubble on every dashboard page
-   * and POST /api/assistant. Dogfooding with Sam, Pat and Evgeny before
-   * everyone gets it. See docs/features.md → "Hub & Spoke Assistant".
-   */
-  assistant: {
-    emails: ["sam@starterstory.com", "patrickswalls@gmail.com", "timjohn2002@gmail.com"],
-    envVar: "FEATURE_ASSISTANT_EMAILS",
-  },
 } as const satisfies Record<string, FlagDefinition>;
 
 export type FeatureFlag = keyof typeof FLAGS;

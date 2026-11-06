@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
-import { requireFeature } from "@/lib/auth-guards";
+import { requireSession } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
 import { assistantMessages, users } from "@/lib/db/schema";
 import { ASSISTANT_MODEL, runAssistant, type AssistantEvent } from "@/lib/assistant/agent";
@@ -18,15 +18,14 @@ const bodySchema = z.object({
 });
 
 /**
- * POST /api/assistant — the Hub & Spoke Assistant (chat panel, beta). Only
- * users on the `assistant` feature flag; read-only tools; ASSISTANT_DAILY_LIMIT questions per person per day.
+ * POST /api/assistant — the Hub & Spoke Assistant (chat panel, beta). Any
+ * signed-in user; read-only tools; ASSISTANT_DAILY_LIMIT questions per person per day.
  * Body: { messages: [{ role, content }] } (last one is the new question).
  * Response: newline-delimited JSON events (status / text / done / error).
  * Every question is logged to assistant_messages.
  */
 export async function POST(request: NextRequest) {
-  // Beta: only people on the `assistant` feature flag (src/lib/feature-flags.ts).
-  const guard = await requireFeature("assistant");
+  const guard = await requireSession();
   if (guard.response) return guard.response;
   const userId = guard.session.user.id;
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

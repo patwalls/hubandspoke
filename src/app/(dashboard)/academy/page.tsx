@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { isAcademyEditor } from "@/lib/academy/editors";
-import { isFeatureEnabled } from "@/lib/feature-flags";
 import { getAcademyLibrary, getAcademyProgress } from "@/lib/academy/queries";
 import { AcademyHome } from "@/components/academy/academy-home";
 
@@ -21,7 +20,5 @@ export default async function AcademyRoute() {
     getAcademyProgress(session.user.id),
     Promise.resolve(isAcademyEditor(session)),
   ]);
-  return (
-    <AcademyHome library={library} progress={progress} canEdit={canEdit} canUseAssistant={isFeatureEnabled("assistant", session.user)} />
-  );
+  return <AcademyHome library={library} progress={progress} canEdit={canEdit} />;
 }
