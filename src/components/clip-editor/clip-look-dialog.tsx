@@ -26,7 +26,9 @@ import { useCanEditBrand } from "@/components/brand-access";
 
 const AUTOSAVE_DELAY_MS = 900;
 
-export function ClipLookDialog({ open, onOpenChange, formatId, formatName, brand, look, aspectRatio, onSaved }: {
+/** `intro`: a note under the header — the Add format flow's "last step"
+ *  explanation. */
+export function ClipLookDialog({ open, onOpenChange, formatId, formatName, brand, look, aspectRatio, onSaved, intro }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   formatId: string;
@@ -36,17 +38,51 @@ export function ClipLookDialog({ open, onOpenChange, formatId, formatName, brand
   look: ClipLook | null;
   aspectRatio: AspectRatio;
   onSaved: () => void;
+  intro?: string | null;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex h-[94vh] w-[97vw] max-w-[97vw] flex-col gap-0 overflow-hidden p-0 sm:max-w-[min(1200px,97vw)]">
-        {open && <LookEditor formatId={formatId} formatName={formatName} brand={brand} look={look} aspectRatio={aspectRatio} onSaved={onSaved} onClose={() => onOpenChange(false)} />}
+        {open && <LookHost formatId={formatId} formatName={formatName} brand={brand} look={look} aspectRatio={aspectRatio} onSaved={onSaved} onClose={() => onOpenChange(false)} intro={intro ?? null} />}
       </DialogContent>
     </Dialog>
   );
 }
 
-function LookEditor(props: { formatId: string; formatName: string; brand: string; look: ClipLook | null; aspectRatio: AspectRatio; onSaved: () => void; onClose: () => void }) {
+/** Owns the shape: switching Vertical / Horizontal saves the look, writes
+ *  the format's `clip_aspect_ratio` (which every new clip edit of the
+ *  format reads — session.ts → resolveClipAspectRatio), reloads the look and
+ *  remounts the editor on the new frame. */
+function LookHost(props: { formatId: string; formatName: string; brand: string; look: ClipLook | null; aspectRatio: AspectRatio; onSaved: () => void; onClose: () => void; intro: string | null }) {
+  const [current, setCurrent] = useState({ look: props.look, aspectRatio: props.aspectRatio, epoch: 0 });
+  const changeAspect = useCallback(
+    async (next: AspectRatio, flush: () => Promise<boolean>) => {
+      if (next === current.aspectRatio) return;
+      if (!(await flush())) return void toast.error("Couldn't save the look — try again");
+      const res = await fetch("/api/formats", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: props.formatId, clipAspectRatio: next }),
+      }).catch(() => null);
+      if (!res?.ok) return void toast.error("Couldn't change the shape — try again");
+      const tpl = await fetch(`/api/formats/${props.formatId}/clip-template`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+      setCurrent((c) => ({ look: tpl?.look ?? c.look, aspectRatio: (tpl?.aspectRatio as AspectRatio | undefined) ?? next, epoch: c.epoch + 1 }));
+      props.onSaved();
+    },
+    [current.aspectRatio, props],
+  );
+  return (
+    <LookEditor
+      key={current.epoch}
+      {...props}
+      look={current.look}
+      aspectRatio={current.aspectRatio}
+      onChangeAspect={changeAspect}
+    />
+  );
+}
+
+function LookEditor(props: { formatId: string; formatName: string; brand: string; look: ClipLook | null; aspectRatio: AspectRatio; onSaved: () => void; onClose: () => void; intro: string | null; onChangeAspect: (next: AspectRatio, flush: () => Promise<boolean>) => Promise<void> }) {
   const [store] = useState(() => createEditorStore({ doc: buildLookPreviewDoc(props.look, props.aspectRatio), revision: 0 }));
   return (
     <EditorStoreContext.Provider value={store}>
@@ -55,10 +91,11 @@ function LookEditor(props: { formatId: string; formatName: string; brand: string
   );
 }
 
-function LookWorkspace({ formatId, formatName, brand, onSaved, onClose }: { formatId: string; formatName: string; brand: string; onSaved: () => void; onClose: () => void }) {
+function LookWorkspace({ formatId, formatName, brand, onSaved, onClose, intro, aspectRatio, onChangeAspect }: { formatId: string; formatName: string; brand: string; onSaved: () => void; onClose: () => void; intro: string | null; aspectRatio: AspectRatio; onChangeAspect: (next: AspectRatio, flush: () => Promise<boolean>) => Promise<void> }) {
   const storeApi = useEditorStoreApi();
   // View-only users can look at the format's clip look, not change it.
   const viewOnly = !useCanEditBrand(brand);
+  const [reshaping, setReshaping] = useState(false);
   const doc = useEditor((s) => s.doc);
   const saveState = useEditor((s) => s.saveState);
   const canUndo = useEditor((s) => s.past.length > 0);
@@ -134,6 +171,31 @@ function LookWorkspace({ formatId, formatName, brand, onSaved, onClose }: { form
       <header className="flex items-center gap-3 border-b border-border px-4 py-2.5">
         <DialogTitle className="text-sm font-semibold">Clip look</DialogTitle>
         <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">{formatName}</span>
+        <div className="ml-2 flex items-center gap-0.5 rounded-md bg-muted p-0.5" role="group" aria-label="Video shape" data-testid="clip-look-shape">
+          {(["9:16", "16:9"] as const).map((a) => (
+            <button
+              key={a}
+              type="button"
+              disabled={viewOnly || reshaping}
+              aria-pressed={aspectRatio === a}
+              onClick={async () => {
+                setReshaping(true);
+                try {
+                  await onChangeAspect(a, save);
+                } finally {
+                  setReshaping(false);
+                }
+              }}
+              className={
+                "rounded px-2 py-0.5 text-[11px] transition-colors " +
+                (aspectRatio === a ? "bg-primary font-medium text-primary-foreground" : "text-muted-foreground hover:text-foreground")
+              }
+              data-testid={`clip-look-shape-${a === "9:16" ? "vertical" : "horizontal"}`}
+            >
+              {a === "9:16" ? "Vertical 9:16" : "Horizontal 16:9"}
+            </button>
+          ))}
+        </div>
         <div className="ml-auto flex items-center gap-1.5">
           <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
             {saveState === "saving" ? <><Loader2Icon className="size-3 animate-spin" /> Saving…</> : saveState === "error" ? <span className="text-destructive">Not saved</span> : saveState === "dirty" ? "Unsaved" : <><CheckIcon className="size-3" /> Saved</>}
@@ -142,6 +204,11 @@ function LookWorkspace({ formatId, formatName, brand, onSaved, onClose }: { form
           <Button type="button" size="icon" variant="ghost" className="size-7" disabled={!canRedo || viewOnly} onClick={redo} title="Redo (⇧⌘Z)"><Redo2Icon className="size-3.5" /></Button>
         </div>
       </header>
+      {intro && (
+        <div className="border-b border-emerald-200 bg-emerald-50 px-4 py-2 text-xs text-emerald-900" data-testid="clip-look-intro">
+          {intro}
+        </div>
+      )}
       <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_340px] gap-4 p-4">
         <div className="relative min-h-0 min-w-0">
           <Stage plan={plan} scene={scene} engine={engine} videoUrl={null} brand={brand} readOnly={viewOnly} />

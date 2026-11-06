@@ -4,30 +4,6 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { useUrlState } from "@/lib/hooks/use-url-state";
 import { useRememberListUrl } from "@/lib/hooks/use-remember-list-url";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
-import { Textarea } from "@/components/ui/textarea";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command";
 import {
   Table,
   TableBody,
@@ -41,17 +17,8 @@ import { AccountBadge } from "@/components/ui/account-badge";
 import { SelectPill } from "./filter-pills";
 import { buildChannelOptions, channelKey } from "@/lib/channel-options";
 import type { FormatChannelWithAccount } from "@/lib/format-channels";
-import { applyStarterTemplate } from "@/lib/format-skill";
-import { QuickAddFormatDialog } from "./quick-add-format-dialog";
-import { FormatLibraryDialog } from "./format-library-dialog";
+import { AddFormatMenu } from "./add-format-dialog";
 import { FormatStatusBadge } from "./format-status-badge";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { ChevronDownIcon } from "lucide-react";
 import { useCanEditBrand } from "@/components/brand-access";
 import type { FormatProvenStatus } from "@/lib/services/format-proven-shared";
 import type { FormatEditorRules } from "@/lib/db/schema";
@@ -86,10 +53,6 @@ export function FormatsPageContent({ brand }: { brand: string }) {
   const canEdit = useCanEditBrand(brand);
   const [formats, setFormats] = useState<FormatRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [quickAddOpen, setQuickAddOpen] = useState(false);
-  const [libraryOpen, setLibraryOpen] = useState(false);
-
   // Filter + sort state in the URL — keeps the filtered Formats view
   // shareable and restores it via the detail-page back-link.
   const urlFilters = useUrlState({
@@ -108,16 +71,6 @@ export function FormatsPageContent({ brand }: { brand: string }) {
   useRememberListUrl({ brand, listKey: "formats" });
 
   const [assignableUsers, setAssignableUsers] = useState<AssignableUser[]>([]);
-  const [editorPopoverOpen, setEditorPopoverOpen] = useState(false);
-  const [parentPopoverOpen, setParentPopoverOpen] = useState(false);
-
-  const [name, setName] = useState("");
-  const [viewThreshold, setViewThreshold] = useState("");
-  const [editor, setEditor] = useState("");
-  const [editorUserId, setEditorUserId] = useState("");
-  const [instructions, setInstructions] = useState("");
-  const [parentFormatId, setParentFormatId] = useState<string | null>(null);
-
   const fetchFormats = useCallback(async () => {
     try {
       const fmtRes = await fetch(`/api/formats?brand=${brand}`);
@@ -150,48 +103,6 @@ export function FormatsPageContent({ brand }: { brand: string }) {
     loadAssignable();
   }, []);
 
-  function openCreate() {
-    setName("");
-    setViewThreshold("");
-    setEditor("");
-    setEditorUserId("");
-    setInstructions("");
-    setParentFormatId(null);
-    setDialogOpen(true);
-  }
-
-  async function handleSave() {
-    const body = {
-      name,
-      brand,
-      viewThreshold: viewThreshold ? parseInt(viewThreshold, 10) : null,
-      editor: editor || null,
-      instructions: instructions || null,
-      parentFormatId,
-    };
-
-    await fetch("/api/formats", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-
-    setDialogOpen(false);
-    fetchFormats();
-  }
-
-  function selectEditor(user: AssignableUser) {
-    setEditor(user.name ?? user.email);
-    setEditorUserId(user.id);
-    setEditorPopoverOpen(false);
-  }
-
-  function clearEditor() {
-    setEditor("");
-    setEditorUserId("");
-    setEditorPopoverOpen(false);
-  }
-
   function handleSort(key: SortKey) {
     if (sortKey === key) {
       urlFilters.set("sortDir", sortDir === "asc" ? "desc" : "asc");
@@ -203,37 +114,11 @@ export function FormatsPageContent({ brand }: { brand: string }) {
     }
   }
 
-  // Parent-name lookup powers the Pillar column + sort-by-pillar. Depth chain is
-  // still needed by the create-dialog's parent picker.
-  const { parentNameById, depthById } = useMemo(() => {
-    const byId = new Map(formats.map((f) => [f.id, f]));
-    const names = new Map<string, string>();
-    const depths = new Map<string, number>();
-    for (const f of formats) names.set(f.id, f.name);
-    for (const f of formats) {
-      let depth = 0;
-      const seen = new Set<string>();
-      let cur = f.parentFormatId;
-      while (cur && !seen.has(cur)) {
-        seen.add(cur);
-        depth++;
-        cur = byId.get(cur)?.parentFormatId ?? null;
-      }
-      depths.set(f.id, depth);
-    }
-    return { parentNameById: names, depthById: depths };
-  }, [formats]);
-
-  const parentOptions = useMemo(() => {
-    return formats
-      .slice()
-      .sort((a, b) => a.name.localeCompare(b.name))
-      .map((f) => ({ ...f, depth: depthById.get(f.id) ?? 0 }));
-  }, [formats, depthById]);
-
-  const selectedParent = parentFormatId
-    ? formats.find((f) => f.id === parentFormatId) ?? null
-    : null;
+  // Parent-name lookup powers the Pillar column + sort-by-pillar.
+  const parentNameById = useMemo(
+    () => new Map(formats.map((f) => [f.id, f.name])),
+    [formats]
+  );
 
   const channelOptions = useMemo(
     () => buildChannelOptions(formats.flatMap((f) => f.accountChannels ?? [])),
@@ -367,253 +252,7 @@ export function FormatsPageContent({ brand }: { brand: string }) {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {canEdit && (
-          <DropdownMenu>
-            <DropdownMenuTrigger className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-xs transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring w-full sm:w-auto">
-              Add Format
-              <ChevronDownIcon className="ml-0.5 size-4" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => setLibraryOpen(true)}>
-                📚 From Library
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setQuickAddOpen(true)}>
-                ✨ Quick Add (AI)
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={openCreate}>
-                ➕ Create Manually
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          )}
-
-          <FormatLibraryDialog
-            brand={brand}
-            open={libraryOpen}
-            onOpenChange={setLibraryOpen}
-            onAdded={() => void fetchFormats()}
-          />
-          <QuickAddFormatDialog
-            brand={brand}
-            open={quickAddOpen}
-            onOpenChange={setQuickAddOpen}
-            onCreated={() => void fetchFormats()}
-          />
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>New Format</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label>Name</Label>
-                <Input
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Business Breakdown"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label>Parent Format</Label>
-                <Popover open={parentPopoverOpen} onOpenChange={setParentPopoverOpen}>
-                  <PopoverTrigger
-                    className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs hover:bg-accent cursor-pointer"
-                  >
-                    {selectedParent ? (
-                      <span className="flex items-center gap-2 truncate">
-                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-50 text-purple-700">
-                          Child of
-                        </span>
-                        <span className="truncate">{selectedParent.name}</span>
-                      </span>
-                    ) : (
-                      <span className="flex items-center gap-2">
-                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-50 text-blue-700">
-                          No parent
-                        </span>
-                        <span className="text-muted-foreground">root / pillar</span>
-                      </span>
-                    )}
-                    <svg
-                      className="ml-2 h-4 w-4 shrink-0 opacity-50"
-                      xmlns="http://www.w3.org/2000/svg"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <path d="m7 15 5 5 5-5" />
-                      <path d="m7 9 5-5 5 5" />
-                    </svg>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-80 p-0" align="start">
-                    <Command>
-                      <CommandInput placeholder="Search formats..." />
-                      <CommandList>
-                        <CommandEmpty>No matching format.</CommandEmpty>
-                        <CommandGroup>
-                          <CommandItem
-                            onSelect={() => {
-                              setParentFormatId(null);
-                              setParentPopoverOpen(false);
-                            }}
-                          >
-                            <span className="flex items-center gap-2">
-                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-50 text-blue-700">
-                                No parent
-                              </span>
-                              <span className="text-sm">Root / pillar</span>
-                            </span>
-                          </CommandItem>
-                          {parentOptions.map((opt) => (
-                            <CommandItem
-                              key={opt.id}
-                              value={opt.name}
-                              onSelect={() => {
-                                setParentFormatId(opt.id);
-                                setParentPopoverOpen(false);
-                              }}
-                              data-checked={parentFormatId === opt.id ? "true" : undefined}
-                            >
-                              <span className="flex items-center gap-2">
-                                <span className="text-xs text-gray-400">
-                                  {opt.depth === 0 ? "root" : `depth ${opt.depth}`}
-                                </span>
-                                <span className="text-sm">{opt.name}</span>
-                              </span>
-                            </CommandItem>
-                          ))}
-                        </CommandGroup>
-                      </CommandList>
-                    </Command>
-                  </PopoverContent>
-                </Popover>
-                <p className="text-xs text-muted-foreground">
-                  Leave empty to make this a root (pillar). Otherwise, this format will be a derivative of the chosen parent.
-                </p>
-              </div>
-
-              <p className="text-xs text-muted-foreground">
-                Add channels (account + post-type) on the format detail page after
-                creating.
-              </p>
-              <div className="space-y-2">
-                <Label>View Threshold</Label>
-                <Input
-                  type="number"
-                  value={viewThreshold}
-                  onChange={(e) => setViewThreshold(e.target.value)}
-                  placeholder="e.g. 50000"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Parent content crossing this number triggers a repurpose task for THIS format.
-                </p>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Editor (Content Creator)</Label>
-                <Popover open={editorPopoverOpen} onOpenChange={setEditorPopoverOpen}>
-                  <PopoverTrigger className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs hover:bg-accent cursor-pointer">
-                    {editor ? (
-                      <span className="flex items-center gap-2">
-                        <span className="w-6 h-6 rounded-full bg-green-100 text-green-700 flex items-center justify-center text-xs font-medium">
-                          {editor
-                            .split(" ")
-                            .map((n) => n[0])
-                            .join("")
-                            .slice(0, 2)}
-                        </span>
-                        {editor}
-                      </span>
-                    ) : (
-                      <span className="text-muted-foreground">Search team members...</span>
-                    )}
-                    <svg
-                      className="ml-2 h-4 w-4 shrink-0 opacity-50"
-                      xmlns="http://www.w3.org/2000/svg"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <path d="m7 15 5 5 5-5" />
-                      <path d="m7 9 5-5 5 5" />
-                    </svg>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-72 p-0" align="start">
-                    <Command>
-                      <CommandInput placeholder="Search by name or email..." />
-                      <CommandList>
-                        <CommandEmpty>No team members found.</CommandEmpty>
-                        <CommandGroup>
-                          {editor && (
-                            <CommandItem onSelect={clearEditor} className="text-muted-foreground">
-                              <span className="text-sm">Clear selection</span>
-                            </CommandItem>
-                          )}
-                          {assignableUsers.map((u) => (
-                            <CommandItem
-                              key={u.id}
-                              value={`${u.name ?? ""} ${u.email}`}
-                              onSelect={() => selectEditor(u)}
-                              data-checked={editorUserId === u.id ? "true" : undefined}
-                            >
-                              <span className="flex items-center gap-2">
-                                <span className="w-6 h-6 rounded-full bg-green-100 text-green-700 flex items-center justify-center text-xs font-medium shrink-0">
-                                  {(u.name ?? u.email)
-                                    .split(" ")
-                                    .map((n) => n[0])
-                                    .join("")
-                                    .slice(0, 2)}
-                                </span>
-                                <span className="flex flex-col">
-                                  <span className="text-sm font-medium">{u.name ?? u.email}</span>
-                                  <span className="text-xs text-muted-foreground">{u.email}</span>
-                                </span>
-                              </span>
-                            </CommandItem>
-                          ))}
-                        </CommandGroup>
-                      </CommandList>
-                    </Command>
-                  </PopoverContent>
-                </Popover>
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label>Prompt</Label>
-                  <button
-                    type="button"
-                    onClick={() => setInstructions(applyStarterTemplate(instructions))}
-                    className="text-xs text-primary hover:underline"
-                  >
-                    Load starter template
-                  </button>
-                </div>
-                <Textarea
-                  value={instructions}
-                  onChange={(e) => setInstructions(e.target.value)}
-                  placeholder="Describe this format as a Claude-style skill. Click “Load starter template” for the structure."
-                  rows={8}
-                  className="font-mono text-xs"
-                />
-                <p className="text-xs text-muted-foreground">
-                  One prompt for everything. Read by Claude when Repurpose fires.
-                </p>
-              </div>
-
-              <Button onClick={handleSave} className="w-full" disabled={!canEdit}>
-                Create
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
+          {canEdit && <AddFormatMenu brand={brand} />}
         </div>
       </div>
 

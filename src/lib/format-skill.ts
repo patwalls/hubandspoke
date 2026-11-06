@@ -253,6 +253,7 @@ export function extractCrossPostRulesSection(skill: string): string | null {
  *
  * Repeated headings are joined in order (see the body).
  *
+ * A Skill with NO headings at all is returned whole (plain-text Skills).
  * Returns `null` when the section is missing — the agent then falls back to
  * its hardcoded default block (current Reels-style narrator-overlay hook,
  * 30-60s runtime, no extras). This back-compat path keeps the original
@@ -275,7 +276,15 @@ export function extractClipIdeaSection(skill: string): string | null {
     ).trim();
     if (section.length > 0) sections.push(section);
   }
-  return sections.length > 0 ? sections.join("\n\n") : null;
+  if (sections.length > 0) return sections.join("\n\n");
+  // A plain-text Skill (the Formats tab's guided box and "Build with AI"
+  // write no headings, 2026-11-06) is ALL clip guidance — read the whole
+  // thing. A Skill with headings but no Clip Idea Generation section keeps
+  // the old behavior (null → default block); every pre-existing clip format
+  // has headings, so none of them changes.
+  const plain = skill.trim();
+  if (plain && !ANY_HEADING_AT_LEVEL_OR_HIGHER.test(plain)) return plain;
+  return null;
 }
 
 const EXTRAS_SCHEMA_FENCE = /```extras-schema\s*\n([\s\S]*?)\n```/i;

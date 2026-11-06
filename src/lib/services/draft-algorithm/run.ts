@@ -28,6 +28,7 @@ import {
   recordContentChanges,
   type ContentChange,
 } from "@/lib/services/content-revisions";
+import { defaultCrossPostRules } from "./cross-post-defaults";
 import {
   extractCrossPostRulesSection,
   extractDescriptSection,
@@ -909,11 +910,12 @@ export async function runDraftAlgorithm(
   // (`descript-derivative-create` task) for framing rules — the section
   // is the shared source of truth and each consumer picks the bullets
   // relevant to it (caption-shape rules here, framing rules over there).
-  // Falls back to null when the Skill has no such section — exemplars
-  // then drive caption shape as before.
+  // No section (most Skills don't have one) → built-in per-platform
+  // defaults, so a repost still gets the house shape.
   const crossPostCaptionRules =
-    item.sourceType === "cross_post" && formatInstructions
-      ? extractCrossPostRulesSection(formatInstructions)
+    item.sourceType === "cross_post"
+      ? (formatInstructions ? extractCrossPostRulesSection(formatInstructions) : null) ??
+        defaultCrossPostRules(item.postType)
       : null;
 
   // v2 (smart tracked CTA): the reply CTA is no longer drafted inside the body

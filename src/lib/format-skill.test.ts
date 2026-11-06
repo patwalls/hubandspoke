@@ -136,6 +136,12 @@ Apply the layout pack at https://example.com.
     expect(extractCrossPostRulesSection(skill)).toBeNull();
   });
 
+  it("reads a plain-text Skill (no headings) whole", () => {
+    const skill = "Make these from moments where the founder reveals a number.\n\nSkip the intro.";
+    expect(extractClipIdeaSection(skill)).toBe(skill);
+    expect(extractClipIdeaSection("   ")).toBeNull();
+  });
+
   it("returns null when the section is empty", () => {
     const skill = "### Cross Post Rules\n\n\n### Descript Clip & Pack Info\nbody";
     expect(extractCrossPostRulesSection(skill)).toBeNull();

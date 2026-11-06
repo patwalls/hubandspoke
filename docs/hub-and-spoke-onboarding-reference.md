@@ -127,7 +127,7 @@ The format name is used as a string key to link production items to formats. Ren
 
 The **Format Library** lets you discover formats that are already working for other brands and copy them into a new brand. This is the primary onboarding shortcut for new brands — instead of building formats from scratch, you can clone proven ones from elsewhere.
 
-Access it from the **Formats** page via **Add Format → From Library**.
+Access it from the **Formats** page: **Add format → pick a platform → Start from: Copy a proven one**.
 
 The library shows:
 - All active formats from other brands that have at least one published post in the last 180 days

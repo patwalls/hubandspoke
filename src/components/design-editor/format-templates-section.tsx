@@ -38,6 +38,11 @@ import type { LookEdits } from "@/lib/services/clip-editor/look-edits";
 import type { HookRewriteSummary } from "@/lib/clip-editor/hook-rewrites";
 import { trimHabitsLine, type TrimSummary } from "@/lib/clip-editor/trim-habits";
 
+const CLIP_LOOK_INTRO =
+  "Last step: design how every clip in this format looks — the hook text style, captions, fonts and where the video sits. Your format is already saved, and changes here save as you go, so you can close this any time and come back from the format page. The hook text is a placeholder: each clip gets its own.";
+const DESIGN_TEMPLATE_INTRO =
+  "Last step: pick a starting layout for this format's posts (or import a Canva PDF), then edit it in the design editor. Your format is already saved, so you can leave and come back to this from the format page.";
+
 const VIEW_ONLY_TITLE = "View only — you don't have edit access to this brand";
 
 interface TemplateResponse {
@@ -47,27 +52,46 @@ interface TemplateResponse {
   edits?: TemplateEdits | null;
 }
 
-export function FormatTemplatesSection({ brand, formatId, formatName, isClippableFormat }: { brand: string; formatId: string; formatName: string; isClippableFormat: boolean }) {
+/** `autoOpen` (the Add format dialog's "Next: design format"): open the
+ *  editor as soon as the card loads — the clip look always; the design
+ *  template when there is one to edit (otherwise the card scrolls into view
+ *  so a starting layout can be picked). */
+export function FormatTemplatesSection({ brand, formatId, formatName, isClippableFormat, autoOpen = false, onAutoOpened, onFormatChanged }: { brand: string; formatId: string; formatName: string; isClippableFormat: boolean; autoOpen?: boolean; onAutoOpened?: () => void; onFormatChanged?: () => void }) {
   const flags = useFeatureFlags();
   if (!flags?.designEditor && !flags?.clipEditor) return null;
   // A video format gets a clip look; an image/carousel format gets a design
   // template. Neither card is shown for the other kind.
   const card = isClippableFormat
-    ? flags.clipEditor && <ClipLookCard brand={brand} formatId={formatId} formatName={formatName} />
-    : flags.designEditor && <DesignTemplateCard brand={brand} formatId={formatId} formatName={formatName} />;
+    ? flags.clipEditor && <ClipLookCard brand={brand} formatId={formatId} formatName={formatName} autoOpen={autoOpen} onAutoOpened={onAutoOpened} onFormatChanged={onFormatChanged} />
+    : flags.designEditor && <DesignTemplateCard brand={brand} formatId={formatId} formatName={formatName} autoOpen={autoOpen} onAutoOpened={onAutoOpened} />;
   if (!card) return null;
-  return <div className="grid gap-3">{card}</div>;
+  return <div className="grid gap-3" id="format-templates">{card}</div>;
 }
 
-function DesignTemplateCard({ brand, formatId, formatName }: { brand: string; formatId: string; formatName: string }) {
+function DesignTemplateCard({ brand, formatId, formatName, autoOpen, onAutoOpened }: { brand: string; formatId: string; formatName: string; autoOpen: boolean; onAutoOpened?: () => void }) {
   const canEdit = useCanEditBrand(brand);
   const [data, setData] = useState<TemplateResponse | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<ImportedDraft | null>(null);
+  const autoOpenRef = useRef(autoOpen);
+  const onAutoOpenedRef = useRef(onAutoOpened);
+  useEffect(() => {
+    onAutoOpenedRef.current = onAutoOpened;
+  }, [onAutoOpened]);
+  const [fromCreate, setFromCreate] = useState(false);
   const load = useCallback(async () => {
     const res = await fetch(`/api/formats/${formatId}/design-template`);
-    if (res.ok) setData((await res.json()) as TemplateResponse);
+    if (!res.ok) return;
+    const json = (await res.json()) as TemplateResponse;
+    setData(json);
+    if (autoOpenRef.current) {
+      autoOpenRef.current = false;
+      onAutoOpenedRef.current?.();
+      setFromCreate(true);
+      if (json.template) setEditing(true);
+      else document.getElementById("format-templates")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
   }, [formatId]);
   useEffect(() => {
     void load();
@@ -123,6 +147,11 @@ function DesignTemplateCard({ brand, formatId, formatName }: { brand: string; fo
         </>
       ) : (
         <>
+          {fromCreate && (
+            <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900" data-testid="design-template-intro">
+              {DESIGN_TEMPLATE_INTRO}
+            </p>
+          )}
           <p className="text-[12px] text-muted-foreground">No template yet. Start from a preset, then edit it in the design editor.</p>
           <div className="flex flex-wrap gap-2">
             {(Object.keys(DESIGN_PRESETS) as DesignPresetId[]).map((id) => (
@@ -292,16 +321,29 @@ function Filmstrip({ doc, imageUrls, channels }: { doc: DesignDoc; imageUrls: Re
   );
 }
 
-function ClipLookCard({ brand, formatId, formatName }: { brand: string; formatId: string; formatName: string }) {
+function ClipLookCard({ brand, formatId, formatName, autoOpen, onAutoOpened, onFormatChanged }: { brand: string; formatId: string; formatName: string; autoOpen: boolean; onAutoOpened?: () => void; onFormatChanged?: () => void }) {
   const canEdit = useCanEditBrand(brand);
   const [look, setLook] = useState<{ look: ClipLook | null; updatedAt: string | null; aspectRatio: AspectRatio; edits: LookEdits | null; hookRewrites: HookRewriteSummary | null; trims: TrimSummary | null } | null>(null);
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
+  const autoOpenRef = useRef(autoOpen);
+  const onAutoOpenedRef = useRef(onAutoOpened);
+  useEffect(() => {
+    onAutoOpenedRef.current = onAutoOpened;
+  }, [onAutoOpened]);
+  // Opened by "Next: design format" — say what this step is.
+  const [fromCreate, setFromCreate] = useState(false);
   const load = useCallback(async () => {
     const res = await fetch(`/api/formats/${formatId}/clip-template`);
     if (res.ok) {
       const json = (await res.json()) as { look: ClipLook | null; updatedAt: string | null; aspectRatio?: AspectRatio; edits?: LookEdits | null; hookRewrites?: HookRewriteSummary | null; trims?: TrimSummary | null };
       setLook({ look: json.look, updatedAt: json.updatedAt, aspectRatio: json.aspectRatio ?? "9:16", edits: json.edits ?? null, hookRewrites: json.hookRewrites ?? null, trims: json.trims ?? null });
+      if (autoOpenRef.current) {
+        autoOpenRef.current = false;
+        onAutoOpenedRef.current?.();
+        setFromCreate(true);
+        setEditing(true);
+      }
     }
   }, [formatId]);
   useEffect(() => {
@@ -358,7 +400,7 @@ function ClipLookCard({ brand, formatId, formatName }: { brand: string; formatId
             )}
           </div>
           <p className="text-[11px] text-muted-foreground">You can also save a look from inside any clip of this format: clip editor → ⋯ → “Save look as the format’s template”.</p>
-          <ClipLookDialog open={editing} onOpenChange={(o) => { setEditing(o); if (!o) void load(); }} formatId={formatId} formatName={formatName} brand={brand} look={l ?? null} aspectRatio={look.aspectRatio} onSaved={() => {}} />
+          <ClipLookDialog intro={fromCreate ? CLIP_LOOK_INTRO : null} open={editing} onOpenChange={(o) => { setEditing(o); if (!o) { setFromCreate(false); void load(); onFormatChanged?.(); } }} formatId={formatId} formatName={formatName} brand={brand} look={l ?? null} aspectRatio={look.aspectRatio} onSaved={() => {}} />
         </>
       )}
     </Card>

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { clipTargetForPostType } from "@/lib/format-kinds";
 import { db } from "@/lib/db";
 import { requireBrandEdit } from "@/lib/auth-guards";
 import { brandOfFormat } from "@/lib/brand-access";
@@ -7,6 +8,7 @@ import {
   formats,
   productionItems,
   repurposeTriggers,
+  formatChannels,
 } from "@/lib/db/schema";
 import { and, eq, isNotNull, sql } from "drizzle-orm";
 import {
@@ -407,7 +409,28 @@ export async function PUT(request: NextRequest) {
       await setFormatChannels(id, accountChannels);
     }
 
-    return NextResponse.json(updated);
+    // A clip format's target post type / platform follow the account it
+    // posts to ("Where it posts") — re-derived whenever the channel or the
+    // clippable flag changes, so nobody has to keep them in step by hand.
+    let result = updated;
+    if (updated?.isClippableFormat && (accountChannels !== undefined || body.isClippableFormat === true)) {
+      const firstPostType =
+        accountChannels !== undefined
+          ? accountChannels[0]?.postType ?? null
+          : (
+              await db
+                .select({ postType: formatChannels.postType })
+                .from(formatChannels)
+                .where(eq(formatChannels.formatId, id))
+                .limit(1)
+            )[0]?.postType ?? null;
+      const target = clipTargetForPostType(firstPostType);
+      if (target) {
+        [result] = await db.update(formats).set(target).where(eq(formats.id, id)).returning();
+      }
+    }
+
+    return NextResponse.json(result);
   } catch (error) {
     console.error("Error updating format:", error);
     return NextResponse.json(

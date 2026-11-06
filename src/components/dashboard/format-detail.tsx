@@ -12,11 +12,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { coverImageUrl } from "@/lib/cover-image";
 import { CoverImg } from "./cover-img";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { MoreHorizontalIcon, Trash2Icon } from "lucide-react";
+import { MoreHorizontalIcon, PencilIcon, Trash2Icon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Popover,
   PopoverContent,
@@ -54,7 +53,10 @@ import {
   type Platform,
 } from "@/lib/platforms";
 import type { PostType } from "@/lib/platform-field-schemas";
-import { addRuleToSkill, applyStarterTemplate } from "@/lib/format-skill";
+import { addRuleToSkill } from "@/lib/format-skill";
+import { FORMAT_PLATFORMS, familyForFormat, kindForExistingFormat, kindLabelForFormat } from "@/lib/format-kinds";
+import { AddFormatDialog, AddFormatMenu } from "./add-format-dialog";
+import { SkillGuideEditor } from "./skill-guide-editor";
 import { recordVisit } from "@/lib/hooks/use-recent-items";
 import { useCanEditBrand } from "@/components/brand-access";
 import { FormatTemplatesSection } from "@/components/design-editor/format-templates-section";
@@ -253,6 +255,24 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const tabParam = searchParams.get("tab");
+  const newKindParam = searchParams.get("new");
+  // "Edit format": the guided dialog, opened on this format.
+  const [guidedEditOpen, setGuidedEditOpen] = useState(false);
+  // Open the format's designer (clip look / design template) ONCE: on
+  // arrival from "Next: design format" (?design=1) or after "Save & edit
+  // design". Cleared as soon as the card opens it, so later re-renders or
+  // reloads never reopen it.
+  const [autoOpenDesign, setAutoOpenDesign] = useState(() => searchParams.get("design") === "1");
+  const [designOpenKey, setDesignOpenKey] = useState(0);
+  function designOpened() {
+    setAutoOpenDesign(false);
+    if (searchParams.get("design")) {
+      const params = new URLSearchParams(searchParams.toString());
+      params.delete("design");
+      const qs = params.toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    }
+  }
   const activeTab: FormatTab = FORMAT_TAB_VALUES.includes(tabParam as FormatTab)
     ? (tabParam as FormatTab)
     : "details";
@@ -279,14 +299,11 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
   const [viewThreshold, setViewThreshold] = useState("");
   const [editor, setEditor] = useState("");
   const [instructions, setInstructions] = useState("");
-  const [preTemplateInstructions, setPreTemplateInstructions] = useState<string | null>(null);
   // Long Skills (the Futurepedia Newsletter's is ~95k chars) show in a scrollable box until expanded.
   const [skillExpanded, setSkillExpanded] = useState(false);
   const [parentFormatId, setParentFormatId] = useState<string | null>(null);
   const [isClippableFormat, setIsClippableFormat] = useState(false);
   const [labelsAsOriginal, setLabelsAsOriginal] = useState(false);
-  const [clipTargetPostType, setClipTargetPostType] = useState<string>("");
-  const [clipTargetPlatform, setClipTargetPlatform] = useState<string[]>([]);
   const [clipAspectRatio, setClipAspectRatio] = useState<string>("");
   const [descriptLayoutPackId, setDescriptLayoutPackId] = useState<string | null>(null);
   const [ctaStrategy, setCtaStrategy] = useState<string>("");
@@ -327,71 +344,6 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
     () => new Set(),
   );
   const [bulkClearing, setBulkClearing] = useState(false);
-
-  // New-derivative dialog state.
-  const [addChildOpen, setAddChildOpen] = useState(false);
-  const [childName, setChildName] = useState("");
-  const [childSelections, setChildSelections] = useState<AccountChannelSelection[]>([]);
-  const [childViewThreshold, setChildViewThreshold] = useState("");
-  const [childEditor, setChildEditor] = useState("");
-  const [childInstructions, setChildInstructions] = useState("");
-  const [childEditorOpen, setChildEditorOpen] = useState(false);
-  const [childChannelsOpen, setChildChannelsOpen] = useState(false);
-  const [savingChild, setSavingChild] = useState(false);
-  const [childError, setChildError] = useState<string | null>(null);
-
-  function openAddChild() {
-    setChildName("");
-    setChildSelections([]);
-    setChildViewThreshold("");
-    setChildEditor("");
-    setChildInstructions("");
-    setChildError(null);
-    setAddChildOpen(true);
-  }
-
-  function toggleChildSelection(s: AccountChannelSelection) {
-    setChildSelections((prev) => {
-      const k = selectionKey(s);
-      const exists = prev.find((p) => selectionKey(p) === k);
-      return exists ? prev.filter((p) => selectionKey(p) !== k) : [...prev, s];
-    });
-  }
-
-  async function submitAddChild() {
-    if (!childName.trim()) {
-      setChildError("Name is required");
-      return;
-    }
-    setSavingChild(true);
-    setChildError(null);
-    try {
-      const res = await fetch("/api/formats", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: childName.trim(),
-          brand,
-          accountChannels: childSelections,
-          viewThreshold: childViewThreshold ? parseInt(childViewThreshold, 10) : null,
-          editor: childEditor || null,
-          instructions: childInstructions || null,
-          parentFormatId: formatId,
-        }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        setChildError(body.error || `HTTP ${res.status}`);
-        return;
-      }
-      setAddChildOpen(false);
-      await load();
-    } catch (err) {
-      setChildError(err instanceof Error ? err.message : "Request failed");
-    } finally {
-      setSavingChild(false);
-    }
-  }
 
   const [clipItem, setClipItem] = useState<ContentItem | null>(null);
   const [clipTargetId, setClipTargetId] = useState<string>("");
@@ -698,10 +650,6 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
     setInstructions(f.instructions || "");
     setParentFormatId(f.parentFormatId ?? null);
     setIsClippableFormat(f.isClippableFormat ?? false);
-    setClipTargetPostType(f.clipTargetPostType ?? "");
-    setClipTargetPlatform(
-      Array.isArray(f.clipTargetPlatform) ? f.clipTargetPlatform : [],
-    );
     setClipAspectRatio(f.clipAspectRatio ?? "");
     setDescriptLayoutPackId(f.descriptLayoutPackId ?? null);
     setLabelsAsOriginal(f.labelsAsOriginal ?? false);
@@ -784,6 +732,16 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
   useEffect(() => {
     load();
   }, [load]);
+
+  // Re-read the format without the full-page loading state (used after the
+  // guided "Edit format" saves), so the page doesn't flash or remount.
+  const refreshQuietly = useCallback(async () => {
+    const res = await fetch(`/api/formats/${formatId}`).catch(() => null);
+    if (!res?.ok) return;
+    const json = (await res.json()) as DetailResponse;
+    setData(json);
+    applyFormat(json.format);
+  }, [formatId]);
 
   useEffect(() => {
     const f = data?.format;
@@ -1172,7 +1130,6 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
     }
   }
   const selectionLookup = new Set(selections.map((s) => selectionKey(s)));
-  const childSelectionLookup = new Set(childSelections.map((s) => selectionKey(s)));
 
   // Build descendant set to prevent cycles in parent picker.
   const descendantIds = new Set<string>();
@@ -1195,8 +1152,74 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
     ? allFormats.find((f) => f.id === parentFormatId) ?? null
     : null;
 
+  // Which guidance the Skill editor shows.
+  const skillFamily = familyForFormat({
+    isClippableFormat,
+    labelsAsOriginal,
+    parentFormatId,
+    postTypes: selections.map((s) => s.postType),
+  });
+  // Just created from the Add format dialog (?new=<kind>): say what's next.
+  const createdKind = newKindParam
+    ? FORMAT_PLATFORMS.flatMap((p) => p.kinds).find((k) => k.key === newKindParam) ?? null
+    : null;
+
+  const guidedKind = data?.format
+    ? kindForExistingFormat({ isClippableFormat, labelsAsOriginal, parentFormatId, postTypes: selections.map((s) => s.postType) })
+    : null;
+
   return (
     <div className="space-y-6">
+      {guidedEditOpen && data?.format && guidedKind && (
+        <AddFormatDialog
+          brand={brand}
+          platformKey={guidedKind.platformKey}
+          presetParentId={parentFormatId}
+          editing={{
+            id: formatId,
+            kindKey: guidedKind.kindKey,
+            // What's on screen, not what was loaded: the page autosaves
+            // fields without reloading, so `data.format` can be stale.
+            name: name || data.format.name,
+            parentId: parentFormatId,
+            accountId: selections[0]?.accountId ?? null,
+            channelCount: selections.length,
+            viewThreshold: viewThreshold ? parseInt(viewThreshold, 10) : null,
+            instructions,
+          }}
+          onClose={() => setGuidedEditOpen(false)}
+          onSaved={(design) => {
+            // Quiet refresh — no full-page reload, so nothing jumps.
+            void refreshQuietly();
+            if (design) {
+              setAutoOpenDesign(true);
+              setDesignOpenKey((k) => k + 1);
+            }
+          }}
+        />
+      )}
+      {createdKind && (
+        <div
+          className="flex items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900"
+          data-testid="format-created-banner"
+        >
+          <span>
+            <span className="font-medium">{createdKind.label} format created.</span> Next: {createdKind.nextStep}.
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              const params = new URLSearchParams(searchParams.toString());
+              params.delete("new");
+              const qs = params.toString();
+              router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+            }}
+            className="shrink-0 text-xs text-emerald-800 hover:underline"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
       {/* Breadcrumb + autosave indicator + actions */}
       <div className="flex items-center justify-between gap-3">
         <BackLink
@@ -1218,6 +1241,17 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
             <span className="text-xs text-red-600" title={saveState.message}>
               Save failed
             </span>
+          )}
+          {canEdit && data?.format && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setGuidedEditOpen(true)}
+              title="Change this format step by step, the same way it was created"
+              data-testid="edit-format-guided"
+            >
+              <PencilIcon className="size-3.5" /> Edit format
+            </Button>
           )}
           {canEdit && (
           <DropdownMenu>
@@ -1634,7 +1668,13 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
           )}
 
           {data?.format && (
-            <FormatTemplatesSection brand={brand} formatId={formatId} formatName={data.format.name} isClippableFormat={isClippableFormat} />
+            <FormatTemplatesSection key={designOpenKey} brand={brand} formatId={formatId} formatName={data.format.name} isClippableFormat={isClippableFormat} autoOpen={autoOpenDesign} onAutoOpened={designOpened} onFormatChanged={() => {
+              // The clip look can change the shape (clip_aspect_ratio) — pick it up
+              // without reloading the whole page.
+              void fetch(`/api/formats/${formatId}`)
+                .then((r) => (r.ok ? r.json() : null))
+                .then((j: DetailResponse | null) => j && setClipAspectRatio(j.format.clipAspectRatio ?? ""));
+            }} />
           )}
 
           {data?.format && <NewsletterTemplateSection formatId={formatId} />}
@@ -1649,58 +1689,28 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
                     Claude-powered
                   </span>
                 </div>
-                <div className="flex items-center gap-3">
-                  {canEdit && preTemplateInstructions !== null && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setInstructions(preTemplateInstructions);
-                        void persistField({ instructions: preTemplateInstructions || null });
-                        setPreTemplateInstructions(null);
-                      }}
-                      className="text-xs text-muted-foreground hover:text-foreground hover:underline"
-                    >
-                      Revert
-                    </button>
-                  )}
-                  {canEdit && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPreTemplateInstructions(instructions);
-                      const next = applyStarterTemplate(instructions);
-                      setInstructions(next);
-                      void persistField({ instructions: next });
-                    }}
-                    className="text-xs text-primary hover:underline"
-                  >
-                    Add template
-                  </button>
-                  )}
-                </div>
               </div>
-              <Textarea
+              <SkillGuideEditor
                 value={instructions}
-                onChange={(e) => setInstructions(e.target.value)}
-                onBlur={() => {
+                onChange={setInstructions}
+                onCommit={(next) => {
                   const saved = data.format.instructions ?? "";
-                  if (instructions !== saved) {
-                    void persistField({ instructions: instructions || null });
-                  }
+                  if (next !== saved) void persistField({ instructions: next || null });
                 }}
-                rows={12}
+                family={skillFamily}
+                brand={brand}
+                kindLabel={kindLabelForFormat(skillFamily, selections.map((s) => s.postType))}
+                formatName={name}
                 readOnly={!canEdit}
-                placeholder="Teach Claude this format: what it is, why it works, how to pick the moment, what to avoid. Click &quot;Add template&quot; for the structure."
-                className={cn("font-mono text-xs", !skillExpanded && instructions.length > SKILL_COLLAPSE_CHARS && "max-h-80 overflow-y-auto")}
+                rows={12}
+                textareaClassName={cn(!skillExpanded && instructions.length > SKILL_COLLAPSE_CHARS && "max-h-80 overflow-y-auto")}
+                testId="format-skill"
               />
               {instructions.length > SKILL_COLLAPSE_CHARS && (
                 <button type="button" onClick={() => setSkillExpanded((v) => !v)} className="text-xs text-primary hover:underline">
                   {skillExpanded ? "Collapse" : `Expand (${Math.round(instructions.length / 1000)}k characters)`}
                 </button>
               )}
-              <p className="text-xs text-muted-foreground">
-                A single skill definition. Claude reads it to generate clip ideas, run Descript edits, and write cross-post captions.
-              </p>
             </div>
           </PropertyRowSolo>
 
@@ -1741,97 +1751,22 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
                 <span className="text-sm">
                   <span className="font-medium">Clippable format</span>
                   <span className="block text-xs text-muted-foreground mt-0.5">
-                    When ticked, this format gets its own Queue tab and the clip-idea agent (Splice) can target it. Multiple formats per brand can be clippable — each gets its own per-format hook style, output extras, and platform target from the format Skill&apos;s <code className="font-mono">## Clip Idea Generation</code> section. The four &quot;Create in Descript&quot; flows on clip triage also work for any clippable format.
+                    Set automatically when the format is made as a Clip. When ticked, clip ideas are made for this format from every new pillar video, and it gets its own Queue tab. Untick to stop making clip ideas for it.
                   </span>
                 </span>
               </label>
               {isClippableFormat && (
-                <div className="ml-6 mt-3 space-y-3 border-l border-border pl-3">
-                  <div className="space-y-1">
-                    <Label htmlFor="clip-target-post-type" className="text-xs">
-                      Target post type
-                    </Label>
-                    <select
-                      id="clip-target-post-type"
-                disabled={!canEdit}
-                      value={clipTargetPostType}
-                      onChange={(e) => {
-                        // The brand's default choice is stored as null.
-                  const next = e.target.value === defaultCtaStrategy(data?.format?.brand) ? null : e.target.value;
-                        setClipTargetPostType(next ?? "");
-                        void persistField({ clipTargetPostType: next });
-                      }}
-                      className={cn(PROPERTY_INPUT_CLASS, "h-8 text-xs")}
-                    >
-                      <option value="">— pick one —</option>
-                      <option value="instagram_reel">instagram_reel</option>
-                      <option value="tiktok">tiktok</option>
-                      <option value="youtube_shorts">youtube_shorts</option>
-                      <option value="x">x</option>
-                      <option value="instagram_post">instagram_post</option>
-                      <option value="linkedin">linkedin</option>
-                      <option value="threads">threads</option>
-                    </select>
-                    <p className="text-[11px] text-muted-foreground">
-                      Sets <code className="font-mono">production_items.post_type</code> on each generated clip idea.
-                    </p>
-                  </div>
-                  <div className="space-y-1">
-                    <Label htmlFor="clip-target-platform" className="text-xs">
-                      Target platform(s)
-                    </Label>
-                    <Input
-                      id="clip-target-platform"
-                      type="text"
-                      value={clipTargetPlatform.join(", ")}
-                      onChange={(e) => {
-                        const next = e.target.value
-                          .split(",")
-                          .map((s) => s.trim())
-                          .filter((s) => s.length > 0);
-                        setClipTargetPlatform(next);
-                      }}
-                      onBlur={() => {
-                        void persistField({
-                          clipTargetPlatform:
-                            clipTargetPlatform.length > 0
-                              ? clipTargetPlatform
-                              : null,
-                        });
-                      }}
-                      placeholder='Instagram Reel, X, YouTube Shorts'
-                      readOnly={!canEdit}
-                      className={cn(PROPERTY_INPUT_CLASS, "h-8 text-xs")}
-                    />
-                    <p className="text-[11px] text-muted-foreground">
-                      Comma-separated. Stored on each generated clip&apos;s <code className="font-mono">production_items.platform</code> JSONB array.
-                    </p>
-                  </div>
-                  <div className="space-y-1">
-                    <Label htmlFor="clip-aspect-ratio" className="text-xs">
-                      Clip aspect ratio
-                    </Label>
-                    <select
-                      id="clip-aspect-ratio"
-                disabled={!canEdit}
-                      value={clipAspectRatio}
-                      onChange={(e) => {
-                        // The brand's default choice is stored as null.
-                  const next = e.target.value === defaultCtaStrategy(data?.format?.brand) ? null : e.target.value;
-                        setClipAspectRatio(next ?? "");
-                        void persistField({ clipAspectRatio: next });
-                      }}
-                      className={cn(PROPERTY_INPUT_CLASS, "h-8 text-xs")}
-                    >
-                      <option value="">— derive from post type —</option>
-                      <option value="9:16">9:16 (vertical)</option>
-                      <option value="16:9">16:9 (horizontal)</option>
-                    </select>
-                    <p className="text-[11px] text-muted-foreground">
-                      Drives the Descript composition layout for clips in this format. Blank = 9:16 for Reel/Shorts/TikTok, 16:9 for X / YouTube long.
-                    </p>
-                  </div>
-                </div>
+                <p className="ml-6 text-xs text-muted-foreground" data-testid="clip-target-summary">
+                  {(() => {
+                    const ch = selections[0];
+                    const acct = ch ? accounts.find((x) => x.id === ch.accountId) : null;
+                    const where = ch
+                      ? `${acct ? `@${acct.handle}` : "its account"} as ${kindLabelForFormat("clip", [ch.postType])}`
+                      : "no account yet — pick one under Accounts";
+                    const shape = clipAspectRatio === "9:16" ? "vertical 9:16" : clipAspectRatio === "16:9" ? "horizontal 16:9" : "shape set by the post type";
+                    return `Clip ideas post to ${where} · ${shape}. Change the account above; change the shape in Clip look.`;
+                  })()}
+                </p>
               )}
             </div>
           </PropertyRowSolo>
@@ -1997,14 +1932,12 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
             </p>
           </div>
           {canEdit && (
-          <Button size="sm" onClick={openAddChild}>
-            + Add
-          </Button>
+            <AddFormatMenu brand={brand} parentFormatId={formatId} label="Add derivative" size="sm" />
           )}
         </div>
         {children.length === 0 ? (
           <div className="px-5 py-12 text-center text-sm text-muted-foreground">
-            No derivatives yet.{canEdit && <> Click <span className="font-medium text-foreground">+ Add</span> to create one.</>}
+            No derivatives yet.{canEdit && <> Click <span className="font-medium text-foreground">Add derivative</span> to create one.</>}
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -2445,205 +2378,6 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
               )}
             </div>
           )}
-        </DialogContent>
-      </Dialog>
-
-      {/* Add derivative modal */}
-      <Dialog open={addChildOpen} onOpenChange={(o) => { if (!o) setAddChildOpen(false); }}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>New derivative of &ldquo;{name}&rdquo;</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label>Name</Label>
-              <Input
-                value={childName}
-                onChange={(e) => setChildName(e.target.value)}
-                placeholder="e.g. X clip"
-                autoFocus
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label>Accounts</Label>
-              <Popover open={childChannelsOpen} onOpenChange={setChildChannelsOpen}>
-                <PopoverTrigger className="flex min-h-9 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-1.5 text-sm shadow-xs hover:bg-accent cursor-pointer">
-                  {childSelections.length === 0 ? (
-                    <span className="text-muted-foreground">Select accounts…</span>
-                  ) : (
-                    <span className="flex flex-wrap items-center gap-1 overflow-hidden">
-                      {childSelections.slice(0, 3).map((s) => {
-                        const opt = channelOptions.find((o) => selectionKey(o) === selectionKey(s));
-                        const account = opt?.account ?? accounts.find((a) => a.id === s.accountId) ?? null;
-                        return (
-                          <AccountBadge
-                            key={selectionKey(s)}
-                            account={account}
-                            postType={s.postType}
-                          />
-                        );
-                      })}
-                      {childSelections.length > 3 && (
-                        <span className="shrink-0 rounded bg-muted text-[10px] font-medium text-muted-foreground px-1.5 py-0.5">
-                          +{childSelections.length - 3}
-                        </span>
-                      )}
-                    </span>
-                  )}
-                  <svg className="ml-2 h-4 w-4 shrink-0 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg>
-                </PopoverTrigger>
-                <PopoverContent className="w-80 p-0" align="start">
-                  <Command>
-                    <CommandInput placeholder="Search accounts…" />
-                    <CommandList>
-                      <CommandEmpty>No accounts found.</CommandEmpty>
-                      <CommandGroup>
-                        {channelOptions.map((opt) => {
-                          const isSelected = childSelectionLookup.has(opt.key);
-                          const postTypeLabel = opt.postType
-                            ? POST_TYPE_SHORT_LABEL[opt.postType]
-                            : null;
-                          return (
-                            <CommandItem
-                              key={opt.key}
-                              value={`${opt.account.handle} ${opt.account.platform} ${opt.postType ?? ""}`}
-                              onSelect={() =>
-                                toggleChildSelection({
-                                  accountId: opt.accountId,
-                                  postType: opt.postType,
-                                })
-                              }
-                            >
-                              <span className="flex items-center gap-2 w-full">
-                                <span className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${isSelected ? "bg-primary border-primary" : "border-input"}`}>
-                                  {isSelected && (
-                                    <svg className="w-3 h-3 text-primary-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-                                  )}
-                                </span>
-                                <PlatformIcon platform={opt.platform} size={13} />
-                                <span className="text-sm font-medium">@{opt.account.handle}</span>
-                                {postTypeLabel && (
-                                  <span className="ml-auto text-[10px] uppercase tracking-wide text-muted-foreground">
-                                    {postTypeLabel}
-                                  </span>
-                                )}
-                              </span>
-                            </CommandItem>
-                          );
-                        })}
-                      </CommandGroup>
-                    </CommandList>
-                  </Command>
-                </PopoverContent>
-              </Popover>
-            </div>
-
-            <div className="space-y-2">
-              <Label>View Threshold</Label>
-              <Input
-                type="number"
-                value={childViewThreshold}
-                onChange={(e) => setChildViewThreshold(e.target.value)}
-                placeholder="e.g. 50000"
-              />
-              <p className="text-xs text-muted-foreground">
-                When a &ldquo;{name}&rdquo; post hits this number of views, a repurpose task is created for this derivative.
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Editor (Content Creator)</Label>
-              <Popover open={childEditorOpen} onOpenChange={setChildEditorOpen}>
-                <PopoverTrigger className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs hover:bg-accent cursor-pointer">
-                  {childEditor ? (
-                    <span className="flex items-center gap-2 truncate">
-                      <span className="w-6 h-6 rounded-full bg-green-100 text-green-700 flex items-center justify-center text-xs font-medium shrink-0">
-                        {childEditor.split(" ").map((n) => n[0]).join("").slice(0, 2)}
-                      </span>
-                      <span className="truncate">{childEditor}</span>
-                    </span>
-                  ) : (
-                    <span className="text-muted-foreground">Search team members…</span>
-                  )}
-                  <svg className="ml-2 h-4 w-4 shrink-0 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg>
-                </PopoverTrigger>
-                <PopoverContent className="w-72 p-0" align="start">
-                  <Command>
-                    <CommandInput placeholder="Search by name or email..." />
-                    <CommandList>
-                      <CommandEmpty>No team members found.</CommandEmpty>
-                      <CommandGroup>
-                        {childEditor && (
-                          <CommandItem
-                            onSelect={() => {
-                              setChildEditor("");
-                                                        setChildEditorOpen(false);
-                            }}
-                            className="text-muted-foreground"
-                          >
-                            <span className="text-sm">Clear selection</span>
-                          </CommandItem>
-                        )}
-                        {assignableUsers.map((u) => (
-                          <CommandItem
-                            key={u.id}
-                            value={`${u.name ?? ""} ${u.email}`}
-                            onSelect={() => {
-                              setChildEditor(u.name ?? u.email);
-                              setChildEditorOpen(false);
-                            }}
-                            data-checked={childEditor === (u.name ?? u.email) ? "true" : undefined}
-                          >
-                            <span className="flex items-center gap-2">
-                              <span className="w-6 h-6 rounded-full bg-green-100 text-green-700 flex items-center justify-center text-xs font-medium shrink-0">
-                                {(u.name ?? u.email).split(" ").map((n) => n[0]).join("").slice(0, 2)}
-                              </span>
-                              <span className="flex flex-col">
-                                <span className="text-sm font-medium">{u.name ?? u.email}</span>
-                                <span className="text-xs text-muted-foreground">{u.email}</span>
-                              </span>
-                            </span>
-                          </CommandItem>
-                        ))}
-                      </CommandGroup>
-                    </CommandList>
-                  </Command>
-                </PopoverContent>
-              </Popover>
-            </div>
-
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label>Skill</Label>
-                <button
-                  type="button"
-                  onClick={() => setChildInstructions(applyStarterTemplate(childInstructions))}
-                  className="text-xs text-primary hover:underline"
-                >
-                  Add template
-                </button>
-              </div>
-              <Textarea
-                value={childInstructions}
-                onChange={(e) => setChildInstructions(e.target.value)}
-                placeholder="Describe this derivative as a Claude-style skill."
-                rows={6}
-                className="font-mono text-xs"
-              />
-            </div>
-
-            {childError && <p className="text-xs text-destructive">{childError}</p>}
-
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setAddChildOpen(false)} disabled={savingChild}>
-                Cancel
-              </Button>
-              <Button onClick={submitAddChild} disabled={savingChild || !childName.trim() || !canEdit}>
-                {savingChild ? "Creating…" : "Create derivative"}
-              </Button>
-            </div>
-          </div>
         </DialogContent>
       </Dialog>
 
