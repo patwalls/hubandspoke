@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { ArrowUp, MessageCircle, RotateCcw, Sparkles, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -194,7 +195,16 @@ export function AssistantPanel() {
                 >
                   {t.content ? (
                     <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
                       components={{
+                        // Tables are a fallback (the prompt asks for lists): keep them readable in a narrow panel.
+                        table: ({ children }) => (
+                          <div className="-mx-1 overflow-x-auto">
+                            <table className="w-full border-collapse text-xs">{children}</table>
+                          </div>
+                        ),
+                        th: ({ children }) => <th className="border-b border-border px-1.5 py-1 text-left font-semibold text-foreground">{children}</th>,
+                        td: ({ children }) => <td className="border-b border-border/60 px-1.5 py-1 align-top">{children}</td>,
                         a: ({ href, children }) => {
                           const internal = href?.startsWith(window.location.origin) || href?.startsWith("/");
                           return internal ? (

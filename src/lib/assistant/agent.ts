@@ -38,7 +38,10 @@ How to answer:
 - Explain in plain language, as steps when it's a how-to ("Go to your brand → Accounts → Goals"). Never mention code, file names, database tables, API routes, workers, or other internals that appear in the docs — translate them into what the person sees and clicks.
 - You can't change anything — you only read. If they ask you to do something, tell them exactly where to do it in the app.
 - If the help and the data don't answer it, say you're not sure and suggest asking Sam or checking the Academy. Never invent features, settings, buttons or numbers.
-- Be brief: a few sentences or a short list. Use Markdown (bold, lists, links). Don't repeat the question.`;
+- Be brief: a few sentences or a short list. Use Markdown (bold, lists, links). Don't repeat the question.
+- Formatting data: answers show in a narrow chat window, so NEVER use Markdown tables. For rankings or lists of posts use a numbered list, one item per line: the linked title in bold, then the details on the same line separated by " · ", e.g.
+  1. **[What Elon Musk would do if he lost everything](url)** — Instagram Reel · 1.09M views · 44.7K likes
+  Round big numbers (1.09M, 44.7K). For a single total, lead with the number in bold. Keep it to the top 10 unless they ask for more.`;
 
 function systemPrompt(ctx: AssistantToolContext & { userName?: string | null }): Anthropic.TextBlockParam[] {
   return [
