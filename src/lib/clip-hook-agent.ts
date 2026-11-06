@@ -6,6 +6,7 @@ import {
   type TranscriptWord,
 } from "./clip-anchor-utils";
 import { hookRewritesBlock, type HookRewrite } from "./clip-editor/hook-rewrites";
+import { trimHabitsBlock, type TrimSummary } from "./clip-editor/trim-habits";
 
 // Haiku 5.5 (was Haiku 4.5). Splice v10 hook writer (2026-05-22). Reads ONE pre-detected
 // section and ONE format's skill section. Decides if the format applies
@@ -23,7 +24,9 @@ const MODEL = "claude-haiku-5-5";
 // Stack format's name; v2 forbids that reframing and matches on the section's
 // actual subject. See clip-hook-agent.eval.test.ts.
 // v3 (2026-11-05): + editors' recent hook rewrites for the format (hooks-learn M1).
-export const HOOK_PROMPT_VERSION = 3;
+// v4 (2026-11-06): + how editors trim the format's clip windows (clip-trim M1).
+//   Keeps v3's rewrites block, so hooks-learn reads v3 and later together.
+export const HOOK_PROMPT_VERSION = 4;
 export const HOOK_GENERATED_BY = `${MODEL}:hook-v${HOOK_PROMPT_VERSION}`;
 
 const DEFAULT_FORMAT_BLOCK = `FORMAT — narrator-overlay hook, 30–60s vertical Reel.
@@ -170,6 +173,9 @@ export interface HookGenerateArgs {
   /** This format's recent (AI hook → line the editor shipped) pairs, from
    *  `loadHookRewrites` (hooks-learn M1). Empty/absent = no block. */
   editorRewrites?: HookRewrite[];
+  /** How editors trim this format's AI clip windows, from `loadTrimHabits`
+   *  (clip-trim M1). Null/absent = no block. */
+  editorTrims?: TrimSummary | null;
   /** The section being evaluated. */
   section: {
     id: string;
@@ -475,6 +481,7 @@ ${DEFAULT_FORMAT_BLOCK}`;
   const refLib = formatReferenceLibrary(args.referenceHooks);
 
   const rewritesBlock = hookRewritesBlock(args.editorRewrites ?? []);
+  const trimsBlock = trimHabitsBlock(args.editorTrims ?? null);
 
   const systemPrompt = [
     SYSTEM_PROMPT_BASE,
@@ -483,6 +490,7 @@ ${DEFAULT_FORMAT_BLOCK}`;
     "",
     refLib.block,
     ...(rewritesBlock ? ["", rewritesBlock] : []),
+    ...(trimsBlock ? ["", trimsBlock] : []),
   ].join("\n");
 
   const userMessage = [

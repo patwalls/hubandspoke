@@ -9,7 +9,7 @@ test("the drafts-learn-from-edits card pops up on the next page load", async ({ 
   await page.waitForLoadState("networkidle");
   let dialog = page.getByRole("dialog", { name: "What's new" });
   if (!(await dialog.isVisible())) {
-    await page.getByRole("button", { name: "Account menu" }).click();
+    await page.getByRole("button", { name: /^Learn:/ }).click(); // What's new moved to the Learn menu (Academy, 2026-11-05)
     await page.getByRole("menuitem", { name: "What's new" }).click();
     dialog = page.getByRole("dialog", { name: "What's new" });
   }

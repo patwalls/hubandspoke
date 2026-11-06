@@ -1,9 +1,9 @@
 import { test, expect } from "@playwright/test";
 import { WHATS_NEW } from "../../src/lib/whats-new/entries";
 
-// The What's new list is reachable from the user menu on every dashboard page,
+// The What's new list is reachable from the Learn menu on every dashboard page,
 // whether or not the pop-up already showed (it pops once per user).
-test("user menu opens the What's new list", async ({ page }) => {
+test("Learn menu opens the What's new list", async ({ page }) => {
   await page.goto("/");
   await page.waitForLoadState("networkidle");
   const popup = page.getByRole("dialog", { name: "What's new" });
@@ -16,7 +16,9 @@ test("user menu opens the What's new list", async ({ page }) => {
   await page.reload();
   await page.waitForLoadState("networkidle");
   await expect(page.getByRole("dialog")).toHaveCount(0);
-  await page.getByRole("button", { name: "Account menu" }).click();
+  // Since the Academy shipped (2026-11-05) What's new lives in the Learn menu
+  // (graduation cap), not the account menu.
+  await page.getByRole("button", { name: /^Learn:/ }).click();
   await page.getByRole("menuitem", { name: "What's new" }).click();
   const list = page.getByRole("dialog", { name: "What's new" });
   await expect(list).toBeVisible();
