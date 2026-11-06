@@ -34,6 +34,8 @@ function fmt(sec: number): string {
 
 const POLL_MS = 4_000;
 const POLL_FOR_MS = 120_000;
+/** Ideas already asked this page load (StrictMode / reopen → poll, not re-ask). */
+const asked = new Set<string>();
 
 /** M3: a pre-v2 section has none yet — ask the worker once (POST), poll
  *  until they land. Nothing shows while it looks. */
@@ -66,7 +68,8 @@ export function useStitchMoments(args: {
         timer = setTimeout(() => void check("GET"), POLL_MS);
       }
     };
-    void check("POST");
+    void check(asked.has(clipIdeaId) ? "GET" : "POST");
+    asked.add(clipIdeaId);
     return () => {
       stopped = true;
       if (timer) clearTimeout(timer);
