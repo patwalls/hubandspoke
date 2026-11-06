@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createDefaultDoc, type ClipEditDoc } from "./doc";
-import { clipTrim, summarizeTrims, trimHabitsBlock } from "./trim-habits";
+import { clipTrim, summarizeTrims, trimHabitsBlock, trimHabitsLine } from "./trim-habits";
 
 const IDEA = { startSec: 100, endSec: 160 };
 const doc = (): ClipEditDoc => structuredClone(createDefaultDoc({ startSec: 100, endSec: 160, hook: "h" }));
@@ -78,5 +78,23 @@ describe("summarizeTrims + trimHabitsBlock (what the clip writer learns)", () =>
     const block = trimHabitsBlock(s)!;
     expect(block).toContain("cut the opening on 5 (median 7s) and cut the ending on 5 (median 10s)");
     expect(block).toContain("tightEndSec up to ~10s earlier");
+  });
+});
+
+describe("trimHabitsLine (the format page's line, clip-trim M2)", () => {
+  const S = { clips: 20, headCut: 9, medianHeadSec: 7, tailCut: 2, medianTailSec: 4 };
+
+  it("names only the end editors trim often enough for the writer to learn it", () => {
+    expect(trimHabitsLine(S)).toEqual({ lead: "Editors cut the opening on", counts: "9 of 20 clips (~7s)" });
+    expect(trimHabitsLine({ ...S, headCut: 2, tailCut: 6 })).toEqual({ lead: "Editors cut the ending on", counts: "6 of 20 clips (~4s)" });
+  });
+
+  it("both ends → one line with both", () => {
+    expect(trimHabitsLine({ ...S, tailCut: 5 })).toEqual({ lead: "Editors cut the opening on", counts: "9 of 20 clips (~7s) and the ending on 5 (~4s)" });
+  });
+
+  it("no habit → no line (nothing on the page)", () => {
+    expect(trimHabitsLine(null)).toBeNull();
+    expect(trimHabitsLine({ ...S, headCut: 4, tailCut: 4 })).toBeNull();
   });
 });

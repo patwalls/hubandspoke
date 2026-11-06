@@ -114,3 +114,21 @@ export function trimHabitsBlock(s: TrimSummary | null): string | null {
     `Cut it the way they do: ${moves.join("; ")}. Only narrow where this section actually has that slack — a section that already starts on its point keeps its start. The anchor stays inside, and the clip stays at least 25s.`,
   ].join("\n");
 }
+
+/** The format page's one line (clip-trim M2), e.g. "Editors cut the opening
+ *  on 19 of 45 clips (~7 s) and the ending on 12 (~5 s)". Only the ends
+ *  editors trim often enough for the writer to learn from (the same rule as
+ *  `trimHabitsBlock`), so the page names exactly what new ideas are told. */
+export function trimHabitsLine(s: TrimSummary | null): { lead: string; counts: string } | null {
+  if (!s) return null;
+  const share = (n: number) => n / s.clips >= MIN_TRIM_SHARE;
+  const head = share(s.headCut);
+  const tail = share(s.tailCut);
+  if (!head && !tail) return null;
+  if (head && tail) {
+    return { lead: "Editors cut the opening on", counts: `${s.headCut} of ${s.clips} clips (~${s.medianHeadSec}s) and the ending on ${s.tailCut} (~${s.medianTailSec}s)` };
+  }
+  return head
+    ? { lead: "Editors cut the opening on", counts: `${s.headCut} of ${s.clips} clips (~${s.medianHeadSec}s)` }
+    : { lead: "Editors cut the ending on", counts: `${s.tailCut} of ${s.clips} clips (~${s.medianTailSec}s)` };
+}
