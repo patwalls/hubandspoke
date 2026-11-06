@@ -3,7 +3,7 @@
  * surfaces call these functions, so a filter or field added here shows up in
  * REST and MCP at once. Everything is read-only; nothing here writes.
  */
-import { and, desc, eq, gte, ilike, isNull, or, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, gte, ilike, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/lib/db";
 import {
@@ -62,6 +62,8 @@ export interface ListContentParams {
   brand?: string;
   account_id?: string;
   post_type?: string;
+  /** Any of these post types (e.g. every short-form type in one query). Not exposed on REST. */
+  post_types?: string[];
   status?: string;
   format?: string;
   source_type?: string;
@@ -136,6 +138,7 @@ export async function listContent(
   if (params.brand && params.brand !== "all") where.push(eq(productionItems.brand, params.brand));
   if (params.account_id) where.push(eq(productionItems.accountId, params.account_id));
   if (params.post_type) where.push(eq(productionItems.postType, params.post_type));
+  if (params.post_types?.length) where.push(inArray(productionItems.postType, params.post_types));
   if (params.status) where.push(sql`lower(${productionItems.status}) = lower(${params.status})`);
   if (params.format) where.push(sql`lower(${productionItems.format}) = lower(${params.format})`);
   if (params.source_type) where.push(eq(productionItems.sourceType, params.source_type));

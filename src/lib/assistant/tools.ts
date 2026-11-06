@@ -11,6 +11,7 @@ import { getContentReportCached } from "@/lib/db/queries-cached";
 import { getContentReport } from "@/lib/db/queries";
 import { todayInclusiveOfUtc } from "@/lib/dates";
 import type { CardBlock, ContentCard } from "@/lib/assistant/cards";
+import { resolvePostTypes } from "@/lib/assistant/post-type-groups";
 
 /**
  * The assistant's tools. READ-ONLY by design: help search (docs + Academy)
@@ -24,6 +25,8 @@ export interface AssistantToolContext {
   baseUrl: string;
   /** Receives result cards to show under the answer (see cards.ts). */
   onCards?: (block: CardBlock) => void;
+  /** Receives every search_content result, so the agent can show cards if the model doesn't. */
+  onSearch?: (search: { sort: string; items: { id: string; views: number | null }[] }) => void;
 }
 
 /** Keep tool results small: a model reads them and they cost tokens. */
@@ -47,12 +50,14 @@ export const ASSISTANT_TOOLS: Anthropic.Tool[] = [
   {
     name: "search_content",
     description:
-      "Find content items (hub videos and the clips/posts made from them). Returns compact rows newest first. Filter by brand slug, post_type, status, format, source_type, text, or publish dates.",
+      "Find content items (hub videos and the clips/posts made from them). Returns compact rows newest first. Filter by brand slug, post_type, status, format, source_type, text, or publish dates. One call covers several platforms: pass a group (short_form) or a comma list in post_type.",
     input_schema: {
       type: "object",
       properties: {
         brand: str("Brand slug from list_brands; omit for all brands"),
-        post_type: str("youtube_long, youtube_shorts, instagram_reel, instagram_post, x, tiktok, linkedin, threads, newsletter"),
+        post_type: str(
+          "A post type (youtube_long, youtube_shorts, instagram_reel, instagram_post, x, tiktok, linkedin, threads, newsletter), a comma list of them, or a group: short_form = youtube_shorts + instagram_reel + tiktok; long_form = youtube_long; text = x + linkedin + threads",
+        ),
         status: str("Workflow status, e.g. Published, Review, Ready to Publish, Scheduled"),
         format: str("Format name from list_formats"),
         source_type: { type: "string", enum: [...SOURCE_TYPES], description: "original = hub piece; repurposed = clip; cross_post / repost" },
@@ -273,22 +278,25 @@ async function run(name: string, a: Args, ctx: AssistantToolContext): Promise<un
       return { your_turn: work.yourTurn.map(row), to_review: work.toReview.map(row), waiting_on_others: work.waitingOnOthers.map(row) };
     }
     case "search_content": {
+      const sort = (s(a.sort) as "published_at" | "updated_at" | "views" | undefined) ?? undefined;
       const page = await listContent(
         {
           brand: s(a.brand),
-          post_type: s(a.post_type),
+          post_types: resolvePostTypes(a.post_type),
           status: s(a.status),
           format: s(a.format),
           source_type: s(a.source_type),
           q: s(a.q),
           published_after: date(a.published_after),
           published_before: date(a.published_before),
-          sort: (s(a.sort) as "published_at" | "updated_at" | "views" | undefined) ?? undefined,
+          sort,
           limit: Math.min(Number(a.limit) || 10, 25),
         },
         ctx.baseUrl,
       );
-      return { items: page.data.map(compact), has_more: page.has_more };
+      const items = page.data.map(compact);
+      ctx.onSearch?.({ sort: sort ?? "published_at", items: items.map((i) => ({ id: i.id, views: i.views })) });
+      return { items, has_more: page.has_more };
     }
     case "content_totals":
       return contentTotals(a, ctx);

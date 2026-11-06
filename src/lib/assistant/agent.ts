@@ -37,7 +37,7 @@ How to answer:
 - For "how does X work", "how do I…", or "what does Y mean": call search_help first, and answer from what it returns. If an Academy video covers it, link it: [Video title](url).
 - For questions about their actual content ("what's waiting for me?", "what did we publish on X?"): use the content tools. Link items with their app_url.
 - For totals ("how many views did Starter Story get in the last 30 days?", "how many Shorts did we post this month?"): use content_totals — it returns the same numbers as the dashboard. Never add up search_content rows for a total. If a brand name is ambiguous, check list_brands for the slug.
-- "Top" / "best" / "bangers" means highest views: use search_content with sort=views and the date range, filtering by post_type as asked (short-form = everything except youtube_long; run one search per platform if needed and pick the top overall).
+- "Top" / "best" / "bangers" means highest views: ONE search_content call with sort=views and the date range. For a mix of platforms use a post_type group or comma list ("short-form" → post_type=short_form) — don't run one search per platform.
 - Explain in plain language, as steps when it's a how-to ("Go to your brand → Accounts → Goals"). Never mention code, file names, database tables, API routes, workers, or other internals that appear in the docs — translate them into what the person sees and clicks.
 - You can't change anything — you only read. If they ask you to do something, tell them exactly where to do it in the app.
 - If the help and the data don't answer it, say you're not sure and suggest asking Sam or checking the Academy. Never invent features, settings, buttons or numbers.
@@ -80,6 +80,24 @@ export function trimHistory(turns: ChatTurn[]): Anthropic.MessageParam[] {
   return out;
 }
 
+type SearchResult = { sort: string; items: { id: string; views: number | null }[] };
+
+/**
+ * Posts to show as cards when the model looked them up but never called
+ * show_content_cards: the results of its final round of searches, merged and
+ * de-duplicated — ranked by views when every search was a views sort (several
+ * "top" searches at once), otherwise in the order they came back.
+ */
+export function fallbackCardIds(searches: SearchResult[], max = 5): string[] {
+  const seen = new Map<string, number | null>();
+  for (const s of searches) for (const i of s.items) if (!seen.has(i.id)) seen.set(i.id, i.views);
+  let rows = [...seen.entries()];
+  if (searches.length > 0 && searches.every((s) => s.sort === "views")) {
+    rows = rows.sort((a, b) => (b[1] ?? -1) - (a[1] ?? -1));
+  }
+  return rows.slice(0, max).map(([id]) => id);
+}
+
 export async function runAssistant(
   turns: ChatTurn[],
   ctx: AssistantToolContext & { userName?: string | null },
@@ -88,6 +106,14 @@ export async function runAssistant(
 ): Promise<AssistantRunResult> {
   const messages = trimHistory(turns);
   const result: AssistantRunResult = { answer: "", toolCalls: [], inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 };
+  let contentCardsShown = false;
+  // Searches from the latest round, kept only if that round was nothing but
+  // searches (a later get_transcript etc. means the answer isn't a post list).
+  let lastSearches: SearchResult[] = [];
+  const onCards = (block: CardBlock) => {
+    if (block.kind === "content") contentCardsShown = true;
+    emit({ type: "cards", block });
+  };
 
   for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
     const lastRound = round === MAX_TOOL_ROUNDS;
@@ -119,17 +145,28 @@ export async function runAssistant(
 
     messages.push({ role: "assistant", content: message.content });
     const results: Anthropic.ToolResultBlockParam[] = [];
+    const roundSearches: SearchResult[] = [];
     for (const call of calls) {
       emit({ type: "status", text: toolStatus(call.name) });
       const started = Date.now();
       const out = await runAssistantTool(call.name, call.input as Record<string, unknown>, {
         ...ctx,
-        onCards: (block) => emit({ type: "cards", block }),
+        onCards,
+        onSearch: (search) => roundSearches.push(search),
       });
       result.toolCalls.push({ name: call.name, ok: out.ok, ms: Date.now() - started });
       results.push({ type: "tool_result", tool_use_id: call.id, content: out.text, is_error: !out.ok });
     }
+    lastSearches = calls.every((c) => c.name === "search_content") ? roundSearches : [];
     messages.push({ role: "user", content: results });
+  }
+
+  // Safety net: it found posts but answered in prose without showing them.
+  const ids = contentCardsShown ? [] : fallbackCardIds(lastSearches);
+  if (ids.length > 0) {
+    const started = Date.now();
+    const out = await runAssistantTool("show_content_cards", { ids }, { ...ctx, onCards });
+    result.toolCalls.push({ name: "show_content_cards:auto", ok: out.ok, ms: Date.now() - started });
   }
 
   result.answer = result.answer.trim();
