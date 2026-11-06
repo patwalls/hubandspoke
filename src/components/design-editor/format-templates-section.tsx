@@ -36,6 +36,7 @@ import type { TemplateEdits } from "@/lib/services/design-editor/template-edits"
 import { trackUsage } from "@/lib/usage/track";
 import type { LookEdits } from "@/lib/services/clip-editor/look-edits";
 import type { HookRewriteSummary } from "@/lib/clip-editor/hook-rewrites";
+import { trimHabitsLine, type TrimSummary } from "@/lib/clip-editor/trim-habits";
 
 const VIEW_ONLY_TITLE = "View only — you don't have edit access to this brand";
 
@@ -293,14 +294,14 @@ function Filmstrip({ doc, imageUrls, channels }: { doc: DesignDoc; imageUrls: Re
 
 function ClipLookCard({ brand, formatId, formatName }: { brand: string; formatId: string; formatName: string }) {
   const canEdit = useCanEditBrand(brand);
-  const [look, setLook] = useState<{ look: ClipLook | null; updatedAt: string | null; aspectRatio: AspectRatio; edits: LookEdits | null; hookRewrites: HookRewriteSummary | null } | null>(null);
+  const [look, setLook] = useState<{ look: ClipLook | null; updatedAt: string | null; aspectRatio: AspectRatio; edits: LookEdits | null; hookRewrites: HookRewriteSummary | null; trims: TrimSummary | null } | null>(null);
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
   const load = useCallback(async () => {
     const res = await fetch(`/api/formats/${formatId}/clip-template`);
     if (res.ok) {
-      const json = (await res.json()) as { look: ClipLook | null; updatedAt: string | null; aspectRatio?: AspectRatio; edits?: LookEdits | null; hookRewrites?: HookRewriteSummary | null };
-      setLook({ look: json.look, updatedAt: json.updatedAt, aspectRatio: json.aspectRatio ?? "9:16", edits: json.edits ?? null, hookRewrites: json.hookRewrites ?? null });
+      const json = (await res.json()) as { look: ClipLook | null; updatedAt: string | null; aspectRatio?: AspectRatio; edits?: LookEdits | null; hookRewrites?: HookRewriteSummary | null; trims?: TrimSummary | null };
+      setLook({ look: json.look, updatedAt: json.updatedAt, aspectRatio: json.aspectRatio ?? "9:16", edits: json.edits ?? null, hookRewrites: json.hookRewrites ?? null, trims: json.trims ?? null });
     }
   }, [formatId]);
   useEffect(() => {
@@ -345,6 +346,7 @@ function ClipLookCard({ brand, formatId, formatName }: { brand: string; formatId
           </div>
           {look.edits && <ClipLookEditorsChange edits={look.edits} brand={brand} />}
           {look.hookRewrites && <HookRewritesLine summary={look.hookRewrites} brand={brand} />}
+          <TrimsLine summary={look.trims} />
           <div className="flex flex-wrap gap-2">
             <Button type="button" size="sm" className="h-7 text-xs" disabled={!canEdit} title={canEdit ? undefined : VIEW_ONLY_TITLE} onClick={() => setEditing(true)}>
               <PencilIcon className="mr-1 size-3" /> {l ? "Edit look" : "Create look"}
@@ -408,6 +410,23 @@ function HookRewritesLine({ summary, brand }: { summary: HookRewriteSummary; bra
         </>
       )}
     </div>
+  );
+}
+
+/** "Editors cut the opening on 19 of 45 clips (~7s)" — one quiet line, no
+ *  panel: the trim habit new clip ideas for this format start from
+ *  (clip-trim M2). Nothing to learn → nothing rendered. */
+function TrimsLine({ summary }: { summary: TrimSummary | null }) {
+  const line = trimHabitsLine(summary);
+  if (!line || !summary) return null;
+  return (
+    <p
+      className="truncate text-[11px] text-muted-foreground"
+      data-testid="clip-trims"
+      title={`From the last ${summary.clips} edited clips: how often editors cut 3s or more off the start or end of the AI's clip window before posting. New clip ideas for this format start and end where editors do.`}
+    >
+      {line.lead} <span className="text-foreground">{line.counts}</span>
+    </p>
   );
 }
 
