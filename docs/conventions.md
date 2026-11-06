@@ -142,6 +142,17 @@ URLs but never wrote back, so back-navigation and reload silently
 discarded everything. The new hook is the only sanctioned way to read
 filter state.
 
+**Default dates and anything else "today" in render come from
+`useToday()`** (`src/lib/hooks/use-today.ts`), never `new Date()`. The
+server renders in UTC and the browser in the user's timezone, so every
+evening in the Americas they disagree on the date and React throws #418
+(HUBANDSPOKE-5, 2026-11-06). `useToday()` renders the UTC date for the
+server and hydration passes, then the local date. Defaults settle once
+after hydration, so a fetch effect keyed on them needs a newest-request
+guard (`requestSeq` in `content-report.tsx`). Event handlers can still
+call `new Date()`. `tests/e2e/dashboard-hydration.spec.ts` catches a
+regression (run the dev server with `TZ=UTC`).
+
 The reference migration is `src/components/dashboard/content-view.tsx`
 — copy that shape for a new list view.
 

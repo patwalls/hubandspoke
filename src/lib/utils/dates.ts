@@ -128,9 +128,9 @@ function rangeEnd(today: Date): Date {
 }
 
 export function getQuickRange(
-  range: string
+  range: string,
+  today: Date = new Date(),
 ): { startDate: Date; endDate: Date } | null {
-  const today = new Date();
   const endDate = rangeEnd(today);
   switch (range) {
     case "7d":

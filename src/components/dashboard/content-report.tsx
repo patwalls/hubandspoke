@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useToday } from "@/lib/hooks/use-today";
 import { format, subDays } from "date-fns";
 import { FilterPills, type FilterAccount } from "./filter-pills";
 import { MetricTiles } from "./metric-tiles";
@@ -8,7 +9,6 @@ import { WinnersStrip } from "./winners-strip";
 import { PeriodTable, type GroupDim } from "./period-table";
 import type { ContentReportData } from "@/types";
 import { rehydrateReportAccounts, type HydratedContentReportData } from "@/lib/report-hydrate";
-import { todayInclusiveOfUtc } from "@/lib/dates";
 import { useUrlState } from "@/lib/hooks/use-url-state";
 import { downloadChannelSummaryCsv } from "@/lib/export-csv";
 import { useRememberListUrl } from "@/lib/hooks/use-remember-list-url";
@@ -30,13 +30,16 @@ const GROUP_BY_TITLE: Record<string, string> = {
 };
 
 export function ContentReport({ brand }: { brand: string }) {
-  const { defaultStart, defaultEnd } = useMemo(() => {
-    const today = new Date();
-    return {
-      defaultStart: format(subDays(today, 90), "yyyy-MM-dd"),
-      defaultEnd: todayInclusiveOfUtc(),
-    };
-  }, []);
+  // useToday, not `new Date()`: server (UTC) and browser (local) must agree
+  // on the hydration pass — see use-today.ts.
+  const today = useToday();
+  const { defaultStart, defaultEnd } = useMemo(
+    () => ({
+      defaultStart: format(subDays(today.date, 90), "yyyy-MM-dd"),
+      defaultEnd: today.inclusiveOfUtc,
+    }),
+    [today],
+  );
 
   // On the cross-brand /all view, grouping the primary table by brand is the
   // most useful default; on a single-brand dashboard "by brand" is a no-op so
