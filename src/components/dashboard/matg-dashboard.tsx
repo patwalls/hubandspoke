@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useToday } from "@/lib/hooks/use-today";
 import { format, subDays } from "date-fns";
 import { FilterPills, type FilterAccount } from "./filter-pills";
 import { MetricTiles } from "./metric-tiles";
@@ -26,13 +27,16 @@ const PLATFORM_TABS = [
 export function MATGDashboard() {
   // Rolling 90-day default; memoized so the hook's default-pruning sees a
   // stable string per render.
-  const { defaultStart, defaultEnd } = useMemo(() => {
-    const today = new Date();
-    return {
-      defaultStart: format(subDays(today, 90), "yyyy-MM-dd"),
-      defaultEnd: format(today, "yyyy-MM-dd"),
-    };
-  }, []);
+  // useToday, not `new Date()`: server (UTC) and browser (local) must agree
+  // on the hydration pass — see use-today.ts.
+  const today = useToday();
+  const { defaultStart, defaultEnd } = useMemo(
+    () => ({
+      defaultStart: format(subDays(today.date, 90), "yyyy-MM-dd"),
+      defaultEnd: today.key,
+    }),
+    [today],
+  );
 
   const filters = useUrlState({
     platform: { default: "all" },
@@ -90,7 +94,11 @@ export function MATGDashboard() {
   /*  Data fetching                                                    */
   /* ---------------------------------------------------------------- */
 
+  // Only the newest request may land: the default dates settle from UTC to
+  // local right after hydration (useToday), so the first two fetches overlap.
+  const requestSeq = useRef(0);
   const fetchReport = useCallback(async () => {
+    const seq = ++requestSeq.current;
     try {
       const params = new URLSearchParams({
         startDate,
@@ -106,7 +114,9 @@ export function MATGDashboard() {
         provenOnly: provenOnly ? "1" : "0",
       });
       const res = await fetch(`/api/reports/matg?${params}`);
-      setData(rehydrateReportAccounts(await res.json()));
+      const json = await res.json();
+      if (seq !== requestSeq.current) return;
+      setData(rehydrateReportAccounts(json));
     } catch (err) {
       console.error("Failed to fetch data:", err);
     }

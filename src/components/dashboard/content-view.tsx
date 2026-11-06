@@ -1,13 +1,13 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useToday } from "@/lib/hooks/use-today";
 import { format, subDays } from "date-fns";
 import { FilterPills, SelectPill } from "./filter-pills";
 import { PerformanceTable } from "./performance-table";
 import type { ContentReportData } from "@/types";
 import { rehydrateReportAccounts, type HydratedContentReportData } from "@/lib/report-hydrate";
 import type { PickerAccount } from "@/components/ui/account-post-type-picker";
-import { todayInclusiveOfUtc } from "@/lib/dates";
 import { useUrlState } from "@/lib/hooks/use-url-state";
 import { useRememberListUrl } from "@/lib/hooks/use-remember-list-url";
 import { ReportCache, loadMode } from "@/lib/content-list/report-cache";
@@ -41,13 +41,16 @@ export function ContentView({ brand }: ContentViewProps) {
   // clock only ticks across midnight; pruning a value that matches today's
   // default but won't match tomorrow's is a fair trade-off — see
   // use-url-state.ts notes).
-  const { defaultStart, defaultEnd } = useMemo(() => {
-    const today = new Date();
-    return {
-      defaultStart: format(subDays(today, 90), "yyyy-MM-dd"),
-      defaultEnd: todayInclusiveOfUtc(),
-    };
-  }, []);
+  // useToday, not `new Date()`: server (UTC) and browser (local) must agree
+  // on the hydration pass — see use-today.ts.
+  const today = useToday();
+  const { defaultStart, defaultEnd } = useMemo(
+    () => ({
+      defaultStart: format(subDays(today.date, 90), "yyyy-MM-dd"),
+      defaultEnd: today.inclusiveOfUtc,
+    }),
+    [today],
+  );
 
   // Dashboard drill-through links build URLs with `?platform=<row-label>`,
   // which has always been the canonical URL key. The hook reads it

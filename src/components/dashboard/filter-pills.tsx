@@ -20,6 +20,7 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { getQuickRange } from "@/lib/utils/dates";
+import { useToday } from "@/lib/hooks/use-today";
 import { PLATFORM_META, POST_TYPE_SHORT_LABEL, toPlatform } from "@/lib/platforms";
 import type { PostType } from "@/lib/platform-field-schemas";
 import {
@@ -145,20 +146,26 @@ const ORIGINS = [
   { value: "synced", label: "Synced from platform" },
 ];
 
+// `today` comes from useToday() in render paths — never `new Date()` there,
+// or the server (UTC) and browser (local) labels disagree and React #418s.
 function resolvePreset(
-  value: string
+  value: string,
+  today: Date,
 ): { startDate: Date; endDate: Date } | null {
-  const today = new Date();
   const endDate = addDays(today, 1);
   if (value === "today") return { startDate: today, endDate };
   if (value === "ytd") return { startDate: startOfYear(today), endDate };
   if (value === "all-time") return { startDate: new Date(2010, 0, 1), endDate };
-  return getQuickRange(value);
+  return getQuickRange(value, today);
 }
 
-function activePresetValue(startDate: string, endDate: string): string | null {
+function activePresetValue(
+  startDate: string,
+  endDate: string,
+  today: Date,
+): string | null {
   for (const p of PRESETS) {
-    const r = resolvePreset(p.value);
+    const r = resolvePreset(p.value, today);
     if (
       r &&
       format(r.startDate, "yyyy-MM-dd") === startDate &&
@@ -170,8 +177,8 @@ function activePresetValue(startDate: string, endDate: string): string | null {
   return null;
 }
 
-function rangeLabel(startDate: string, endDate: string): string {
-  const preset = activePresetValue(startDate, endDate);
+function rangeLabel(startDate: string, endDate: string, today: Date): string {
+  const preset = activePresetValue(startDate, endDate, today);
   if (preset) return PRESETS.find((p) => p.value === preset)!.label;
   try {
     const s = parse(startDate, "yyyy-MM-dd", new Date());
@@ -275,6 +282,7 @@ export function DateRangePill({
   | "onEndDateChange"
   | "onDateRangeChange"
 >) {
+  const today = useToday().date;
   const [open, setOpen] = useState(false);
   const [draftStart, setDraftStart] = useState(startDate);
   const [draftEnd, setDraftEnd] = useState(endDate);
@@ -299,7 +307,7 @@ export function DateRangePill({
   }
 
   function applyPreset(value: string) {
-    const r = resolvePreset(value);
+    const r = resolvePreset(value, new Date());
     if (!r) return;
     const s = format(r.startDate, "yyyy-MM-dd");
     const e = format(r.endDate, "yyyy-MM-dd");
@@ -312,12 +320,12 @@ export function DateRangePill({
     setOpen(false);
   }
 
-  const activeValue = activePresetValue(startDate, endDate);
+  const activeValue = activePresetValue(startDate, endDate, today);
 
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger className={PILL_TRIGGER_CLASSES}>
-        <PillContent label="Date range" value={rangeLabel(startDate, endDate)} />
+        <PillContent label="Date range" value={rangeLabel(startDate, endDate, today)} />
       </PopoverTrigger>
       <PopoverContent align="start" className="w-72 p-2 gap-1">
         <div className="flex flex-col">
