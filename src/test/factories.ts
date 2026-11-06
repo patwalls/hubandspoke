@@ -673,20 +673,25 @@ export async function createTestClipSection(opts: {
   createdAt?: Date;
   supportingMoments?: (typeof clipSections.$inferInsert)["supportingMoments"];
   killedAt?: Date;
+  /** Section-picker version; the column default (1) is pre-stitching. */
+  promptVersion?: number;
+  startSec?: number;
+  endSec?: number;
 }): Promise<typeof clipSections.$inferSelect> {
   const [row] = await db
     .insert(clipSections)
     .values({
       pillarId: opts.pillarId,
       batchId: randomUUID(),
-      startSec: "0",
-      endSec: "60",
+      startSec: String(opts.startSec ?? 0),
+      endSec: String(opts.endSec ?? 60),
       transcriptAnchorQuote: "vitest anchor quote with at least eight words in it",
       topic: "vitest topic",
       summary: "vitest summary",
       generatedBy: "vitest",
       supportingMoments: opts.supportingMoments ?? null,
       killedAt: opts.killedAt ?? null,
+      ...(opts.promptVersion != null ? { promptVersion: opts.promptVersion } : {}),
       ...(opts.createdAt ? { createdAt: opts.createdAt } : {}),
     })
     .returning();

@@ -6,6 +6,7 @@
  * through `apply`, so it is one undo step like any edit; "Added" follows the
  * doc, so undoing or cutting the scene brings the button back.
  */
+import { useEffect, useState } from "react";
 import { CheckIcon, PlusIcon } from "lucide-react";
 import type { SupportingMoment } from "@/lib/clip-stitch";
 import type { ClipEditDoc } from "@/lib/clip-editor/doc";
@@ -29,6 +30,54 @@ function fmt(sec: number): string {
   const m = Math.floor((t % 3600) / 60);
   const s = String(t % 60).padStart(2, "0");
   return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${s}` : `${m}:${s}`;
+}
+
+const POLL_MS = 4_000;
+const POLL_FOR_MS = 120_000;
+/** Ideas already asked this page load (StrictMode / reopen → poll, not re-ask). */
+const asked = new Set<string>();
+
+/** M3: a pre-v2 section has none yet — ask the worker once (POST), poll
+ *  until they land. Nothing shows while it looks. */
+export function useStitchMoments(args: {
+  clipIdeaId: string;
+  initial: SupportingMoment[];
+  pending: boolean;
+}): SupportingMoment[] {
+  const { clipIdeaId, initial, pending } = args;
+  const [moments, setMoments] = useState<SupportingMoment[]>(initial);
+  useEffect(() => {
+    setMoments(initial);
+    if (!pending) return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const startedAt = Date.now();
+    const url = `/api/clip-ideas/${clipIdeaId}/editor/stitch`;
+    const check = async (method: "POST" | "GET") => {
+      try {
+        const res = await fetch(url, { method });
+        if (!res.ok || stopped) return;
+        const body = (await res.json()) as { pending?: boolean; moments?: SupportingMoment[] };
+        if (stopped) return;
+        if (!body.pending) {
+          setMoments(body.moments ?? []);
+          return;
+        }
+      } catch {} // network blip: keep polling
+      if (!stopped && Date.now() - startedAt < POLL_FOR_MS) {
+        timer = setTimeout(() => void check("GET"), POLL_MS);
+      }
+    };
+    void check(asked.has(clipIdeaId) ? "GET" : "POST");
+    asked.add(clipIdeaId);
+    return () => {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+    };
+    // `initial` is the session's array; re-run only when the idea changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clipIdeaId, pending]);
+  return moments;
 }
 
 export function StitchSuggestions({
