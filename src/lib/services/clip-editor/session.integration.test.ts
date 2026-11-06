@@ -64,4 +64,16 @@ describe("loadClipEditorSession · supportingMoments", () => {
     const old = await seed({ moments: null });
     expect((await loadClipEditorSession({ clipIdeaId: old.id, userId })).supportingMoments).toEqual([]);
   });
+
+  // M3: the editor asks the worker for lines only for a pre-v2 section that
+  // was never asked — not a killed one, and not one that already answered.
+  it("marks only a never-asked pre-v2 section as pending", async () => {
+    const userId = await getTestUserId();
+    const old = await seed({ moments: null });
+    expect((await loadClipEditorSession({ clipIdeaId: old.id, userId })).stitchPending).toBe(true);
+    const killed = await seed({ killed: true, moments: null });
+    expect((await loadClipEditorSession({ clipIdeaId: killed.id, userId })).stitchPending).toBe(false);
+    const answered = await seed({ moments: [] });
+    expect((await loadClipEditorSession({ clipIdeaId: answered.id, userId })).stitchPending).toBe(false);
+  });
 });

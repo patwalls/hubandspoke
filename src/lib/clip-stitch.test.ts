@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { locateSupportingMoments, snapToCues } from "./clip-stitch";
+import { locateSupportingMoments, needsStitchSuggest, snapToCues } from "./clip-stitch";
 import type { TranscriptSegment, TranscriptWord } from "./clip-anchor-utils";
 
 // A 3-cue transcript: cue A 0–10 s, cue B 100–110 s (the section), cue C 300–308 s.
@@ -69,5 +69,16 @@ describe("locateSupportingMoments", () => {
 describe("snapToCues", () => {
   it("widens a word range to the cues it touches", () => {
     expect(snapToCues(102, 104, segments)).toEqual({ startSec: 100, endSec: 110 });
+  });
+});
+
+describe("needsStitchSuggest (M3)", () => {
+  const base = { promptVersion: 1, supportingMoments: null, killedAt: null };
+  it("is true only for a live pre-v2 section never asked", () => {
+    expect(needsStitchSuggest(base)).toBe(true);
+    expect(needsStitchSuggest({ ...base, supportingMoments: [] })).toBe(false); // asked, none
+    expect(needsStitchSuggest({ ...base, promptVersion: 2 })).toBe(false); // v2 NULL = picker found none
+    expect(needsStitchSuggest({ ...base, killedAt: new Date() })).toBe(false);
+    expect(needsStitchSuggest(null)).toBe(false);
   });
 });

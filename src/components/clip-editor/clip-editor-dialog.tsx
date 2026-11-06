@@ -67,7 +67,7 @@ import {
 } from "./store";
 import { framingFor, useFraming } from "./framing";
 import { TranscriptEditor, type SpeakerLabels } from "./transcript-editor";
-import { StitchSuggestions } from "./stitch-suggestions";
+import { StitchSuggestions, useStitchMoments } from "./stitch-suggestions";
 import { speakerColor, speakerLabel } from "@/components/dashboard/transcript-speakers";
 import { Transport } from "./transport";
 import type { TimelineNote } from "./timeline";
@@ -222,6 +222,11 @@ function EditorWorkspace({
   const [busy, setBusy] = useState<null | "fillers" | "export" | "kill">(null);
   const [killOpen, setKillOpen] = useState(false);
   const [leaving, setLeaving] = useState(false);
+  const stitchMoments = useStitchMoments({
+    clipIdeaId: session.clipIdea.id,
+    initial: session.supportingMoments ?? [],
+    pending: session.stitchPending ?? false,
+  });
   // X posts lead with the copy; everywhere else the cut comes first.
   const postFirst = session.post?.postType === "x";
   const [tab, setTab] = useState<"clip" | "post">(postFirst ? "post" : "clip");
@@ -828,7 +833,7 @@ function EditorWorkspace({
             </p>
           )}
           <StitchSuggestions
-            moments={session.supportingMoments ?? []}
+            moments={stitchMoments}
             doc={doc}
             apply={apply}
             locked={locked}

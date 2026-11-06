@@ -26,6 +26,7 @@ import { ensureClipPostDraft, type ClipPost } from "./post-draft";
 import { previewUrlFor } from "@/lib/services/design-editor/assets";
 import { loadEditorReviewNotes, type EditorReviewNotes } from "./review-notes";
 import type { SupportingMoment } from "@/lib/clip-stitch";
+import { needsStitchSuggest } from "@/lib/clip-stitch";
 
 export class ClipEditorIdeaNotFoundError extends Error {
   constructor() {
@@ -113,6 +114,10 @@ export interface ClipEditorSession {
    *  stitching into this clip (clip stitching M2) — offered with one-click
    *  Add, never added on their own. Empty for pre-v2 or killed sections. */
   supportingMoments: SupportingMoment[];
+  /** The section predates section-picker v2 and was never asked for stitch
+   *  lines (M3): the editor POSTs `editor/stitch` to have the worker find
+   *  them, then polls. */
+  stitchPending: boolean;
 }
 
 export async function loadClipEditorSession(args: {
@@ -133,6 +138,7 @@ export async function loadClipEditorSession(args: {
       acceptedProductionItemId: clipIdeas.acceptedProductionItemId,
       supportingMoments: clipSections.supportingMoments,
       sectionKilledAt: clipSections.killedAt,
+      sectionPromptVersion: clipSections.promptVersion,
       sourceProductionItemId: clipIdeas.sourceProductionItemId,
       sourceTitle: productionItems.title,
       sourceBrand: productionItems.brand,
@@ -287,6 +293,13 @@ export async function loadClipEditorSession(args: {
       ? await loadEditorReviewNotes(row.acceptedProductionItemId)
       : null,
     supportingMoments: row.sectionKilledAt ? [] : (row.supportingMoments ?? []),
+    stitchPending:
+      row.sectionPromptVersion != null &&
+      needsStitchSuggest({
+        promptVersion: row.sectionPromptVersion,
+        supportingMoments: row.supportingMoments,
+        killedAt: row.sectionKilledAt,
+      }),
   };
 }
 

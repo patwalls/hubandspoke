@@ -26,6 +26,7 @@ import { designFramesTask, type DesignFramesPayload } from "./design-frames";
 import { designTemplateImportTask, type DesignTemplateImportPayload } from "./design-template-import";
 import { designScreensTask, type DesignScreensPayload } from "./design-screens";
 import { designStyleExtractTask, type DesignStyleExtractPayload } from "./design-style-extract";
+import { clipSectionStitchTask, type ClipSectionStitchPayload } from "./clip-section-stitch";
 import { designDraftTask, type DesignDraftPayload } from "./design-draft";
 import { newsletterDraftTask, type NewsletterDraftPayload } from "./newsletter-draft";
 import {
@@ -156,6 +157,7 @@ export interface TaskPayloads {
   "design-template-import": DesignTemplateImportPayload;
   "design-screens": DesignScreensPayload;
   "design-style-extract": DesignStyleExtractPayload;
+  "clip-section-stitch": ClipSectionStitchPayload;
   "design-draft": DesignDraftPayload;
   "newsletter-draft": NewsletterDraftPayload;
   "newsletter-section-regenerate": NewsletterSectionRegeneratePayload;
@@ -240,6 +242,7 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "design-template-import": designTemplateImportTask,
   "design-screens": designScreensTask,
   "design-style-extract": designStyleExtractTask,
+  "clip-section-stitch": clipSectionStitchTask,
   "design-draft": designDraftTask,
   "newsletter-draft": newsletterDraftTask,
   "newsletter-section-regenerate": newsletterSectionRegenerateTask,

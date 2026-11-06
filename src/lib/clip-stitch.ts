@@ -101,3 +101,27 @@ export function snapToCues(
 function round3(n: number): number {
   return Math.round(n * 1000) / 1000;
 }
+
+/** Section-picker version that started suggesting moments (section-v2). */
+export const STITCH_SINCE_SECTION_VERSION = 2;
+
+export interface StitchSectionState {
+  promptVersion: number;
+  supportingMoments: SupportingMoment[] | null;
+  killedAt: Date | null;
+}
+
+/**
+ * M3: true when a section predates section-v2 and has never been asked for
+ * stitch lines, so the editor should have the worker find them. A v2
+ * section's NULL means the picker found none — not pending — and the M3
+ * task stores `[]` for none, so a section is asked at most once.
+ */
+export function needsStitchSuggest(s: StitchSectionState | null | undefined): boolean {
+  if (!s) return false;
+  return (
+    s.killedAt == null &&
+    s.supportingMoments == null &&
+    s.promptVersion < STITCH_SINCE_SECTION_VERSION
+  );
+}

@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import postgres from "postgres";
 import { createDefaultDoc } from "../../src/lib/clip-editor/doc";
 
@@ -24,7 +24,14 @@ const moments = [
   { quote: "and by the end of the year it was doing forty grand a month", role: "payoff", why: "What the outreach paid", startSec: 40, endSec: 47 },
 ];
 
-test("suggested lines are one click to stitch in, setup before and payoff after", async ({ page }) => {
+test("suggested lines are one click to stitch in, setup before and payoff after", ({ page }) => stitchFlow(page, false));
+
+// M3: an idea on a section from before the stitch picker opens with none;
+// the editor asks the worker once (POST), polls, and the strip appears when
+// the lines land. Nothing shows while it looks.
+test("an older idea gets its lines to stitch in after the editor asks", ({ page }) => stitchFlow(page, true));
+
+async function stitchFlow(page: Page, older: boolean) {
   const sql = postgres(process.env.DATABASE_URL!, { max: 1 });
   try {
     const stamp = Date.now();
@@ -75,9 +82,17 @@ test("suggested lines are one click to stitch in, setup before and payoff after"
           latestRender: null,
           post: null,
           reviewNotes: null,
-          supportingMoments: moments,
+          supportingMoments: older ? [] : moments,
+          stitchPending: older,
         },
       });
+    });
+
+    const stitchCalls: string[] = [];
+    let ready = false;
+    await page.route(/\/api\/clip-ideas\/[^/]+\/editor\/stitch$/, async (route) => {
+      stitchCalls.push(route.request().method());
+      await route.fulfill({ json: ready ? { pending: false, moments } : { pending: true, moments: [] } });
     });
 
     const flagsLoaded = page.waitForResponse(/\/api\/feature-flags$/);
@@ -91,7 +106,14 @@ test("suggested lines are one click to stitch in, setup before and payoff after"
     await expect(dialog.getByText("Editor beta")).toBeVisible({ timeout: 20_000 });
 
     const strip = dialog.getByTestId("stitch-suggestions");
-    await expect(strip).toContainText("Lines to stitch in");
+    if (older) {
+      await expect.poll(() => stitchCalls[0]).toBe("POST");
+      await expect(strip).toHaveCount(0);
+      ready = true;
+    }
+    await expect(strip).toContainText("Lines to stitch in", { timeout: 15_000 });
+    if (older && process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT });
+    expect(stitchCalls.filter((m) => m === "POST")).toHaveLength(older ? 1 : 0);
     await expect(strip.getByRole("button", { name: "Add" })).toHaveCount(2);
     await page.screenshot({ path: ".playwright-mcp/screenshots/clip-stitch-before.png" });
 
@@ -110,4 +132,4 @@ test("suggested lines are one click to stitch in, setup before and payoff after"
   } finally {
     await sql.end();
   }
-}); 
+}

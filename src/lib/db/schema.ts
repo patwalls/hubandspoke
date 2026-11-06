@@ -1176,7 +1176,8 @@ export const clipSections = pgTable(
     /** Clip stitching (section-v2, 2026-11-05): 0-3 short lines from
      *  OUTSIDE this section's window that an editor would stitch in
      *  (setup / detail / payoff), cue-aligned by `src/lib/clip-stitch.ts`.
-     *  Null = none suggested, or a pre-v2 section. */
+     *  Null = none suggested (v2), or a pre-v2 section not yet asked;
+     *  `[]` = asked on demand (M3, `clip-section-stitch`), none found. */
     supportingMoments: jsonb("supporting_moments").$type<SupportingMoment[]>(),
     promptVersion: integer("prompt_version").notNull().default(1),
     /** e.g. "claude-sonnet-4-6:section-v1". Surfaces in algorithm-version
