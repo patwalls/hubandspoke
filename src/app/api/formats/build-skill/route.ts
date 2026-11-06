@@ -77,5 +77,5 @@ export async function POST(request: NextRequest) {
     }
     return NextResponse.json({ error: "The AI couldn't write a Skill this time — try again." }, { status: 502 });
   }
-  return NextResponse.json({ skill: result.skill, suggestedName: result.suggestedName });
+  return NextResponse.json({ skill: result.skill, suggestedName: result.suggestedName, look: result.look });
 }

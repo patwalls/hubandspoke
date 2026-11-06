@@ -297,6 +297,15 @@ export function clipTargetForPostType(
   return label ? { clipTargetPostType: postType!, clipTargetPlatform: [label] } : null;
 }
 
+/** The default clip shape for a post type: horizontal where the feed is
+ *  landscape (X, LinkedIn, Threads), vertical everywhere else. Matches the
+ *  kinds' `clipAspectRatio` and resolveClipAspectRatio's fallback. */
+export function defaultClipAspectFor(postType: string | null | undefined): "9:16" | "16:9" {
+  return postType === "x" || postType === "linkedin" || postType === "threads" || postType === "youtube_long"
+    ? "16:9"
+    : "9:16";
+}
+
 /** Which menu platform + kind an EXISTING format is, so the guided dialog
  *  can open on it for editing: its family (familyForFormat) matched against
  *  its first channel's post type; falls back to the family's first kind. */

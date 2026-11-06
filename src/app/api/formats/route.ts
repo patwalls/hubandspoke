@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { clipTargetForPostType } from "@/lib/format-kinds";
+import { clipTargetForPostType, defaultClipAspectFor } from "@/lib/format-kinds";
 import { db } from "@/lib/db";
 import { requireBrandEdit } from "@/lib/auth-guards";
 import { brandOfFormat } from "@/lib/brand-access";
@@ -426,7 +426,14 @@ export async function PUT(request: NextRequest) {
             )[0]?.postType ?? null;
       const target = clipTargetForPostType(firstPostType);
       if (target) {
-        [result] = await db.update(formats).set(target).where(eq(formats.id, id)).returning();
+        // A new platform brings its shape (X → horizontal, Reel → vertical).
+        // Same post type → the shape someone picked in the clip look stays.
+        const platformChanged = target.clipTargetPostType !== updated.clipTargetPostType;
+        const set =
+          platformChanged && body.clipAspectRatio === undefined
+            ? { ...target, clipAspectRatio: defaultClipAspectFor(target.clipTargetPostType) }
+            : target;
+        [result] = await db.update(formats).set(set).where(eq(formats.id, id)).returning();
       }
     }
 

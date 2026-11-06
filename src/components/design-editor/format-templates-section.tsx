@@ -56,13 +56,13 @@ interface TemplateResponse {
  *  editor as soon as the card loads — the clip look always; the design
  *  template when there is one to edit (otherwise the card scrolls into view
  *  so a starting layout can be picked). */
-export function FormatTemplatesSection({ brand, formatId, formatName, isClippableFormat, autoOpen = false, onAutoOpened, onFormatChanged }: { brand: string; formatId: string; formatName: string; isClippableFormat: boolean; autoOpen?: boolean; onAutoOpened?: () => void; onFormatChanged?: () => void }) {
+export function FormatTemplatesSection({ brand, formatId, formatName, isClippableFormat, autoOpen = false, onAutoOpened, onFormatChanged, onBackToSetup }: { brand: string; formatId: string; formatName: string; isClippableFormat: boolean; autoOpen?: boolean; onAutoOpened?: () => void; onFormatChanged?: () => void; onBackToSetup?: () => void }) {
   const flags = useFeatureFlags();
   if (!flags?.designEditor && !flags?.clipEditor) return null;
   // A video format gets a clip look; an image/carousel format gets a design
   // template. Neither card is shown for the other kind.
   const card = isClippableFormat
-    ? flags.clipEditor && <ClipLookCard brand={brand} formatId={formatId} formatName={formatName} autoOpen={autoOpen} onAutoOpened={onAutoOpened} onFormatChanged={onFormatChanged} />
+    ? flags.clipEditor && <ClipLookCard brand={brand} formatId={formatId} formatName={formatName} autoOpen={autoOpen} onAutoOpened={onAutoOpened} onFormatChanged={onFormatChanged} onBackToSetup={onBackToSetup} />
     : flags.designEditor && <DesignTemplateCard brand={brand} formatId={formatId} formatName={formatName} autoOpen={autoOpen} onAutoOpened={onAutoOpened} />;
   if (!card) return null;
   return <div className="grid gap-3" id="format-templates">{card}</div>;
@@ -321,7 +321,7 @@ function Filmstrip({ doc, imageUrls, channels }: { doc: DesignDoc; imageUrls: Re
   );
 }
 
-function ClipLookCard({ brand, formatId, formatName, autoOpen, onAutoOpened, onFormatChanged }: { brand: string; formatId: string; formatName: string; autoOpen: boolean; onAutoOpened?: () => void; onFormatChanged?: () => void }) {
+function ClipLookCard({ brand, formatId, formatName, autoOpen, onAutoOpened, onFormatChanged, onBackToSetup }: { brand: string; formatId: string; formatName: string; autoOpen: boolean; onAutoOpened?: () => void; onFormatChanged?: () => void; onBackToSetup?: () => void }) {
   const canEdit = useCanEditBrand(brand);
   const [look, setLook] = useState<{ look: ClipLook | null; updatedAt: string | null; aspectRatio: AspectRatio; edits: LookEdits | null; hookRewrites: HookRewriteSummary | null; trims: TrimSummary | null } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -400,7 +400,7 @@ function ClipLookCard({ brand, formatId, formatName, autoOpen, onAutoOpened, onF
             )}
           </div>
           <p className="text-[11px] text-muted-foreground">You can also save a look from inside any clip of this format: clip editor → ⋯ → “Save look as the format’s template”.</p>
-          <ClipLookDialog intro={fromCreate ? CLIP_LOOK_INTRO : null} open={editing} onOpenChange={(o) => { setEditing(o); if (!o) { setFromCreate(false); void load(); onFormatChanged?.(); } }} formatId={formatId} formatName={formatName} brand={brand} look={l ?? null} aspectRatio={look.aspectRatio} onSaved={() => {}} />
+          <ClipLookDialog onBack={onBackToSetup ?? null} intro={fromCreate ? CLIP_LOOK_INTRO : null} open={editing} onOpenChange={(o) => { setEditing(o); if (!o) { setFromCreate(false); void load(); onFormatChanged?.(); } }} formatId={formatId} formatName={formatName} brand={brand} look={l ?? null} aspectRatio={look.aspectRatio} onSaved={() => {}} />
         </>
       )}
     </Card>

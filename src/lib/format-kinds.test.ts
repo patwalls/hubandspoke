@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { FORMAT_PLATFORMS, clipTargetForPostType, familyForFormat, formatPlatform, kindForExistingFormat, kindLabelForFormat } from "./format-kinds";
+import { FORMAT_PLATFORMS, clipTargetForPostType, defaultClipAspectFor, familyForFormat, formatPlatform, kindForExistingFormat, kindLabelForFormat } from "./format-kinds";
 import { SKILL_EXAMPLE, SKILL_QUESTIONS } from "./format-skill-guide";
 
 const allKinds = FORMAT_PLATFORMS.flatMap((p) => p.kinds);
@@ -106,5 +106,16 @@ describe("kindForExistingFormat", () => {
   });
   it("a clip with no account yet falls back to the first clip kind", () => {
     expect(kindForExistingFormat({ ...base, isClippableFormat: true, postTypes: [] })).toEqual({ platformKey: "instagram", kindKey: "instagram_clip" });
+  });
+});
+
+describe("defaultClipAspectFor", () => {
+  it("landscape feeds are horizontal, everything else vertical — and every clip kind agrees", () => {
+    expect(defaultClipAspectFor("x")).toBe("16:9");
+    expect(defaultClipAspectFor("linkedin")).toBe("16:9");
+    expect(defaultClipAspectFor("instagram_reel")).toBe("9:16");
+    for (const k of FORMAT_PLATFORMS.flatMap((p) => p.kinds).filter((k) => k.family === "clip")) {
+      expect(defaultClipAspectFor(k.postType)).toBe(k.clipAspectRatio);
+    }
   });
 });

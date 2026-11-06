@@ -54,6 +54,7 @@ import {
 } from "@/lib/platforms";
 import type { PostType } from "@/lib/platform-field-schemas";
 import { addRuleToSkill } from "@/lib/format-skill";
+import { lookFromSuggestion } from "@/lib/clip-editor/look-from-example";
 import { FORMAT_PLATFORMS, familyForFormat, kindForExistingFormat, kindLabelForFormat } from "@/lib/format-kinds";
 import { AddFormatDialog, AddFormatMenu } from "./add-format-dialog";
 import { SkillGuideEditor } from "./skill-guide-editor";
@@ -1668,7 +1669,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
           )}
 
           {data?.format && (
-            <FormatTemplatesSection key={designOpenKey} brand={brand} formatId={formatId} formatName={data.format.name} isClippableFormat={isClippableFormat} autoOpen={autoOpenDesign} onAutoOpened={designOpened} onFormatChanged={() => {
+            <FormatTemplatesSection key={designOpenKey} brand={brand} formatId={formatId} formatName={data.format.name} isClippableFormat={isClippableFormat} autoOpen={autoOpenDesign} onAutoOpened={designOpened} onBackToSetup={() => setGuidedEditOpen(true)} onFormatChanged={() => {
               // The clip look can change the shape (clip_aspect_ratio) — pick it up
               // without reloading the whole page.
               void fetch(`/api/formats/${formatId}`)
@@ -1701,6 +1702,26 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
                 brand={brand}
                 kindLabel={kindLabelForFormat(skillFamily, selections.map((s) => s.postType))}
                 formatName={name}
+                onLook={
+                  isClippableFormat
+                    ? async (l) => {
+                        const built = lookFromSuggestion(l);
+                        if (!built) return;
+                        const res = await fetch(`/api/formats/${formatId}/clip-template`, {
+                          method: "PUT",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ look: built.look }),
+                        }).catch(() => null);
+                        if (!res?.ok) return void toast.error("Couldn't update the clip look");
+                        setClipAspectRatio(built.aspectRatio);
+                        await persistField({ clipAspectRatio: built.aspectRatio });
+                        // Remount the Clip look card so it shows the new look.
+                        setDesignOpenKey((k) => k + 1);
+                        toast.success("Clip look updated to match your examples");
+                      }
+                    : undefined
+                }
+                lookMode="offer"
                 readOnly={!canEdit}
                 rows={12}
                 textareaClassName={cn(!skillExpanded && instructions.length > SKILL_COLLAPSE_CHARS && "max-h-80 overflow-y-auto")}

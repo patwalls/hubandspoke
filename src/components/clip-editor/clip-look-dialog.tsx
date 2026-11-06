@@ -28,7 +28,7 @@ const AUTOSAVE_DELAY_MS = 900;
 
 /** `intro`: a note under the header — the Add format flow's "last step"
  *  explanation. */
-export function ClipLookDialog({ open, onOpenChange, formatId, formatName, brand, look, aspectRatio, onSaved, intro }: {
+export function ClipLookDialog({ open, onOpenChange, formatId, formatName, brand, look, aspectRatio, onSaved, intro, onBack }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   formatId: string;
@@ -39,11 +39,13 @@ export function ClipLookDialog({ open, onOpenChange, formatId, formatName, brand
   aspectRatio: AspectRatio;
   onSaved: () => void;
   intro?: string | null;
+  /** "← Back to format setup": save, close, and reopen the guided dialog. */
+  onBack?: (() => void) | null;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex h-[94vh] w-[97vw] max-w-[97vw] flex-col gap-0 overflow-hidden p-0 sm:max-w-[min(1200px,97vw)]">
-        {open && <LookHost formatId={formatId} formatName={formatName} brand={brand} look={look} aspectRatio={aspectRatio} onSaved={onSaved} onClose={() => onOpenChange(false)} intro={intro ?? null} />}
+        {open && <LookHost formatId={formatId} formatName={formatName} brand={brand} look={look} aspectRatio={aspectRatio} onSaved={onSaved} onClose={() => onOpenChange(false)} intro={intro ?? null} onBack={onBack ?? null} />}
       </DialogContent>
     </Dialog>
   );
@@ -53,7 +55,7 @@ export function ClipLookDialog({ open, onOpenChange, formatId, formatName, brand
  *  the format's `clip_aspect_ratio` (which every new clip edit of the
  *  format reads — session.ts → resolveClipAspectRatio), reloads the look and
  *  remounts the editor on the new frame. */
-function LookHost(props: { formatId: string; formatName: string; brand: string; look: ClipLook | null; aspectRatio: AspectRatio; onSaved: () => void; onClose: () => void; intro: string | null }) {
+function LookHost(props: { formatId: string; formatName: string; brand: string; look: ClipLook | null; aspectRatio: AspectRatio; onSaved: () => void; onClose: () => void; intro: string | null; onBack: (() => void) | null }) {
   const [current, setCurrent] = useState({ look: props.look, aspectRatio: props.aspectRatio, epoch: 0 });
   const changeAspect = useCallback(
     async (next: AspectRatio, flush: () => Promise<boolean>) => {
@@ -82,7 +84,7 @@ function LookHost(props: { formatId: string; formatName: string; brand: string; 
   );
 }
 
-function LookEditor(props: { formatId: string; formatName: string; brand: string; look: ClipLook | null; aspectRatio: AspectRatio; onSaved: () => void; onClose: () => void; intro: string | null; onChangeAspect: (next: AspectRatio, flush: () => Promise<boolean>) => Promise<void> }) {
+function LookEditor(props: { formatId: string; formatName: string; brand: string; look: ClipLook | null; aspectRatio: AspectRatio; onSaved: () => void; onClose: () => void; intro: string | null; onBack: (() => void) | null; onChangeAspect: (next: AspectRatio, flush: () => Promise<boolean>) => Promise<void> }) {
   const [store] = useState(() => createEditorStore({ doc: buildLookPreviewDoc(props.look, props.aspectRatio), revision: 0 }));
   return (
     <EditorStoreContext.Provider value={store}>
@@ -91,7 +93,7 @@ function LookEditor(props: { formatId: string; formatName: string; brand: string
   );
 }
 
-function LookWorkspace({ formatId, formatName, brand, onSaved, onClose, intro, aspectRatio, onChangeAspect }: { formatId: string; formatName: string; brand: string; onSaved: () => void; onClose: () => void; intro: string | null; aspectRatio: AspectRatio; onChangeAspect: (next: AspectRatio, flush: () => Promise<boolean>) => Promise<void> }) {
+function LookWorkspace({ formatId, formatName, brand, onSaved, onClose, intro, onBack, aspectRatio, onChangeAspect }: { formatId: string; formatName: string; brand: string; onSaved: () => void; onClose: () => void; intro: string | null; onBack: (() => void) | null; aspectRatio: AspectRatio; onChangeAspect: (next: AspectRatio, flush: () => Promise<boolean>) => Promise<void> }) {
   const storeApi = useEditorStoreApi();
   // View-only users can look at the format's clip look, not change it.
   const viewOnly = !useCanEditBrand(brand);
@@ -169,6 +171,22 @@ function LookWorkspace({ formatId, formatName, brand, onSaved, onClose, intro, a
   return (
     <>
       <header className="flex items-center gap-3 border-b border-border px-4 py-2.5">
+        {onBack && !viewOnly && (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-7 px-2 text-xs"
+            onClick={async () => {
+              if (!(await save())) return void toast.error("Couldn't save the look — try again");
+              onClose();
+              onBack();
+            }}
+            data-testid="clip-look-back"
+          >
+            ← Back to format setup
+          </Button>
+        )}
         <DialogTitle className="text-sm font-semibold">Clip look</DialogTitle>
         <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">{formatName}</span>
         <div className="ml-2 flex items-center gap-0.5 rounded-md bg-muted p-0.5" role="group" aria-label="Video shape" data-testid="clip-look-shape">

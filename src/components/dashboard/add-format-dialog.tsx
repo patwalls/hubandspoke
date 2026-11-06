@@ -36,6 +36,7 @@ import {
   formatPlatform,
 } from "@/lib/format-kinds";
 import { SkillGuideEditor } from "./skill-guide-editor";
+import { lookFromSuggestion, type LookSuggestion } from "@/lib/clip-editor/look-from-example";
 
 // ── Drafts ──────────────────────────────────────────────────────────────
 // Per browser (localStorage), per brand + platform (+ preset parent): a
@@ -336,6 +337,8 @@ export function AddFormatDialog({
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The clip look the AI read off uploaded examples (clip formats only).
+  const [exampleLook, setExampleLook] = useState<LookSuggestion | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -444,6 +447,19 @@ export function AddFormatDialog({
   const designsNext =
     (kind.designer === "clip" && !!flags?.clipEditor) || (kind.designer === "design" && !!flags?.designEditor);
 
+  /** Write the examples' look to the format's clip look (clip kinds only). */
+  async function saveExampleLook(formatId: string) {
+    if (!exampleLook || kind.family !== "clip") return;
+    const built = lookFromSuggestion(exampleLook);
+    if (!built) return;
+    await fetch(`/api/formats/${formatId}/clip-template`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ look: built.look }),
+    }).catch(() => null);
+  }
+  const exampleAspect = kind.family === "clip" && exampleLook ? exampleLook.aspectRatio : null;
+
   async function saveEdit(design: boolean) {
     if (!ready || !editing) return;
     setSaving(true);
@@ -462,10 +478,12 @@ export function AddFormatDialog({
           // Only a Type change rewrites the fixed settings — otherwise a
           // shape picked in the clip look (say vertical on X) is kept.
           ...(kind.key !== editing.kindKey ? formatKindSettings(kind) : {}),
+          ...(exampleAspect ? { clipAspectRatio: exampleAspect } : {}),
         }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
+      await saveExampleLook(editing.id);
       toast.success("Format saved");
       onSaved?.(design);
       onClose();
@@ -491,10 +509,13 @@ export function AddFormatDialog({
           viewThreshold: viewThreshold ? parseInt(viewThreshold, 10) : null,
           instructions: instructions.trim() || null,
           ...formatKindSettings(kind),
+          // The examples showed the shape — it beats the platform default.
+          ...(exampleAspect ? { clipAspectRatio: exampleAspect } : {}),
         }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json.id) throw new Error(json?.error ?? `HTTP ${res.status}`);
+      await saveExampleLook(json.id);
       clearDraft(key);
       onClose();
       router.push(
@@ -707,6 +728,8 @@ export function AddFormatDialog({
                   kindLabel={kind.label}
                   formatName={name}
                   onSuggestName={(n) => setName((cur) => cur.trim() ? cur : n)}
+                  onLook={kind.family === "clip" ? (l) => setExampleLook(l) : undefined}
+                  lookMode={editing ? "offer" : "auto"}
                   rows={10}
                   textareaClassName="max-h-72"
                   testId="add-format-skill"

@@ -15,6 +15,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import type { FormatFamily } from "@/lib/format-kinds";
 import { SET_ELSEWHERE, SKILL_EXAMPLE, SKILL_QUESTIONS } from "@/lib/format-skill-guide";
+import { describeLookSuggestion, type LookSuggestion } from "@/lib/clip-editor/look-from-example";
 
 const MAX_IMAGES = 6;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
@@ -48,6 +49,8 @@ export function SkillGuideEditor({
   kindLabel,
   formatName,
   onSuggestName,
+  onLook,
+  lookMode = "auto",
   readOnly,
   rows = 10,
   textareaClassName,
@@ -64,6 +67,11 @@ export function SkillGuideEditor({
   formatName?: string | null;
   /** The AI's name suggestion, for a dialog whose Name is still empty. */
   onSuggestName?: (name: string) => void;
+  /** Clip formats, "Upload examples": the look the AI read off the examples.
+   *  "auto" hands it over straight away (a new format has no look yet);
+   *  "offer" shows a button, so an existing look is never replaced silently. */
+  onLook?: (look: LookSuggestion) => void | Promise<void>;
+  lookMode?: "auto" | "offer";
   readOnly?: boolean;
   rows?: number;
   textareaClassName?: string;
@@ -81,6 +89,7 @@ export function SkillGuideEditor({
   const [building, setBuilding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [previous, setPrevious] = useState<string | null>(null);
+  const [lookFound, setLookFound] = useState<{ look: LookSuggestion; applied: boolean } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const imagesRef = useRef(images);
@@ -144,6 +153,10 @@ export function SkillGuideEditor({
       onChange(json.skill);
       onCommit?.(json.skill);
       if (json.suggestedName && !formatName?.trim()) onSuggestName?.(json.suggestedName);
+      if (json.look && onLook) {
+        if (lookMode === "auto") await onLook(json.look);
+        setLookFound({ look: json.look, applied: lookMode === "auto" });
+      }
       setBuilderOpen(false);
     } catch (e) {
       setError((e as Error).message);
@@ -367,6 +380,28 @@ export function SkillGuideEditor({
           <p className="text-[11px] text-muted-foreground">
             Write it like you&apos;re explaining the format to a new editor. Plain sentences are perfect.
           </p>
+          {lookFound && (
+            <div className="flex flex-wrap items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900" data-testid={testId ? `${testId}-look-found` : undefined}>
+              <span className="flex-1">
+                {lookFound.applied ? "The clip look will start from your examples: " : "Your examples' clip look: "}
+                {describeLookSuggestion(lookFound.look)}.
+              </span>
+              {!lookFound.applied && onLook && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 bg-background text-xs"
+                  onClick={async () => {
+                    await onLook(lookFound.look);
+                    setLookFound({ ...lookFound, applied: true });
+                  }}
+                >
+                  Use it for the clip look
+                </Button>
+              )}
+            </div>
+          )}
         </>
       )}
     </div>

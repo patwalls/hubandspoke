@@ -195,7 +195,8 @@ export async function getClippableFormatBySlug(
 /**
  * Resolve the aspect ratio for clips in this format. Falls back to a
  * post_type-derived default when the format hasn't set one explicitly:
- * 9:16 for Reel/Shorts/TikTok, 16:9 for X / YouTube long. Default 9:16.
+ * 9:16 for Reel/Shorts/TikTok, 16:9 for X / LinkedIn / Threads / YouTube
+ * long. Default 9:16.
  * Used by Descript composition builders so a clip's frame matches the
  * intended surface without operators having to set the column on every
  * format.
@@ -213,6 +214,6 @@ export function resolveClipAspectRatio(
   ) {
     return "9:16";
   }
-  if (pt === "x" || pt === "youtube_long") return "16:9";
+  if (pt === "x" || pt === "youtube_long" || pt === "linkedin" || pt === "threads") return "16:9";
   return "9:16";
 }

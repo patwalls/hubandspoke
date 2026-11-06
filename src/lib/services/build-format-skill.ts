@@ -9,6 +9,8 @@
 // Mirrors derivative-hook.ts: one pinned tool, fail-soft `{ ok: false }`.
 import Anthropic from "@anthropic-ai/sdk";
 import type { FormatFamily } from "@/lib/format-kinds";
+import { FONT_IDS } from "@/lib/clip-editor/doc";
+import { lookSuggestionSchema, type LookSuggestion } from "@/lib/clip-editor/look-from-example";
 
 const MODEL = "claude-haiku-5-5";
 const MAX_TOKENS = 1500;
@@ -34,7 +36,7 @@ export interface BuildFormatSkillArgs {
 }
 
 export type BuildFormatSkillResult =
-  | { ok: true; skill: string; suggestedName: string | null }
+  | { ok: true; skill: string; suggestedName: string | null; look: LookSuggestion | null }
   | { ok: false; failure: { reason: "nothing-to-go-on" } | { reason: "llm-empty" } | { reason: "llm-error"; message: string } };
 
 const FAMILY_CONTEXT: Record<FormatFamily, string> = {
@@ -59,6 +61,67 @@ NEVER
 - Leave out what other tools own: exact hook wording, clip length, caption/text styling, fonts, slide layout or per-slide copy, and CTA links.
 
 Always call return_skill exactly once.`;
+
+/** Fonts the clip editor has, described so the model can pick the closest. */
+const FONT_HINTS: Record<(typeof FONT_IDS)[number], string> = {
+  "montserrat-extrabold": "heavy geometric sans (the common social-video bold)",
+  "montserrat-bold": "bold geometric sans",
+  "montserrat-semibold": "medium-heavy geometric sans",
+  "montserrat-medium": "regular geometric sans",
+  "poppins-extrabold": "heavy rounded geometric sans",
+  "poppins-semibold": "rounded geometric sans",
+  "archivo-black": "very wide, very heavy sans",
+  anton: "tall condensed heavy sans",
+  "bebas-neue": "tall condensed all-caps sans",
+  bangers: "comic-book display",
+  "dm-serif-display": "elegant high-contrast serif",
+  "permanent-marker": "handwritten marker",
+  "inter-bold": "neutral UI sans, bold",
+  "inter-semibold": "neutral UI sans, semibold",
+  "inter-regular": "neutral UI sans, regular",
+};
+
+const TEXT_LOOK_SCHEMA = {
+  type: "object" as const,
+  properties: {
+    present: { type: "boolean", description: "Whether the examples show this text at all." },
+    fontId: { type: "string", enum: [...FONT_IDS], description: "Closest font: " + Object.entries(FONT_HINTS).map(([k, v]) => `${k} = ${v}`).join("; ") },
+    color: { type: "string", description: "Text colour as #RRGGBB." },
+    style: { type: "string", enum: ["clean", "outline", "boxed"], description: "clean = no outline (maybe a soft shadow); outline = thick dark outline; boxed = a solid box behind the text." },
+    boxColor: { type: "string", description: "Box colour #RRGGBB when style is boxed." },
+    uppercase: { type: "boolean" },
+    position: { type: "string", enum: ["top", "middle", "bottom"], description: "Where it sits in the frame." },
+  },
+  required: ["present"],
+};
+
+const LOOK_TOOL_PROPERTY = {
+  type: "object" as const,
+  description:
+    "What the example CLIPS look like, so the clip editor can start from it. Only what you can actually see; omit fields you can't tell.",
+  properties: {
+    aspectRatio: { type: "string", enum: ["9:16", "16:9"], description: "The clip's frame: 9:16 vertical (phone-shaped) or 16:9 horizontal (landscape)." },
+    background: { type: "string", description: "Colour behind the video (e.g. bars around it) as #RRGGBB, if any." },
+    hook: { ...TEXT_LOOK_SCHEMA, description: "The big headline/hook text that stays on screen." },
+    captions: {
+      ...TEXT_LOOK_SCHEMA,
+      description: "The word-by-word subtitles of what's being said.",
+      properties: {
+        ...TEXT_LOOK_SCHEMA.properties,
+        highlightColor: { type: "string", description: "#RRGGBB of the highlighted current word, if words light up; omit if not." },
+        wordsPerCue: { type: "integer", minimum: 1, maximum: 8, description: "Roughly how many words show at once." },
+      },
+    },
+  },
+  required: ["aspectRatio"],
+};
+
+function toolsFor(withLook: boolean): Anthropic.Tool[] {
+  if (!withLook) return TOOLS;
+  const [t] = TOOLS;
+  const schema = t.input_schema as { type: "object"; properties: Record<string, unknown>; required: string[] };
+  return [{ ...t, input_schema: { ...schema, properties: { ...schema.properties, look: LOOK_TOOL_PROPERTY } } }];
+}
 
 const TOOLS: Anthropic.Tool[] = [
   {
@@ -120,6 +183,9 @@ export async function buildFormatSkill(args: BuildFormatSkillArgs): Promise<Buil
     return { ok: false, failure: { reason: "nothing-to-go-on" } };
   }
   const client = args.client ?? new Anthropic();
+  // Examples for a clip format: also read the clips' look (shape, hook and
+  // caption styling) so the clip editor can start from it.
+  const withLook = !!args.fromExamples && args.family === "clip" && images.length > 0;
   const text = buildSkillUserText({ ...args, imageCount: images.length });
   const content: Anthropic.ContentBlockParam[] = [
     { type: "text", text },
@@ -139,16 +205,17 @@ export async function buildFormatSkill(args: BuildFormatSkillArgs): Promise<Buil
       model: MODEL,
       max_tokens: MAX_TOKENS,
       system: SYSTEM_PROMPT,
-      tools: TOOLS,
+      tools: toolsFor(withLook),
       tool_choice: { type: "tool", name: "return_skill" },
       messages: [{ role: "user", content }],
     });
     const block = res.content.find((b): b is Anthropic.ToolUseBlock => b.type === "tool_use");
-    const input = (block?.input ?? {}) as { skill?: string; suggested_name?: string };
+    const input = (block?.input ?? {}) as { skill?: string; suggested_name?: string; look?: unknown };
     const skill = plainSkillText(input.skill ?? "");
     if (!skill) return { ok: false, failure: { reason: "llm-empty" } };
     const name = (input.suggested_name ?? "").trim();
-    return { ok: true, skill, suggestedName: name || null };
+    const lookParsed = withLook ? lookSuggestionSchema.safeParse(input.look) : null;
+    return { ok: true, skill, suggestedName: name || null, look: lookParsed?.success ? lookParsed.data : null };
   } catch (err) {
     return { ok: false, failure: { reason: "llm-error", message: err instanceof Error ? err.message : String(err) } };
   }
