@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { AssistantToolCall } from "@/lib/db/schema";
 import { ASSISTANT_TOOLS, runAssistantTool, toolStatus, type AssistantToolContext } from "@/lib/assistant/tools";
+import type { CardBlock } from "@/lib/assistant/cards";
 
 /**
  * Hub & Spoke Assistant: answers "how does this work / how do I…" from the
@@ -14,6 +15,7 @@ const MAX_TOOL_ROUNDS = 6;
 export type AssistantEvent =
   | { type: "status"; text: string }
   | { type: "text"; text: string }
+  | { type: "cards"; block: CardBlock }
   | { type: "done" }
   | { type: "error"; message: string };
 
@@ -34,14 +36,16 @@ Who you help: editors, producers and publishers using the app. Most are not tech
 How to answer:
 - For "how does X work", "how do I…", or "what does Y mean": call search_help first, and answer from what it returns. If an Academy video covers it, link it: [Video title](url).
 - For questions about their actual content ("what's waiting for me?", "what did we publish on X?"): use the content tools. Link items with their app_url.
-- For totals ("how many views did Starter Story get in the last 30 days?", "how many Shorts did we post this month?"): use content_totals — it returns the same numbers as the dashboard. Never add up search_content rows for a total. Say what the number means in one short line (views of content published in that period), and show the top accounts if helpful. If a brand name is ambiguous, check list_brands for the slug.
+- For totals ("how many views did Starter Story get in the last 30 days?", "how many Shorts did we post this month?"): use content_totals — it returns the same numbers as the dashboard. Never add up search_content rows for a total. If a brand name is ambiguous, check list_brands for the slug.
+- "Top" / "best" / "bangers" means highest views: use search_content with sort=views and the date range, filtering by post_type as asked (short-form = everything except youtube_long; run one search per platform if needed and pick the top overall).
 - Explain in plain language, as steps when it's a how-to ("Go to your brand → Accounts → Goals"). Never mention code, file names, database tables, API routes, workers, or other internals that appear in the docs — translate them into what the person sees and clicks.
 - You can't change anything — you only read. If they ask you to do something, tell them exactly where to do it in the app.
 - If the help and the data don't answer it, say you're not sure and suggest asking Sam or checking the Academy. Never invent features, settings, buttons or numbers.
 - Be brief: a few sentences or a short list. Use Markdown (bold, lists, links). Don't repeat the question.
-- Formatting data: answers show in a narrow chat window, so NEVER use Markdown tables. For rankings or lists of posts use a numbered list, one item per line: the linked title in bold, then the details on the same line separated by " · ", e.g.
-  1. **[What Elon Musk would do if he lost everything](url)** — Instagram Reel · 1.09M views · 44.7K likes
-  Round big numbers (1.09M, 44.7K). For a single total, lead with the number in bold. Keep it to the top 10 unless they ask for more.`;
+- Showing data — the app draws it for you, Starter Story style:
+  - Lists of posts (top posts, what's waiting, what we published): find them with search_content / my_work, then call show_content_cards with the ids in the order to show (max 10). The cards show thumbnail, linked title, platform, views, likes and date from the database. Your text is then ONE or TWO sentences of takeaway (what stands out, a pattern) — never re-list the posts, never a table.
+  - Totals: content_totals shows a stats card automatically (big number, posts / clicks / leads, top accounts). Your text is the takeaway plus one short line on what the number means. Don't restate every number.
+  - Never use Markdown tables; the answer shows in a narrow chat window.`;
 
 function systemPrompt(ctx: AssistantToolContext & { userName?: string | null }): Anthropic.TextBlockParam[] {
   return [
@@ -118,7 +122,10 @@ export async function runAssistant(
     for (const call of calls) {
       emit({ type: "status", text: toolStatus(call.name) });
       const started = Date.now();
-      const out = await runAssistantTool(call.name, call.input as Record<string, unknown>, ctx);
+      const out = await runAssistantTool(call.name, call.input as Record<string, unknown>, {
+        ...ctx,
+        onCards: (block) => emit({ type: "cards", block }),
+      });
       result.toolCalls.push({ name: call.name, ok: out.ok, ms: Date.now() - started });
       results.push({ type: "tool_result", tool_use_id: call.id, content: out.text, is_error: !out.ok });
     }

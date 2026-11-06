@@ -10,6 +10,7 @@ import { rankPassages, searchFeatureDocs } from "@/lib/assistant/help-search";
 import { getContentReportCached } from "@/lib/db/queries-cached";
 import { getContentReport } from "@/lib/db/queries";
 import { todayInclusiveOfUtc } from "@/lib/dates";
+import type { CardBlock, ContentCard } from "@/lib/assistant/cards";
 
 /**
  * The assistant's tools. READ-ONLY by design: help search (docs + Academy)
@@ -21,6 +22,8 @@ import { todayInclusiveOfUtc } from "@/lib/dates";
 export interface AssistantToolContext {
   userId: string;
   baseUrl: string;
+  /** Receives result cards to show under the answer (see cards.ts). */
+  onCards?: (block: CardBlock) => void;
 }
 
 /** Keep tool results small: a model reads them and they cost tokens. */
@@ -75,6 +78,19 @@ export const ASSISTANT_TOOLS: Anthropic.Tool[] = [
         post_type: str("Optional post_type, e.g. youtube_shorts or instagram_reel"),
       },
       required: ["brand", "start_date"],
+    },
+  },
+  {
+    name: "show_content_cards",
+    description:
+      "Show content items as cards under your answer (thumbnail, linked title, platform, views, likes, date — straight from the database). Use this WHENEVER your answer lists posts (top posts, what's waiting, what we published): pass the ids in the order to show. Then write only a 1-2 sentence takeaway — don't repeat the list in text.",
+    input_schema: {
+      type: "object",
+      properties: {
+        heading: str("Short heading for the cards, e.g. 'Top short-form posts · Oct 7 – Nov 6'"),
+        ids: { type: "array", items: { type: "string" }, maxItems: 10, description: "Content item ids, in display order (max 10)" },
+      },
+      required: ["ids"],
     },
   },
   { name: "get_content", description: "Full detail for one content item.", input_schema: { type: "object", properties: { id: uuid }, required: ["id"] } },
@@ -152,7 +168,7 @@ function sumMetric(data: Record<string, Record<string, number>>) {
 }
 
 /** Dashboard numbers for a period, via the dashboard's own report query. */
-async function contentTotals(a: Args) {
+async function contentTotals(a: Args, ctx: AssistantToolContext) {
   const brand = s(a.brand) ?? "all";
   const startDate = ymd(a.start_date);
   const endDate = ymd(a.end_date, todayInclusiveOfUtc());
@@ -189,14 +205,52 @@ async function contentTotals(a: Args) {
       .filter(([, v]) => v > 0)
       .sort((x, y) => y[1] - x[1])
       .slice(0, n);
+  const fromDate = report.clampedStartDate ?? startDate;
+  const byAccount = top(views.rows, 15).map(([account, v]) => ({ account, posts: posts.rows[account] ?? 0, views: v }));
+  ctx.onCards?.({
+    kind: "stats",
+    stats: {
+      label: [brand === "all" ? "All brands" : brand, s(a.platform), s(a.post_type)].filter(Boolean).join(" · "),
+      range: `${fromDate} – ${endDate}`,
+      totals: { posts: posts.total, views: views.total, clicks: clicks.total, leads: leads.total },
+      breakdown: byAccount.slice(0, 5).map((r) => ({ name: r.account, posts: r.posts, views: r.views })),
+    },
+  });
   return {
+    shown_to_user_as_stats_card: true,
     brand,
-    start_date: report.clampedStartDate ?? startDate,
+    start_date: fromDate,
     end_date: endDate,
     meaning: "Posts = items published in the range. Views/clicks/leads = latest synced totals of the content published in the range (same as the dashboard), not views earned during the range by older content.",
     totals: { posts: posts.total, views: views.total, clicks: clicks.total, leads: leads.total },
-    by_account: top(views.rows, 15).map(([account, v]) => ({ account, posts: posts.rows[account] ?? 0, views: v })),
+    by_account: byAccount,
     by_format: top(formatViews.rows, 10).map(([format, v]) => ({ format, posts: formatPosts.rows[format] ?? 0, views: v })),
+  };
+}
+
+/** Resolve ids to real rows and show them as cards; tell the model what was shown. */
+async function showContentCards(a: Args, ctx: AssistantToolContext) {
+  const ids = (Array.isArray(a.ids) ? a.ids : []).filter((x): x is string => typeof x === "string").slice(0, 10);
+  const rows = await Promise.all(ids.map((id) => getContent(id, ctx.baseUrl).catch(() => null)));
+  const items: ContentCard[] = rows
+    .filter((r): r is NonNullable<typeof r> => r !== null)
+    .map((r) => ({
+      id: r.id,
+      title: r.title,
+      app_url: r.app_url,
+      post_type: r.post_type,
+      account: r.account ? `@${r.account.handle}` : null,
+      thumbnail_url: r.thumbnail_url,
+      published_at: r.published_at,
+      views: r.metrics.views,
+      likes: r.metrics.likes,
+    }));
+  if (items.length > 0) ctx.onCards?.({ kind: "content", heading: s(a.heading) ?? null, items });
+  return {
+    shown: items.length,
+    not_found: ids.length - items.length,
+    items: items.map((i) => ({ id: i.id, title: i.title, views: i.views })),
+    note: "These are now visible to the person as cards. Write only a short takeaway; don't list them again.",
   };
 }
 
@@ -237,7 +291,9 @@ async function run(name: string, a: Args, ctx: AssistantToolContext): Promise<un
       return { items: page.data.map(compact), has_more: page.has_more };
     }
     case "content_totals":
-      return contentTotals(a);
+      return contentTotals(a, ctx);
+    case "show_content_cards":
+      return showContentCards(a, ctx);
     case "get_content":
       return getContent(id, ctx.baseUrl);
     case "get_transcript":
@@ -287,6 +343,8 @@ export function toolStatus(name: string): string {
       return "Reading transcripts…";
     case "content_totals":
       return "Adding up the numbers…";
+    case "show_content_cards":
+      return "Pulling up the posts…";
     default:
       return "Looking up your content…";
   }

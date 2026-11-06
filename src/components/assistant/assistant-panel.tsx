@@ -5,6 +5,8 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ArrowUp, MessageCircle, RotateCcw, Sparkles, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import type { CardBlock } from "@/lib/assistant/cards";
+import { AssistantCards } from "@/components/assistant/assistant-cards";
 
 /** Dispatch on window to open the panel, optionally with a question to ask. */
 export const OPEN_ASSISTANT_EVENT = "hs:open-assistant";
@@ -12,7 +14,7 @@ export function openAssistant(question?: string) {
   window.dispatchEvent(new CustomEvent(OPEN_ASSISTANT_EVENT, { detail: { question } }));
 }
 
-type Turn = { role: "user" | "assistant"; content: string; error?: boolean };
+type Turn = { role: "user" | "assistant"; content: string; error?: boolean; blocks?: CardBlock[] };
 
 const SUGGESTIONS = [
   "How do cross-posts work?",
@@ -92,7 +94,7 @@ export function AssistantPanel() {
         buffer = lines.pop() ?? "";
         for (const line of lines) {
           if (!line.trim()) continue;
-          const event = JSON.parse(line) as { type: string; text?: string; message?: string };
+          const event = JSON.parse(line) as { type: string; text?: string; message?: string; block?: CardBlock };
           if (event.type === "status") setStatus(event.text ?? null);
           else if (event.type === "text") {
             setStatus(null);
@@ -220,6 +222,7 @@ export function AssistantPanel() {
                       {t.content}
                     </ReactMarkdown>
                   ) : null}
+                  {t.blocks && t.blocks.length > 0 && <AssistantCards blocks={t.blocks} />}
                   {i === turns.length - 1 && status && <p className="animate-pulse text-xs text-muted-foreground">{status}</p>}
                 </div>
               ),
