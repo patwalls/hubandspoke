@@ -104,7 +104,7 @@ export function AcademySidebar({
   const shown = canEdit ? order : order.filter((c) => c.videos.length > 0);
 
   return (
-    <aside className="hidden w-64 shrink-0 lg:block">
+    <aside className="hidden w-80 shrink-0 lg:block">
       <nav
         className="sticky top-20 max-h-[calc(100vh-6rem)] space-y-6 overflow-y-auto pb-8 pr-2"
         aria-label="Academy"

@@ -5,8 +5,8 @@
 export const GUIDE_PROSE = [
   "text-[15px] leading-relaxed text-foreground/90",
   "[&>*+*]:mt-3",
-  "[&_h2]:mt-8 [&_h2]:text-lg [&_h2]:font-semibold [&_h2]:tracking-tight [&_h2]:text-foreground [&>h2:first-child]:mt-0",
-  "[&_h3]:mt-5 [&_h3]:text-base [&_h3]:font-semibold [&_h3]:text-foreground",
+  "[&_h2]:mt-10 [&_h2]:text-[26px] [&_h2]:leading-tight [&_h2]:font-semibold [&_h2]:tracking-tight [&_h2]:text-foreground [&>h2:first-child]:mt-0",
+  "[&_h3]:mt-7 [&_h3]:text-[19px] [&_h3]:leading-snug [&_h3]:font-semibold [&_h3]:tracking-tight [&_h3]:text-foreground [&>h3:first-child]:mt-0",
   "[&_strong]:font-semibold [&_strong]:text-foreground",
   "[&_a]:font-medium [&_a]:text-orange-600 [&_a]:underline-offset-2 hover:[&_a]:underline",
   "[&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5 [&_li]:mt-1 [&_li>p]:m-0",

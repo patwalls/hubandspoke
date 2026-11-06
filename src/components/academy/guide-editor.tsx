@@ -176,7 +176,7 @@ export function GuideEditor({ value, onChange }: { value: string; onChange: (htm
     ],
     content: value || "",
     editorProps: {
-      attributes: { class: cn(GUIDE_PROSE, "min-h-48 px-4 py-3 outline-none") },
+      attributes: { class: cn("academy-guide", GUIDE_PROSE, "min-h-48 px-4 py-3 outline-none") },
       handlePaste: (_view, event) => {
         const files = imageFiles(event.clipboardData?.files);
         if (files.length === 0) return false;

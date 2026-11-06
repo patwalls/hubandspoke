@@ -193,6 +193,12 @@
 .tiptap img {
   @apply rounded border border-border max-w-full sm:max-w-sm h-auto my-2 block;
 }
+/* The Academy guide editor (guide-editor.tsx) styles itself with GUIDE_PROSE so it
+   looks like the published guide. These compact comment-box rules are unlayered, so
+   they'd beat those Tailwind classes — drop them back to the layered styles here. */
+.tiptap.academy-guide :is(h1, h2, h3, ul, ol, a, img, blockquote) {
+  all: revert-layer;
+}
 /* The newsletter editor's in-place text (rich-section-editor.tsx): the email's own
    type scale (newsletter-email-html.ts tokens), not the comment box's compact one. */
 .tiptap.nl-rich p {
