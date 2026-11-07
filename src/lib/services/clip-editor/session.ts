@@ -18,6 +18,8 @@ import { resolveClipAspectRatio } from "@/lib/db/formats";
 import { getPresignedGetUrl } from "@/lib/s3";
 import { applyLook, clipLookSchema, createDefaultDoc, parseDoc, type ClipEditDoc } from "@/lib/clip-editor/doc";
 import { resolveTranscriptWords, type EditorWord } from "@/lib/clip-editor/words";
+import { MIN_TRIM_SEC, MIN_TRIM_SHARE } from "@/lib/clip-editor/trim-habits";
+import { loadTrimHabits } from "./trim-habits";
 import { brandSpellingDocs, carrySiblingFixes } from "@/lib/clip-editor/carry-fixes";
 import { loadBrandSpellings } from "./brand-spellings";
 import type { TranscriptSpeaker } from "@/lib/diarization/types";
@@ -73,6 +75,11 @@ export interface ClipEditorSession {
   brand: string;
   /** The target format's saved look (what new edits start from), if any. */
   formatLook: { formatId: string; savedAt: string | null } | null;
+  /** clip-trim M4: this format's median opening cut, offered as one-click
+   *  "Skip the run-up" on ideas written before the writer learned it
+   *  (hook-v1–v3). Null for newer ideas, other kinds of idea, or a format
+   *  whose editors rarely cut the opening. */
+  runUpHabit?: { headSec: number; headCut: number; clips: number } | null;
   edit: { id: string; revision: number; doc: ClipEditDoc };
   /** A browser URL per image layer id in the doc (logos). Layers added in
    *  the session bring their own URL from the logo picker. */
@@ -135,6 +142,7 @@ export async function loadClipEditorSession(args: {
       endSec: clipIdeas.endSec,
       hookSegments: clipIdeas.hookSegments,
       targetFormat: clipIdeas.targetFormat,
+      generatedBy: clipIdeas.generatedBy,
       acceptedProductionItemId: clipIdeas.acceptedProductionItemId,
       supportingMoments: clipSections.supportingMoments,
       sectionKilledAt: clipSections.killedAt,
@@ -270,6 +278,7 @@ export async function loadClipEditorSession(args: {
     },
     brand,
     formatLook: await loadFormatLookInfo(brand, row.targetFormat),
+    runUpHabit: await loadRunUpHabit(brand, row.targetFormat, row.generatedBy),
     // Opening the editor is the moment the post gets drafted (it used to
     // wait for export), so the Post tab has copy to show by the time the
     // cut is done.
@@ -315,6 +324,25 @@ async function resolveMediaUrls(doc: ClipEditDoc): Promise<Record<string, string
   const out: Record<string, string> = {};
   for (const m of doc.media) out[m.id] = await getPresignedGetUrl(m.key, 4 * 3600);
   return out;
+}
+
+/** Ideas from hook-v4 on were written knowing the format's trim habit. */
+const TRIM_AWARE_HOOK_VERSION = 4;
+
+async function loadRunUpHabit(
+  brand: string,
+  targetFormat: string | null,
+  generatedBy: string | null,
+): Promise<ClipEditorSession["runUpHabit"]> {
+  const v = generatedBy?.match(/:hook-v(\d+)$/);
+  if (!targetFormat || !v || Number(v[1]) >= TRIM_AWARE_HOOK_VERSION) return null;
+  try {
+    const s = await loadTrimHabits({ brand, formatName: targetFormat });
+    if (!s || s.headCut / s.clips < MIN_TRIM_SHARE || s.medianHeadSec < MIN_TRIM_SEC) return null;
+    return { headSec: s.medianHeadSec, headCut: s.headCut, clips: s.clips };
+  } catch {
+    return null; // fail-soft: the editor opens without the offer
+  }
 }
 
 async function loadFormatLookInfo(brand: string, targetFormat: string | null): Promise<{ formatId: string; savedAt: string | null } | null> {

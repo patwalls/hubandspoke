@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createDefaultDoc, type ClipEditDoc } from "./doc";
-import { clipTrim, summarizeTrims, trimHabitsBlock, trimHabitsLine } from "./trim-habits";
+import { clipTrim, runUpSkip, summarizeTrims, trimHabitsBlock, trimHabitsLine } from "./trim-habits";
 
 const IDEA = { startSec: 100, endSec: 160 };
 const doc = (): ClipEditDoc => structuredClone(createDefaultDoc({ startSec: 100, endSec: 160, hook: "h" }));
@@ -96,5 +96,43 @@ describe("trimHabitsLine (the format page's line, clip-trim M2)", () => {
   it("no habit → no line (nothing on the page)", () => {
     expect(trimHabitsLine(null)).toBeNull();
     expect(trimHabitsLine({ ...S, headCut: 4, tailCut: 4 })).toBeNull();
+  });
+});
+
+describe("runUpSkip (editor: skip the run-up, M4)", () => {
+  // One word per second from 100 s; sentences end at 104 ("four."), 109 and 120.
+  const words = Array.from({ length: 60 }, (_, i) => ({
+    text: [104, 109, 120].includes(100 + i) ? "end." : "word",
+    startSec: 100 + i,
+  }));
+
+  it("cuts to the sentence start nearest the format's median head cut", () => {
+    // median 9 s → target 109; sentence starts at 105, 110, 121 → 110 is nearest.
+    expect(runUpSkip(IDEA, doc(), words, 9)).toEqual({ sectionId: "body", range: { startSec: 100, endSec: 110 } });
+  });
+
+  it("isn't offered when the editor already cut the opening", () => {
+    expect(runUpSkip(IDEA, cut(doc(), 100, 112), words, 9)).toBeNull();
+  });
+
+  it("isn't offered with no sentence start in reach, or for a habit under 3 s", () => {
+    const flat = words.map((w) => ({ ...w, text: "word" }));
+    expect(runUpSkip(IDEA, doc(), flat, 9)).toBeNull();
+    expect(runUpSkip(IDEA, doc(), words, 2)).toBeNull();
+  });
+
+  it("never leaves the clip under 25 s", () => {
+    // A 28 s clip can lose at most 3 s; the first sentence start (105) would leave 23 s.
+    const short = { startSec: 100, endSec: 128 };
+    const d = structuredClone(createDefaultDoc({ startSec: 100, endSec: 128, hook: "h" }));
+    expect(runUpSkip(short, d, words, 9)).toBeNull();
+    // At 30 s, cutting to 105 leaves exactly 25 s — offered.
+    const ok = structuredClone(createDefaultDoc({ startSec: 100, endSec: 130, hook: "h" }));
+    expect(runUpSkip({ startSec: 100, endSec: 130 }, ok, words, 9)?.range).toEqual({ startSec: 100, endSec: 105 });
+  });
+
+  it("ignores an uploaded clip's words", () => {
+    const up = words.map((w) => ({ ...w, mediaId: "m1" }));
+    expect(runUpSkip(IDEA, doc(), up, 9)).toBeNull();
   });
 });

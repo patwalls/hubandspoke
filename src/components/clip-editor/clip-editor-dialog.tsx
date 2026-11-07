@@ -52,6 +52,8 @@ import { placeNoteOnDraft } from "@/lib/clip-editor/review-notes";
 import { resolveScene } from "@/lib/clip-editor/scene";
 import { buildTranscriptView } from "@/lib/clip-editor/transcript-view";
 import { findSilences, mediaEditorWords, rangeForWordRun } from "@/lib/clip-editor/words";
+import { runUpSkip } from "@/lib/clip-editor/trim-habits";
+import { addRemoval } from "@/lib/clip-editor/removals";
 import type { ClipEditorSession } from "@/lib/services/clip-editor/session";
 import { Inspector } from "./inspector";
 import { clearBackup, takeBackup, writeBackup } from "./local-backup";
@@ -290,6 +292,22 @@ function EditorWorkspace({
     );
   }, [session.speakers]);
   const locked = saveState === "conflict" || viewOnly;
+  // clip-trim M4: on ideas written before the writer learned this format's
+  // opening cut, one click cuts the run-up to the nearest sentence start.
+  // Follows the doc, so undo (or cutting the opening by hand) settles it.
+  const runUpHabit = session.runUpHabit ?? null;
+  const skip = useMemo(
+    () => (runUpHabit ? runUpSkip(session.clipIdea, doc, session.words, runUpHabit.headSec) : null),
+    [runUpHabit, session.clipIdea, doc, session.words],
+  );
+  const skipRunUp = () => {
+    if (!skip) return;
+    apply((d) => ({
+      ...d,
+      sections: d.sections.map((s) => (s.id === skip.sectionId ? addRemoval(s, skip.range, "manual") : s)),
+    }));
+    trackUsage("clip-editor:skip-run-up", brand);
+  };
   const isReExport = session.clipIdea.status !== "suggested";
 
   useEffect(() => {
@@ -830,6 +848,24 @@ function EditorWorkspace({
                   Apply {offer.names.length === 1 ? "fix" : `${offer.names.length} fixes`}
                 </button>
               )}
+            </p>
+          )}
+          {skip && runUpHabit && (
+            <p data-testid="skip-run-up" className="mb-2 flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+              <span
+                className="truncate"
+                title={`Editors cut the opening on ${runUpHabit.headCut} of the last ${runUpHabit.clips} edited clips of this format (median ${runUpHabit.headSec}s). This cuts to the sentence start nearest that — undo brings it back.`}
+              >
+                Editors usually cut ~{runUpHabit.headSec}s off the start of this format.
+              </span>
+              <button
+                type="button"
+                disabled={locked}
+                onClick={skipRunUp}
+                className="shrink-0 font-medium text-foreground underline underline-offset-2 hover:text-primary disabled:opacity-50"
+              >
+                Skip the first {Math.round(skip.range.endSec - skip.range.startSec)}s
+              </button>
             </p>
           )}
           <StitchSuggestions
