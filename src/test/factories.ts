@@ -630,6 +630,9 @@ export interface CreateTestClipIdeaOptions {
   acceptedTargetFormat?: string | null;
   /** The pass-1 section the idea was written from. */
   clipSectionId?: string | null;
+  /** Generation run; ideas sharing one form a batch. Default: a fresh one. */
+  batchId?: string;
+  createdAt?: Date;
 }
 
 /**
@@ -644,7 +647,8 @@ export async function createTestClipIdea(
     .insert(clipIdeas)
     .values({
       sourceProductionItemId: opts.sourceProductionItemId,
-      batchId: randomUUID(),
+      batchId: opts.batchId ?? randomUUID(),
+      ...(opts.createdAt ? { createdAt: opts.createdAt } : {}),
       startSec: String(opts.startSec ?? 0),
       endSec: String(opts.endSec ?? 30),
       hook: opts.hook ?? "vitest clip hook",

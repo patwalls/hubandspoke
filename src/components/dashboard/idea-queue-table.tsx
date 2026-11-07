@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils";
 import { AccountBadge } from "@/components/ui/account-badge";
 import { SourceBadge } from "@/components/ui/source-badge";
 import type { ProductionItem } from "@/types";
+import { oddsChip, oddsScore, oddsTone, oddsWhy } from "@/lib/clip-odds";
 import { useEditableBrands } from "@/components/brand-access";
 
 const VIEW_ONLY_TITLE = "View only — you don't have edit access to this brand";
@@ -113,7 +114,7 @@ export function IdeaQueueTable({
           return item.prediction?.prediction ?? null;
       }
     };
-    return [...items].sort((a, b) => {
+    const primary = (a: ProductionItem, b: ProductionItem): number => {
       const av = keyFn(a);
       const bv = keyFn(b);
       if (av == null && bv == null) return 0;
@@ -123,6 +124,18 @@ export function IdeaQueueTable({
         return (av - bv) * dir;
       }
       return String(av).localeCompare(String(bv)) * dir;
+    };
+    return [...items].sort((a, b) => {
+      const p = primary(a, b);
+      if (p !== 0 || sortKey !== "pillarDate") return p;
+      // Within one video (the default sort), keep its clips together and put
+      // the formats that beat this account's usual most often first
+      // (lib/clip-odds.ts) — not the writer's view guess.
+      const pa = a.pillarContentItemId ?? "";
+      const pb = b.pillarContentItemId ?? "";
+      if (pa !== pb) return pa < pb ? -1 : 1;
+      if (!a.sourceClipIdeaId || !b.sourceClipIdeaId) return 0;
+      return oddsScore(b.clipOdds) - oddsScore(a.clipOdds);
     });
   }, [items, sortKey, sortDir]);
 
@@ -701,6 +714,7 @@ function IdeaQueueRow({
             {item.format || "—"}
           </div>
         )}
+        {item.clipOdds && <ClipOddsChip odds={item.clipOdds} />}
       </td>
       <td className="px-3 py-2 text-xs">
         {item.clipAlgorithmLabel ? (
@@ -786,5 +800,24 @@ function IdeaQueueRow({
         )}
       </td>
     </tr>
+  );
+}
+
+/** "11/20 beat usual" under a clip row's format: how this format's recent
+ *  clips did against the account's usual post. Quiet unless it's clearly
+ *  above or below a coin flip. */
+function ClipOddsChip({ odds }: { odds: NonNullable<ProductionItem["clipOdds"]> }) {
+  const tone = oddsTone(odds);
+  return (
+    <div
+      data-testid="clip-odds"
+      className={cn(
+        "mt-0.5 text-[11px] tabular-nums whitespace-nowrap",
+        tone === "up" ? "text-emerald-700 dark:text-emerald-400" : tone === "down" ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground",
+      )}
+      title={oddsWhy(odds)}
+    >
+      {oddsChip(odds)}
+    </div>
   );
 }

@@ -36,6 +36,7 @@ import { useDialogUrl } from "./use-dialog-url";
 import { useFeatureFlags } from "@/components/clip-editor/use-feature-flags";
 import { CLIP_PARAM, refreshClipDrafts } from "@/components/clip-editor/drafts";
 import { useCanEditBrand } from "@/components/brand-access";
+import { oddsWhy, type FormatOdds } from "@/lib/clip-odds";
 
 const VIEW_ONLY_TITLE = "View only — you don't have edit access to this brand";
 
@@ -65,6 +66,9 @@ interface ClipIdeaSummary {
    *  triage header so the operator knows which format routing this idea
    *  will follow when promoted. */
   targetFormat?: string | null;
+  /** The format's track record on this account (lib/clip-odds.ts); shown
+   *  as one line under the rationale. Null/absent = no record. */
+  odds?: FormatOdds | null;
   /** Post type of the queue-side production_item created at generation
    *  time (`x`, `instagram_reel`, `tiktok`, …). Drives the choice of
    *  preview simulator on the right side of the dialog. */
@@ -535,6 +539,15 @@ function ClassicClipTriageDialog({
                   <p className="text-[13px] leading-relaxed text-foreground/90">
                     {idea.rationale}
                   </p>
+                  {idea.odds && (
+                    <p
+                      data-testid="clip-odds-why"
+                      className="text-[12px] leading-relaxed text-muted-foreground"
+                    >
+                      <span className="font-medium text-foreground/80">Track record:</span>{" "}
+                      {oddsWhy(idea.odds)}
+                    </p>
+                  )}
                 </div>
 
                 {!isDecided && introSegs.length > 0 && (

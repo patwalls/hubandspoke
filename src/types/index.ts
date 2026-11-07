@@ -123,6 +123,11 @@ export interface ProductionItem {
    *  high on published clips, so the queue uses the history-based predictor
    *  for clip rows too (2026-11-07, see production-report.ts). */
   clipEstimatedViews?: number | null;
+  /** Clip-idea rows only: the format's track record on this account — of its
+   *  last ≤20 clips, how many beat the account's usual post (lib/clip-odds.ts).
+   *  Orders a video's clips in the queue and drives the "why" chip. Null =
+   *  fewer than 5 scorable clips. */
+  clipOdds?: import("@/lib/clip-odds").FormatOdds | null;
   /** Friendly name + version of the clip-idea algorithm that produced this
    *  row (e.g. "Splice v6"). Computed from `clip_ideas.prompt_version` via
    *  `algorithmLabel()`. Set only on rows promoted from a clip idea. */

@@ -30,6 +30,8 @@ import {
 } from "@/lib/clip-hook-agent";
 import { loadHookRewrites } from "@/lib/services/clip-editor/hook-rewrites";
 import { loadTrimHabits } from "@/lib/services/clip-editor/trim-habits";
+import { loadFormatOdds } from "@/lib/services/clip-odds";
+import { oddsKey } from "@/lib/clip-odds";
 
 const HOOK_WRITER_CONCURRENCY = 5;
 
@@ -287,6 +289,15 @@ export async function generateClipIdeasForItem(
     return null;
   });
 
+  // What this format's clips actually get on the account (clip-odds M4,
+  // hook-v5) — anchors the writer's estimatedViews. Fail-soft.
+  const formatOdds = await loadFormatOdds(item.brand)
+    .then((m) => m.get(oddsKey(item.brand, format.name)) ?? null)
+    .catch((err) => {
+      console.warn(`[clip-idea-generate] format=${format.name} clip odds read failed: ${err instanceof Error ? err.message : err}`);
+      return null;
+    });
+
   // Pass 2: per-(section, format) hook writer, parallel with concurrency cap.
   const candidates = await mapWithConcurrency(
     liveSections,
@@ -299,6 +310,7 @@ export async function generateClipIdeasForItem(
         referenceHooks,
         editorRewrites,
         editorTrims,
+        formatOdds,
         section: {
           id: section.id,
           startSec: section.startSec,

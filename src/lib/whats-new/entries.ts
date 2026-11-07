@@ -43,6 +43,16 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-11-07-clip-odds",
+    shippedAt: "2026-11-07T21:36:57Z",
+    kind: "feature",
+    title: "Clip ideas show how their format really does on the account",
+    body: "Each clip idea now says how its format's last clips did, like \"11/20 beat usual\": how many got more views than the account's usual post. In the Queue and on a video's Clip Ideas list, the formats that beat the usual most often come first. Hover the line for typical views. Every format's ideas now show on the video page, not just the last one made.",
+    href: "/[brand]/queue",
+    screen: "/[brand]/queue",
+    audience: { usersOf: ["/[brand]/queue", "/[brand]/content/[id]"] },
+  },
+  {
     id: "2026-11-07-clip-views-honest",
     shippedAt: "2026-11-07T18:59:52Z",
     kind: "fix",
