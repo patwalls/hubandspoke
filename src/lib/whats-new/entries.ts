@@ -43,6 +43,16 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-11-07-clip-views-honest",
+    shippedAt: "2026-11-07T18:59:52Z",
+    kind: "fix",
+    title: "Est. Views on clip ideas now matches what clips really get",
+    body: "In the Queue, Est. Views on clip-idea rows used to be the AI's own guess, and it ran about 10 times higher than what those clips went on to get. It now comes from how posts of the same format did on that platform, like every other row. Hover the number to see the usual range.",
+    href: "/[brand]/queue",
+    screen: "/[brand]/queue",
+    audience: { usersOf: ["/[brand]/queue", "/[brand]/production"] },
+  },
+  {
     id: "2026-11-06-clip-ideas-trimmed",
     shippedAt: "2026-11-06T10:59:08Z",
     kind: "feature",
