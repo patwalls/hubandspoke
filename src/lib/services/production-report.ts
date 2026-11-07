@@ -4,6 +4,8 @@ import {
   buildViewPredictorContext,
   predictViews,
 } from "@/lib/services/view-predictor";
+import { loadFormatOdds } from "@/lib/services/clip-odds";
+import { oddsKey } from "@/lib/clip-odds";
 
 /**
  * Production-pipeline report (the queue page's primary payload), 60s-cached.
@@ -15,9 +17,14 @@ import {
  * unstable_cache ceiling).
  */
 export async function computeProductionReport(brand: string, excludeIdea: boolean) {
-    const [items, ctx] = await Promise.all([
+    const [items, ctx, odds] = await Promise.all([
       getProductionPipeline(brand, { excludeIdea }),
       buildViewPredictorContext(brand),
+      // Fail-soft: the queue still renders without the odds chip.
+      loadFormatOdds(brand).catch((err) => {
+        console.warn(`[production-report] clip odds failed: ${err instanceof Error ? err.message : err}`);
+        return new Map();
+      }),
     ]);
     // Every unpublished row shows the history-based prediction (medians of
     // real views: same pillar, same format + platform, … with a p25–p75
@@ -40,7 +47,14 @@ export async function computeProductionReport(brand: string, excludeIdea: boolea
         },
         ctx
       );
-      return { ...item, prediction };
+      // Clip-idea rows also carry their format's track record on this
+      // account (lib/clip-odds.ts) — the queue orders a video's clips by it
+      // and shows it as the "why" chip. ~150 bytes on clip rows only.
+      const clipOdds =
+        item.sourceClipIdeaId && item.format
+          ? (odds.get(oddsKey(item.brand, item.format)) ?? null)
+          : undefined;
+      return clipOdds === undefined ? { ...item, prediction } : { ...item, prediction, clipOdds };
     });
     return { items: withPredictions };
 }

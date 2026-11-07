@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   clipIdeas,
@@ -10,6 +10,9 @@ import {
 } from "@/lib/db/schema";
 import { requireSession } from "@/lib/auth-guards";
 import { algorithmLabel } from "@/lib/clip-idea-agent";
+import { latestClipIdeaBatches } from "@/lib/services/pillar-clip-ideas";
+import { loadFormatOdds } from "@/lib/services/clip-odds";
+import { compareIdeasByOdds, oddsKey, type FormatOdds } from "@/lib/clip-odds";
 
 const TRANSCRIPT_EXCERPT_MAX = 220;
 
@@ -40,16 +43,11 @@ export async function GET(_request: NextRequest, context: RouteContext) {
 
   const { id } = await context.params;
 
-  // Return only the most recent batch. Older batches remain in the table for
-  // history / comparison but the panel shows just the latest run.
-  const [latest] = await db
-    .select({ batchId: clipIdeas.batchId, createdAt: clipIdeas.createdAt })
-    .from(clipIdeas)
-    .where(eq(clipIdeas.sourceProductionItemId, id))
-    .orderBy(desc(clipIdeas.createdAt))
-    .limit(1);
+  // The newest batch of each format (generation runs one batch per format).
+  // Older batches stay in the table for history but aren't listed.
+  const latest = await latestClipIdeaBatches(id);
 
-  if (!latest) {
+  if (latest.batchIds.length === 0) {
     return NextResponse.json({ batch: null, ideas: [] });
   }
 
@@ -57,6 +55,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     .select({
       id: clipIdeas.id,
       batchId: clipIdeas.batchId,
+      targetFormat: clipIdeas.targetFormat,
       sourceProductionItemId: clipIdeas.sourceProductionItemId,
       startSec: clipIdeas.startSec,
       endSec: clipIdeas.endSec,
@@ -84,12 +83,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     })
     .from(clipIdeas)
     .leftJoin(users, eq(users.id, clipIdeas.acceptedEditorUserId))
-    .where(eq(clipIdeas.batchId, latest.batchId))
-    .orderBy(
-      // Sort by estimatedViews desc; older rows without it fall back to
-      // confidence so pre-v2 batches still render in a sensible order.
-      sql`COALESCE(${clipIdeas.estimatedViews}, 0) DESC, ${clipIdeas.confidence} DESC NULLS LAST`,
-    );
+    .where(inArray(clipIdeas.batchId, latest.batchIds));
 
   // One transcript per source item — fetch it once and slice per-idea for
   // the list card preview. Null if the source hasn't been transcribed.
@@ -111,6 +105,19 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     .where(eq(productionItems.id, id))
     .limit(1);
   const brand = source?.brand ?? "starter-story";
+
+  // Order: formats that beat this account's usual most often first, then
+  // video order (lib/clip-odds.ts). Not the writer's estimated_views — it ran
+  // ~10× high and carried no signal within a video. Fail-soft: no odds →
+  // plain video order.
+  const odds = await loadFormatOdds(brand).catch(() => new Map<string, FormatOdds>());
+  const ranked = rows
+    .map((r) => ({
+      ...r,
+      startSec: Number(r.startSec),
+      odds: r.targetFormat ? (odds.get(oddsKey(brand, r.targetFormat)) ?? null) : null,
+    }))
+    .sort(compareIdeasByOdds);
   const [formatRow] = await db
     .select({
       id: formats.id,
@@ -142,12 +149,12 @@ export async function GET(_request: NextRequest, context: RouteContext) {
 
   return NextResponse.json({
     batch: {
-      id: latest.batchId,
+      id: latest.batchIds.join(","),
       createdAt: latest.createdAt,
     },
     promotionFormat,
-    ideas: rows.map((i) => {
-      const startSec = Number(i.startSec);
+    ideas: ranked.map((i) => {
+      const startSec = i.startSec;
       const endSec = Number(i.endSec);
       return {
         ...i,

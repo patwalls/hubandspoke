@@ -212,6 +212,20 @@ describe("writeFormatHookForSection — wiring", () => {
     expect(without).not.toContain("HOW EDITORS TRIM");
   });
 
+  it("anchors estimatedViews on the format's real numbers on the account, and says nothing without a record", async () => {
+    const { client, create } = makeClient([{ eligible: false, reason: "n/a" }, { eligible: false, reason: "n/a" }]);
+    await writeFormatHookForSection(
+      baseArgs({ client, formatOdds: { brand: "ss", format: "Tech Stack", platform: "Instagram Reel", clips: 20, beat: 7, typicalViews: 8400, p25: 3100, p75: 21000, usualViews: 12000 } }),
+    );
+    const withOdds = (create.mock.calls[0][0] as { system: string }).system;
+    expect(withOdds).toContain("REAL OUTCOMES");
+    expect(withOdds).toContain("median 8,400 views, middle half 3,100–21,000");
+    expect(withOdds).toContain("anchor on its median");
+    await writeFormatHookForSection(baseArgs({ client, formatOdds: null }));
+    const without = (create.mock.calls[1][0] as { system: string }).system;
+    expect(without).not.toContain("REAL OUTCOMES —");
+  });
+
   it("falls back to the default block (no subject Skill) but keeps the strict eligibility rule", async () => {
     const { client, create } = makeClient([
       { eligible: false, reason: "n/a" },
@@ -312,8 +326,8 @@ describe("writeFormatHookForSection — wiring", () => {
     expect(candidate.reason).toMatch(/agent error/i);
   });
 
-  it("is attributed to the prompt version that learns editors' trims (hook-v4)", () => {
-    expect(HOOK_PROMPT_VERSION).toBe(4);
-    expect(HOOK_GENERATED_BY).toMatch(/:hook-v4$/);
+  it("is attributed to the prompt version that anchors on real outcomes (hook-v5)", () => {
+    expect(HOOK_PROMPT_VERSION).toBe(5);
+    expect(HOOK_GENERATED_BY).toMatch(/:hook-v5$/);
   });
 });

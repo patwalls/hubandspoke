@@ -18,10 +18,15 @@ import {
 import { cn } from "@/lib/utils";
 import { ClipTriageDialog } from "./clip-triage-dialog";
 import { useCanEditBrand } from "@/components/brand-access";
+import { oddsChip, oddsTone, oddsWhy, type FormatOdds } from "@/lib/clip-odds";
 
 interface ClipIdea {
   id: string;
   batchId: string;
+  targetFormat: string | null;
+  /** The format's track record on this account (lib/clip-odds.ts). The API
+   *  orders ideas by it; null = fewer than 5 scorable clips. */
+  odds: FormatOdds | null;
   startSec: number;
   endSec: number;
   hook: string;
@@ -218,6 +223,14 @@ export function ClipIdeasPanel({
               batch generated {fmtRel(batchCreatedAt)}
             </span>
           )}
+          {ideas.some((i) => i.odds) && (
+            <span
+              className="text-[11px] text-muted-foreground"
+              title="Formats whose recent clips beat this account's usual post most often come first; within a format, in video order."
+            >
+              · best odds first
+            </span>
+          )}
         </div>
         {isAdmin && canEdit && (
           <div className="flex items-center gap-0">
@@ -333,6 +346,27 @@ export function ClipIdeasPanel({
                       ({fmtDur(idea.startSec, idea.endSec)})
                     </span>
                   </span>
+                  {idea.targetFormat && (
+                    <span className="text-[11px] font-medium text-foreground/80">
+                      {idea.targetFormat}
+                    </span>
+                  )}
+                  {idea.odds && (
+                    <span
+                      data-testid="clip-odds"
+                      className={cn(
+                        "text-[11px] tabular-nums",
+                        oddsTone(idea.odds) === "up"
+                          ? "text-emerald-700 dark:text-emerald-400"
+                          : oddsTone(idea.odds) === "down"
+                            ? "text-amber-700 dark:text-amber-400"
+                            : "text-muted-foreground",
+                      )}
+                      title={oddsWhy(idea.odds)}
+                    >
+                      {oddsChip(idea.odds)}
+                    </span>
+                  )}
                   {accepted && (
                     <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700">
                       Accepted

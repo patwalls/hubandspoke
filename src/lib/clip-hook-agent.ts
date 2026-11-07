@@ -7,6 +7,7 @@ import {
 } from "./clip-anchor-utils";
 import { hookRewritesBlock, type HookRewrite } from "./clip-editor/hook-rewrites";
 import { trimHabitsBlock, type TrimSummary } from "./clip-editor/trim-habits";
+import { oddsPromptBlock, type FormatOdds } from "./clip-odds";
 
 // Haiku 5.5 (was Haiku 4.5). Splice v10 hook writer (2026-05-22). Reads ONE pre-detected
 // section and ONE format's skill section. Decides if the format applies
@@ -26,7 +27,11 @@ const MODEL = "claude-haiku-5-5";
 // v3 (2026-11-05): + editors' recent hook rewrites for the format (hooks-learn M1).
 // v4 (2026-11-06): + how editors trim the format's clip windows (clip-trim M1).
 //   Keeps v3's rewrites block, so hooks-learn reads v3 and later together.
-export const HOOK_PROMPT_VERSION = 4;
+// v5 (2026-11-07): + REAL OUTCOMES — the format's actual median / middle half
+//   on this account (clip-odds M4). estimatedViews ran ~10× high anchored on
+//   the reference library's best hits; read docs/build/sql/clip-views.sql
+//   filtered to generated_by LIKE '%hook-v5'. Keeps v3/v4 blocks.
+export const HOOK_PROMPT_VERSION = 5;
 export const HOOK_GENERATED_BY = `${MODEL}:hook-v${HOOK_PROMPT_VERSION}`;
 
 const DEFAULT_FORMAT_BLOCK = `FORMAT — narrator-overlay hook, 30–60s vertical Reel.
@@ -62,7 +67,7 @@ ANGLE + RATIONALE + ESTIMATED VIEWS
 
 - **angle**: one sentence on the payoff — what the viewer walks away understanding.
 - **rationale**: 2-4 sentences. Scroll-stopping move (what about the FIRST FIVE WORDS makes a viewer pause?) + emotional payoff + the structural mirror to your blueprintAnchorHook ("Same 'Bro built X' frame as 'Bro built $1M business in 6-7 hours' (108K views)").
-- **estimatedViews**: integer, calibrated against the REFERENCE LIBRARY view counts. May exceed or undercut the section's \`estimatedViewsBaseline\` depending on how well this format suits this section.
+- **estimatedViews**: integer — what THIS clip will most likely get. When a REAL OUTCOMES block is present, anchor on its median (it is what this format's clips actually get on this account). Otherwise calibrate against the REFERENCE LIBRARY, remembering those are the format's best hits, not a typical clip. The section's \`estimatedViewsBaseline\` is a rough guess, not an outcome.
 
 =====================================================
 TIGHT CUTS
@@ -176,6 +181,9 @@ export interface HookGenerateArgs {
   /** How editors trim this format's AI clip windows, from `loadTrimHabits`
    *  (clip-trim M1). Null/absent = no block. */
   editorTrims?: TrimSummary | null;
+  /** This format's real track record on the account, from `loadFormatOdds`
+   *  (clip-odds M4). Null/absent = no REAL OUTCOMES block. */
+  formatOdds?: FormatOdds | null;
   /** The section being evaluated. */
   section: {
     id: string;
@@ -482,6 +490,7 @@ ${DEFAULT_FORMAT_BLOCK}`;
 
   const rewritesBlock = hookRewritesBlock(args.editorRewrites ?? []);
   const trimsBlock = trimHabitsBlock(args.editorTrims ?? null);
+  const outcomesBlock = oddsPromptBlock(args.formatOdds ?? null);
 
   const systemPrompt = [
     SYSTEM_PROMPT_BASE,
@@ -489,6 +498,7 @@ ${DEFAULT_FORMAT_BLOCK}`;
     formatBlock,
     "",
     refLib.block,
+    ...(outcomesBlock ? ["", outcomesBlock] : []),
     ...(rewritesBlock ? ["", rewritesBlock] : []),
     ...(trimsBlock ? ["", trimsBlock] : []),
   ].join("\n");

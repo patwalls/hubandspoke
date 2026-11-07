@@ -5,6 +5,8 @@ import { requireBrandEdit, requireSession } from "@/lib/auth-guards";
 import { brandOfClipIdea } from "@/lib/brand-access";
 import { db } from "@/lib/db";
 import { titleAfterHookChange } from "@/lib/services/title-after-hook-change";
+import { loadFormatOdds } from "@/lib/services/clip-odds";
+import { oddsKey } from "@/lib/clip-odds";
 import {
   accounts,
   clipIdeas,
@@ -71,8 +73,16 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
+  // The format's track record on this account — the triage dialog's "why"
+  // line (lib/clip-odds.ts). Fail-soft.
+  const odds =
+    row.sourceBrand && row.targetFormat
+      ? ((await loadFormatOdds(row.sourceBrand).catch(() => null))?.get(oddsKey(row.sourceBrand, row.targetFormat)) ?? null)
+      : null;
+
   return NextResponse.json({
     id: row.id,
+    odds,
     hook: row.hook,
     angle: row.angle,
     rationale: row.rationale,
