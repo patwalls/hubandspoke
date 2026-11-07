@@ -119,8 +119,9 @@ export interface ProductionItem {
    *  TriageDialog. */
   sourceClipIdeaId?: string | null;
   /** LLM per-clip view estimate from `clip_ideas.estimated_views`. Set only
-   *  on rows promoted from a clip idea; consumers prefer this over the
-   *  generic format-based predictor when surfacing Est. Views in the queue. */
+   *  on rows promoted from a clip idea. NOT shown as Est. Views: it ran ~10×
+   *  high on published clips, so the queue uses the history-based predictor
+   *  for clip rows too (2026-11-07, see production-report.ts). */
   clipEstimatedViews?: number | null;
   /** Friendly name + version of the clip-idea algorithm that produced this
    *  row (e.g. "Splice v6"). Computed from `clip_ideas.prompt_version` via

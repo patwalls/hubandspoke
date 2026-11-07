@@ -14,11 +14,21 @@ import {
  * page's SSR, and /api/warm — one cache entry (~1.05 MB, under Next's 2 MB
  * unstable_cache ceiling).
  */
-async function computeProductionReport(brand: string, excludeIdea: boolean) {
+export async function computeProductionReport(brand: string, excludeIdea: boolean) {
     const [items, ctx] = await Promise.all([
       getProductionPipeline(brand, { excludeIdea }),
       buildViewPredictorContext(brand),
     ]);
+    // Every unpublished row shows the history-based prediction (medians of
+    // real views: same pillar, same format + platform, … with a p25–p75
+    // range) — clip-idea rows too. Until 2026-11-07 clip rows swapped in the
+    // clip writer's own `clip_ideas.estimated_views` as "high confidence".
+    // Checked against the 473 idea clips that published
+    // (docs/build/sql/clip-views.sql): that number was off ~10× at the median,
+    // >3× too high on 86% of clips, and unrelated to which clips did better
+    // within an account (corr 0.05); the brand + format + platform 90-day
+    // median was off ~1.5×. Don't bring the override back without beating
+    // that query.
     const withPredictions = items.map((item) => {
       if (item.status === "Published") return item;
       const prediction = predictViews(
@@ -30,29 +40,6 @@ async function computeProductionReport(brand: string, excludeIdea: boolean) {
         },
         ctx
       );
-      // For clip rows, prefer the LLM's per-clip estimate over the generic
-      // format-based predictor. The LLM reads the actual transcript chunk
-      // and the brand's top-performer hooks, so it has strictly more signal
-      // than the format median. Wrap it into the same ViewPrediction shape
-      // so the UI doesn't need a special-case render path.
-      if (
-        item.sourceClipIdeaId != null &&
-        item.clipEstimatedViews != null &&
-        prediction
-      ) {
-        const est = item.clipEstimatedViews;
-        return {
-          ...item,
-          prediction: {
-            ...prediction,
-            prediction: est,
-            p25: est,
-            p75: est,
-            confidence: "high" as const,
-            cohortBreakdown: [],
-          },
-        };
-      }
       return { ...item, prediction };
     });
     return { items: withPredictions };
