@@ -132,3 +132,51 @@ export function trimHabitsLine(s: TrimSummary | null): { lead: string; counts: s
     ? { lead: "Editors cut the opening on", counts: `${s.headCut} of ${s.clips} clips (~${s.medianHeadSec}s)` }
     : { lead: "Editors cut the ending on", counts: `${s.tailCut} of ${s.clips} clips (~${s.medianTailSec}s)` };
 }
+
+// ─── Editor: skip the run-up (clip-trim M4) ─────────────────────────────────
+
+/** A clip shorter than this after the skip isn't offered one (the writer's floor). */
+export const MIN_KEPT_AFTER_SKIP_SEC = 25;
+
+/** Punctuation that ends a sentence in Whisper's words (structural, not meaning). */
+const SENTENCE_END = /[.?!]["'”’)]*$/;
+
+export interface RunUpSkip {
+  sectionId: string;
+  /** The range to remove: the scene's kept start → the sentence the point starts on. */
+  range: { startSec: number; endSec: number };
+}
+
+/**
+ * The editor's one-click "Skip the run-up" for ideas written before the
+ * writer learned this format's trim habit: cut the clip's opening up to the
+ * sentence start nearest `headSec` in (the format's median head cut). Null
+ * when the clip's opening was already cut (≥ MIN_TRIM_SEC), there's no
+ * sentence start in reach, or the cut would leave under 25 s.
+ */
+export function runUpSkip(
+  idea: { startSec: number; endSec: number },
+  doc: ClipEditDoc,
+  words: Array<{ text: string; startSec: number; mediaId?: string }>,
+  headSec: number,
+): RunUpSkip | null {
+  if (!(headSec >= MIN_TRIM_SEC)) return null;
+  const trim = clipTrim(idea, doc);
+  if (!trim || trim.headSec >= MIN_TRIM_SEC) return null;
+  const scenes = doc.sections.filter((s) => !s.mediaId && overlap(s, idea.startSec, idea.endSec) > 0);
+  const main = scenes.reduce((a, b) => (overlap(b, idea.startSec, idea.endSec) > overlap(a, idea.startSec, idea.endSec) ? b : a));
+  const kept = keptRange(main);
+  const target = kept.start + headSec;
+  const lo = kept.start + MIN_TRIM_SEC;
+  const hi = Math.min(kept.start + Math.max(headSec * 2, headSec + 10), kept.end - MIN_KEPT_AFTER_SKIP_SEC);
+  const src = words.filter((w) => !w.mediaId);
+  let best: number | null = null;
+  for (let i = 1; i < src.length; i++) {
+    const w = src[i];
+    if (w.startSec < lo || w.startSec > hi) continue;
+    if (!SENTENCE_END.test(src[i - 1].text.trim())) continue;
+    if (best == null || Math.abs(w.startSec - target) < Math.abs(best - target)) best = w.startSec;
+  }
+  if (best == null) return null;
+  return { sectionId: main.id, range: { startSec: main.startSec, endSec: best } };
+}
