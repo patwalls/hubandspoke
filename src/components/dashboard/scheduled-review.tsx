@@ -1,5 +1,6 @@
 "use client";
 
+import { useLocalDate, type LocalDateFormatter } from "@/lib/hooks/use-local-date";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -17,16 +18,17 @@ import type {
   WatchingItemView,
 } from "@/lib/services/schedule-reconcile/review";
 
-function fmt(iso: string | null): string {
+const WHEN_FORMAT: Intl.DateTimeFormatOptions = {
+  month: "short",
+  day: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+};
+
+function fmt(iso: string | null, formatDate: LocalDateFormatter): string {
   if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  if (Number.isNaN(new Date(iso).getTime())) return "—";
+  return formatDate(iso, WHEN_FORMAT);
 }
 
 function PostBox({
@@ -48,6 +50,7 @@ function PostBox({
   href?: string | null;
   external?: boolean;
 }) {
+  const formatDate = useLocalDate();
   const body = (
     <>
       <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -66,7 +69,7 @@ function PostBox({
           {postTypeLabel(postType)}
         </span>
         <span>
-          {timeLabel}: {fmt(time)}
+          {timeLabel}: {fmt(time, formatDate)}
         </span>
       </div>
     </>
@@ -193,6 +196,7 @@ function NeedsAttentionRow({
   n: NeedsAttentionItemView;
   onPublished: (id: string) => void;
 }) {
+  const formatDate = useLocalDate();
   const canEdit = useCanEditBrand(brand);
   const [open, setOpen] = useState(false);
   const [link, setLink] = useState("");
@@ -240,8 +244,8 @@ function NeedsAttentionRow({
           <div className="text-[11px] text-muted-foreground">
             {postTypeLabel(n.postType)} ·{" "}
             {n.expectedPublishAt
-              ? `scheduled for ${fmt(n.expectedPublishAt)}`
-              : `scheduled on ${fmt(n.scheduledAt)}, no publish date set`}
+              ? `scheduled for ${fmt(n.expectedPublishAt, formatDate)}`
+              : `scheduled on ${fmt(n.scheduledAt, formatDate)}, no publish date set`}
           </div>
         </Link>
         {open ? (
@@ -302,6 +306,7 @@ export function ScheduledReview({
   brand: string;
   initialData: ScheduledReviewData;
 }) {
+  const formatDate = useLocalDate();
   const [data, setData] = useState<ScheduledReviewData>(initialData);
 
   const refetch = useCallback(async () => {
@@ -393,10 +398,10 @@ export function ScheduledReview({
                   <div className="text-[11px] text-muted-foreground">
                     {postTypeLabel(n.postType)} ·{" "}
                     {n.expectedPublishAt
-                      ? `scheduled for ${fmt(n.expectedPublishAt)}`
+                      ? `scheduled for ${fmt(n.expectedPublishAt, formatDate)}`
                       : n.scheduledNoDate
-                        ? `no publish date · watching since ${fmt(n.scheduledAt)}`
-                        : `scheduled on ${fmt(n.scheduledAt)}, no publish date set`}
+                        ? `no publish date · watching since ${fmt(n.scheduledAt, formatDate)}`
+                        : `scheduled on ${fmt(n.scheduledAt, formatDate)}, no publish date set`}
                   </div>
                 </div>
                 <span className="text-xs text-muted-foreground">View →</span>

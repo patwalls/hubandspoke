@@ -1,5 +1,6 @@
 "use client";
 
+import { useHydrated, formatDisplayDate } from "@/lib/hooks/use-local-date";
 import React, { useRef, useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
@@ -347,7 +348,7 @@ function formatCompact(n: number | null | undefined): string {
   if (n >= 1_000_000)
     return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}K`;
-  return n.toLocaleString();
+  return n.toLocaleString("en-US");
 }
 
 function formatDate(d: string | null): string {
@@ -454,6 +455,7 @@ const DETAIL_TAB_VALUES = [
 type DetailTab = (typeof DETAIL_TAB_VALUES)[number];
 
 export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, statuses, isAdmin, initialData }: ContentDetailProps) {
+  const hydrated = useHydrated();
   // Sorted dropdown order; palette map for quick chip-color lookup.
   // Published / Scheduled are filtered OUT of the dropdown — those two
   // transitions are reachable only through the PublishScheduleDialog
@@ -3219,7 +3221,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                 className={CHIP_B_BASE}
                 title={
                   item.authorFollowerCount != null
-                    ? `${item.authorFollowerCount.toLocaleString()} followers at last enrichment`
+                    ? `${item.authorFollowerCount.toLocaleString("en-US")} followers at last enrichment`
                     : undefined
                 }
               >
@@ -3586,7 +3588,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
         <div className="flex items-center justify-between gap-2 px-1">
           <p className="text-xs text-muted-foreground">
             {item.lastPerformanceSyncAt
-              ? `Metrics last synced ${formatRelative(item.lastPerformanceSyncAt)}`
+              ? `Metrics last synced ${hydrated ? formatRelative(item.lastPerformanceSyncAt) : formatDisplayDate(item.lastPerformanceSyncAt, false)}`
               : "Metrics not yet synced"}
           </p>
           <div className="flex items-center gap-2">
@@ -4190,17 +4192,17 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                             }
                           >
                             {d.viewsEstimated ? "~" : ""}
-                            {d.views.toLocaleString()}
+                            {d.views.toLocaleString("en-US")}
                           </span>
                         ) : (
                           "-"
                         )}
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums text-sm text-foreground">
-                        {d.likes?.toLocaleString() || "-"}
+                        {d.likes?.toLocaleString("en-US") || "-"}
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums text-sm text-foreground">
-                        {d.comments?.toLocaleString() || "-"}
+                        {d.comments?.toLocaleString("en-US") || "-"}
                       </td>
                     </tr>
                   ))}
@@ -4566,12 +4568,12 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                       </TableCell>
                       <TableCell className="text-right tabular-nums text-muted-foreground">
                         {f.viewThreshold != null
-                          ? f.viewThreshold.toLocaleString()
+                          ? f.viewThreshold.toLocaleString("en-US")
                           : "—"}
                       </TableCell>
                       <TableCell className="text-right tabular-nums text-foreground">
                         {f.totalViews && f.totalViews > 0
-                          ? f.totalViews.toLocaleString()
+                          ? f.totalViews.toLocaleString("en-US")
                           : "—"}
                       </TableCell>
                       <TableCell className="text-right">
@@ -5118,19 +5120,19 @@ function LeadsBreakdown({
             <div className="flex items-center justify-between gap-4">
               <span className="text-muted-foreground">HubSpot leads</span>
               <span className="font-semibold tabular-nums">
-                {hubspotLeads.toLocaleString()}
+                {hubspotLeads.toLocaleString("en-US")}
               </span>
             </div>
             <div className="flex items-center justify-between gap-4">
               <span className="text-muted-foreground">Starter Story leads</span>
               <span className="font-semibold tabular-nums">
-                {starterStory.toLocaleString()}
+                {starterStory.toLocaleString("en-US")}
               </span>
             </div>
             <div className="mt-0.5 flex items-center justify-between gap-4 border-t border-foreground/10 pt-1">
               <span className="text-muted-foreground">Total</span>
               <span className="font-semibold tabular-nums">
-                {total.toLocaleString()}
+                {total.toLocaleString("en-US")}
               </span>
             </div>
           </div>
@@ -5282,7 +5284,7 @@ function GoLinkPopover({
             <div className="flex items-center gap-4 text-xs text-muted-foreground">
               <span>
                 <span className="font-semibold text-foreground tabular-nums">
-                  {(data?.clicksCount ?? 0).toLocaleString()}
+                  {(data?.clicksCount ?? 0).toLocaleString("en-US")}
                 </span>{" "}
                 clicks
               </span>
@@ -5292,7 +5294,7 @@ function GoLinkPopover({
                   hubspotLeads={data ? (data.hubspotLeadsCount ?? 0) : null}
                 >
                   <span className="font-semibold text-foreground tabular-nums">
-                    {(data?.leadsCount ?? 0).toLocaleString()}
+                    {(data?.leadsCount ?? 0).toLocaleString("en-US")}
                   </span>
                 </LeadsBreakdown>{" "}
                 leads

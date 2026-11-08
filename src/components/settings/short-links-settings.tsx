@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useHydrated, formatDisplayDate } from "@/lib/hooks/use-local-date";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,8 +14,9 @@ interface Props {
   initialError: string | null;
 }
 
-function formatLastClick(iso: string | null): string {
+function formatLastClick(iso: string | null, hydrated: boolean): string {
   if (!iso) return "—";
+  if (!hydrated) return formatDisplayDate(iso, false);
   const date = new Date(iso);
   const diffMs = Date.now() - date.getTime();
   const mins = Math.round(diffMs / 60_000);
@@ -29,6 +31,7 @@ function formatLastClick(iso: string | null): string {
 
 export function ShortLinksSettings({ initialLinks, baseUrl, initialError }: Props) {
   const router = useRouter();
+  const hydrated = useHydrated();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(initialError);
   const [copied, setCopied] = useState<string | null>(null);
@@ -286,7 +289,7 @@ export function ShortLinksSettings({ initialLinks, baseUrl, initialError }: Prop
                     </td>
                     <td className="px-3 py-2 font-mono text-xs">{link.clicksCount}</td>
                     <td className="px-3 py-2 text-xs text-muted-foreground">
-                      {formatLastClick(link.lastClickedAt)}
+                      {formatLastClick(link.lastClickedAt, hydrated)}
                     </td>
                     <td className="px-3 py-2 text-xs text-muted-foreground">
                       {link.tag || "—"}

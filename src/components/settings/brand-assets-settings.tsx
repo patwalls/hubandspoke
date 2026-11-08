@@ -1,5 +1,6 @@
 "use client";
 
+import { useLocalDate } from "@/lib/hooks/use-local-date";
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -48,6 +49,7 @@ export function BrandAssetsSettings({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const canEdit = useCanEditBrand(brand);
   const viewOnlyTitle = canEdit ? undefined : VIEW_ONLY_TITLE;
+  const formatDate = useLocalDate();
   const [watermarks, setWatermarks] = useState<WatermarkFile[]>(initialWatermarks);
   const [uploadState, setUploadState] = useState<"idle" | "uploading" | "error">("idle");
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -223,7 +225,7 @@ export function BrandAssetsSettings({
                   <p className="text-xs text-muted-foreground">
                     {[
                       formatBytes(wm.sizeBytes),
-                      new Date(wm.createdAt).toLocaleDateString(),
+                      formatDate(wm.createdAt),
                     ]
                       .filter(Boolean)
                       .join(" · ")}
