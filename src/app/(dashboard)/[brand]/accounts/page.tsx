@@ -7,9 +7,11 @@ import {
   platformSupportsBackfill,
   platformSupportsLatest,
 } from "@/lib/services/account-content-sync";
+import { connectNotice } from "@/lib/services/tiktok-draft/connect-match";
 
 interface BrandAccountsPageProps {
   params: Promise<{ brand: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }
 
 export const dynamic = "force-dynamic";
@@ -26,8 +28,11 @@ export async function generateMetadata({
 
 export default async function BrandAccountsPage({
   params,
+  searchParams,
 }: BrandAccountsPageProps) {
   const { brand } = await params;
+  const sp = await searchParams;
+  const one = (k: string) => (typeof sp[k] === "string" ? (sp[k] as string) : null);
   const brandConfig = await fetchBrandBySlug(brand);
   if (!brandConfig) notFound();
 
@@ -37,8 +42,17 @@ export default async function BrandAccountsPage({
     getContentCountsByAccount(),
   ]);
 
+  // Result of the Zernio TikTok connect round-trip (callback/route.ts).
+  const connectAccount = accounts.find((a) => a.id === one("account"));
+  const notice = connectNotice(
+    one("tiktokConnect"),
+    connectAccount?.handle,
+    one("connectedAs"),
+  );
+
   return (
     <AccountsSettingsContent
+      notice={notice}
       accounts={accounts.map((a) => ({
         id: a.id,
         brandSlug: a.brandSlug,

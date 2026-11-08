@@ -124,6 +124,7 @@ export function AccountsSettingsContent({
   brands,
   scopeBrandSlug = null,
   hideHeader = false,
+  notice = null,
 }: {
   accounts: AccountRow[];
   brands: BrandOption[];
@@ -134,6 +135,8 @@ export function AccountsSettingsContent({
    *  button moves inline with the section). Use when the enclosing page
    *  already owns a page-level header. */
   hideHeader?: boolean;
+  /** One-shot banner, e.g. the result of a TikTok (Zernio) connect. */
+  notice?: { tone: "success" | "error"; text: string } | null;
 }) {
   const router = useRouter();
   const [showAdd, setShowAdd] = useState(false);
@@ -339,6 +342,20 @@ export function AccountsSettingsContent({
           {showAdd ? "Cancel" : "Add account"}
         </Button>
       </div>
+
+      {notice && (
+        <div
+          role="status"
+          data-testid="tiktok-connect-notice"
+          className={
+            notice.tone === "success"
+              ? "rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-200"
+              : "rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-200"
+          }
+        >
+          {notice.text}
+        </div>
+      )}
 
       {error && (
         <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
