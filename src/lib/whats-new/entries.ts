@@ -43,6 +43,15 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-11-08-post-beat-usual",
+    shippedAt: "2026-11-08T22:00:36Z",
+    kind: "feature",
+    title: "A post's page says when it beat its account's usual",
+    body: "On a live post, the Views card now names that account's usual for the same kind of post, and says \"3.2× its usual\" in green when the post did better. Hover it to see what the usual is built from.",
+    screen: "content:beat-usual",
+    audience: { usersOf: ["/[brand]/content/[id]"] },
+  },
+  {
     id: "2026-11-07-clip-odds",
     shippedAt: "2026-11-07T21:36:57Z",
     kind: "feature",

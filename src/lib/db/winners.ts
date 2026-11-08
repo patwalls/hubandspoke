@@ -1,7 +1,9 @@
 import { sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
+  againstUsual,
   pickWinners,
+  type AgainstUsual,
   scoreFormats,
   type FormatScore,
   type Winner,
@@ -114,4 +116,53 @@ async function getCandidates(brand: string, days: number): Promise<WinnerRow[]> 
     winNote: r.win_note ?? null,
   }));
   return candidates;
+}
+
+/**
+ * One published post against its own account + post type's median over the
+ * 90 days before it went out (the post page's Views card). Null for an
+ * unpublished post, one with no account or views, or an account without a
+ * usual yet. The window is anchored on the post's own publish date, so an old
+ * post is judged against what was normal then, not now.
+ */
+export async function getPostAgainstUsual(itemId: string): Promise<AgainstUsual | null> {
+  const rows = await db.execute<{
+    views: number;
+    likes: number | null;
+    post_type: string;
+    baseline_median: string | number | null;
+    baseline_likes_median: string | number | null;
+    baseline_posts: string | number;
+  }>(sql`
+    SELECT p.views, p.likes, coalesce(p.post_type, '') AS post_type,
+           percentile_cont(0.5) WITHIN GROUP (ORDER BY b.views) AS baseline_median,
+           percentile_cont(0.5) WITHIN GROUP (ORDER BY b.likes) AS baseline_likes_median,
+           count(b.id) AS baseline_posts
+      FROM production_items p
+      LEFT JOIN production_items b
+        ON b.account_id = p.account_id
+       AND coalesce(b.post_type, '') = coalesce(p.post_type, '')
+       AND b.id <> p.id
+       AND b.deleted_at IS NULL
+       AND b.views IS NOT NULL
+       AND b.published_at >= p.published_at - interval '90 days'
+       AND b.published_at < p.published_at
+     WHERE p.id = ${itemId}
+       AND p.account_id IS NOT NULL
+       AND p.views IS NOT NULL
+       AND p.published_at IS NOT NULL
+     GROUP BY p.id, p.views, p.likes, p.post_type
+  `);
+  const r = Array.from(rows)[0];
+  if (!r) return null;
+  return againstUsual({
+    id: itemId,
+    title: null,
+    views: Number(r.views),
+    baselineMedian: Number(r.baseline_median ?? 0),
+    baselinePosts: Number(r.baseline_posts),
+    metric: shouldEstimate(r.post_type) ? "likes" : "views",
+    likes: Number(r.likes ?? 0),
+    baselineLikesMedian: Number(r.baseline_likes_median ?? 0),
+  });
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { pickWinners, formatLift, scoreFormats, type WinnerCandidate } from "./pick";
+import { pickWinners, formatLift, scoreFormats, againstUsual, type WinnerCandidate } from "./pick";
 
 const c = (id: string, views: number, baselineMedian: number, baselinePosts = 10): WinnerCandidate => ({
   id,
@@ -117,5 +117,30 @@ describe("scoreFormats", () => {
         f("x", null, 9_000), f("y", "  ", 9_000), f("z", null, 9_000),
       ]),
     ).toEqual([]);
+  });
+});
+
+describe("againstUsual", () => {
+  it("names the usual and the lift when the post beat it", () => {
+    expect(againstUsual(c("hit", 6_000, 1_000))).toEqual({ metric: "views", usual: 1_000, basedOn: 10, lift: 6 });
+  });
+
+  it("names the usual but no lift for a post at or under it (never a below-usual ratio)", () => {
+    expect(againstUsual(c("young", 200, 1_000))).toEqual({ metric: "views", usual: 1_000, basedOn: 10, lift: null });
+    expect(againstUsual(c("normal", 1_200, 1_000))?.lift).toBeNull();
+  });
+
+  it("uses the strip's floor: a tiny post at a big multiple is not a win", () => {
+    expect(againstUsual(c("tiny", 300, 20))?.lift).toBeNull();
+  });
+
+  it("is null when the account has no usual yet", () => {
+    expect(againstUsual(c("new-account", 50_000, 1_000, 4))).toBeNull();
+    expect(againstUsual(c("no-median", 50_000, 0))).toBeNull();
+  });
+
+  it("judges estimated-view post types on likes", () => {
+    const r = againstUsual({ ...c("li", 9_000, 1_000), metric: "likes", likes: 100, baselineLikesMedian: 20 });
+    expect(r).toEqual({ metric: "likes", usual: 20, basedOn: 10, lift: 5 });
   });
 });
