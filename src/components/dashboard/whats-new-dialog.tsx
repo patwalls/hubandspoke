@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { trackUsage } from "@/lib/usage/track";
+import { claimPopup } from "@/lib/whats-new/popup-claim";
 
 export interface WhatsNewCard {
   id: string;
@@ -38,8 +39,16 @@ export function WhatsNewDialog({
   unseen: WhatsNewCard[];
   all: WhatsNewCard[];
 }) {
-  const [mode, setMode] = useState<"unseen" | "all" | null>(unseen.length > 0 ? "unseen" : null);
+  const [mode, setMode] = useState<"unseen" | "all" | null>(null);
   const [stamped, setStamped] = useState(false);
+
+  // Pop up only if no other tab (or earlier load) showed it today — opening
+  // five posts in tabs is one pop-up, not five (popup-claim.ts).
+  useEffect(() => {
+    if (unseen.length > 0 && claimPopup()) setMode((m) => m ?? "unseen");
+    // Once per page load: `unseen` only changes on a full load.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     const open = () => {
