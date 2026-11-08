@@ -21,12 +21,12 @@ test("the post page says when a post beat its account's usual", async ({ page })
                 ${900 + i * 40}, now() - make_interval(days => ${20 + i * 5}))`;
     }
     const [winner] = await sql<{ id: string }[]>`
-      INSERT INTO production_items (title, brand, account_id, post_type, status, views, published_at)
-      VALUES (${`E2E winner ${stamp}`}, 'starter-story', ${account.id}, 'tiktok', 'Published', 8400, now() - interval '2 days')
+      INSERT INTO production_items (title, brand, account_id, post_type, status, published_link, views, published_at)
+      VALUES (${`E2E winner ${stamp}`}, 'starter-story', ${account.id}, 'tiktok', 'Published', ${`https://www.tiktok.com/@e2e/video/${stamp}1`}, 8400, now() - interval '2 days')
       RETURNING id`;
     const [usual] = await sql<{ id: string }[]>`
-      INSERT INTO production_items (title, brand, account_id, post_type, status, views, published_at)
-      VALUES (${`E2E usual ${stamp}`}, 'starter-story', ${account.id}, 'tiktok', 'Published', 1100, now() - interval '1 day')
+      INSERT INTO production_items (title, brand, account_id, post_type, status, published_link, views, published_at)
+      VALUES (${`E2E usual ${stamp}`}, 'starter-story', ${account.id}, 'tiktok', 'Published', ${`https://www.tiktok.com/@e2e/video/${stamp}2`}, 1100, now() - interval '1 day')
       RETURNING id`;
 
     await page.goto(`/starter-story/content/${winner.id}`);
