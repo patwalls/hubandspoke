@@ -1,4 +1,4 @@
-import { unstable_cache } from "next/cache";
+import { compressedCache } from "@/lib/compressed-cache";
 import { getProductionPipeline } from "@/lib/db/queries";
 import {
   buildViewPredictorContext,
@@ -13,8 +13,9 @@ import { oddsKey } from "@/lib/clip-odds";
  * context + per-item predictions) and it's fetched on every queue-page
  * mount. Same staleness rationale as the content report: triage data whose
  * inputs move via background sweeps. Shared by the API route, the queue
- * page's SSR, and /api/warm — one cache entry (~1.05 MB, under Next's 2 MB
- * unstable_cache ceiling).
+ * page's SSR, and /api/warm — one cache entry, gzipped because the busiest
+ * brand outgrew Next's 2 MB ceiling on 2026-11-07 (2.4 MB raw, see
+ * lib/compressed-cache.ts).
  */
 export async function computeProductionReport(brand: string, excludeIdea: boolean) {
     const [items, ctx, odds] = await Promise.all([
@@ -59,7 +60,7 @@ export async function computeProductionReport(brand: string, excludeIdea: boolea
     return { items: withPredictions };
 }
 
-export const getProductionReportCached = unstable_cache(
+export const getProductionReportCached = compressedCache(
   async (brand: string, excludeIdea: boolean) =>
     computeProductionReport(brand, excludeIdea),
   ["production-report"],
