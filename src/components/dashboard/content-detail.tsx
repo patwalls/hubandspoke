@@ -132,6 +132,8 @@ import { recordVisit } from "@/lib/hooks/use-recent-items";
 import { startVisibleInterval } from "@/lib/visible-interval";
 import { validatePublishedLinkPlatform } from "@/lib/published-link-validation";
 import { trackUsage } from "@/lib/usage/track";
+import { ViewsAgainstUsual } from "@/components/dashboard/views-against-usual";
+import type { AgainstUsual } from "@/lib/winners/pick";
 import { acceptsPastedLink, isPagePaste, pastedPostLink } from "@/lib/paste-to-publish";
 import { HandoffButton } from "./handoff-button";
 import { LearnedEditsChip } from "./learned-edits-chip";
@@ -331,6 +333,9 @@ interface ContentDetailProps {
    *  admin-only affordances (e.g. the clip-ideas Generate button) instead
    *  of letting non-admins click them and get a 403 Forbidden. */
   isAdmin: boolean;
+  /** This post against its account's usual (server-computed; null when the
+   *  account has no usual yet or the post isn't live). Views card footer. */
+  againstUsual?: AgainstUsual | null;
 }
 
 const FALLBACK_STATUS_OPTIONS: StatusOption[] = [
@@ -454,7 +459,7 @@ const DETAIL_TAB_VALUES = [
 ] as const;
 type DetailTab = (typeof DETAIL_TAB_VALUES)[number];
 
-export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, statuses, isAdmin, initialData }: ContentDetailProps) {
+export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, statuses, isAdmin, initialData, againstUsual = null }: ContentDetailProps) {
   const hydrated = useHydrated();
   // Sorted dropdown order; palette map for quick chip-color lookup.
   // Published / Scheduled are filtered OUT of the dropdown — those two
@@ -3641,6 +3646,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
               : item.viewsEstimated
                 ? "Estimated from likes"
                 : "Reported"}
+            {item.postType !== "newsletter" && <ViewsAgainstUsual brand={brand} value={againstUsual} />}
           </p>
         </div>
         <div className="rounded-lg border border-border bg-card p-4">

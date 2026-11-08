@@ -12,6 +12,7 @@ import { getProductionItemDetail } from "@/lib/services/production-item-detail";
 import { auth } from "@/lib/auth";
 import { isUuid } from "@/lib/uuid";
 import { isAdminNow } from "@/lib/brand-access";
+import { getPostAgainstUsual } from "@/lib/db/winners";
 
 interface ContentDetailPageProps {
   params: Promise<{ brand: string; contentId: string }>;
@@ -45,7 +46,7 @@ export default async function BrandContentDetailPage({
   // Fetch accounts once on the server and thread through so the picker can
   // render without an extra round-trip. Keep the shape minimal — the picker
   // only needs id/brand/platform/handle/displayName.
-  const [accountRows, statusRows, session, detailPayload] = await Promise.all([
+  const [accountRows, statusRows, session, detailPayload, againstUsual] = await Promise.all([
     getAccounts(),
     getBrandStatuses(brand),
     auth(),
@@ -58,6 +59,12 @@ export default async function BrandContentDetailPage({
       Sentry.captureException(err, {
         tags: { surface: "detail-ssr", contentId },
       });
+      return null;
+    }),
+    // The Views card's "N× its usual" line — nice-to-have, so a failure
+    // just hides it (reported, never silent).
+    getPostAgainstUsual(contentId).catch((err) => {
+      Sentry.captureException(err, { tags: { surface: "detail-against-usual", contentId } });
       return null;
     }),
   ]);
@@ -103,6 +110,7 @@ export default async function BrandContentDetailPage({
       shortLinksBaseUrl={shortLinksBaseUrl}
       statuses={statuses}
       isAdmin={isAdmin}
+      againstUsual={againstUsual}
     />
   );
 }

@@ -126,3 +126,30 @@ export function formatLift(lift: number): string {
   const n = lift >= 10 ? Math.round(lift).toLocaleString("en-US") : lift.toFixed(1);
   return `${n}×`;
 }
+
+/** One post against its own account's usual — the post page's Views card. */
+export interface AgainstUsual {
+  metric: "views" | "likes";
+  /** The account + post type's median over the 90 days before the post. */
+  usual: number;
+  /** How many posts that median is built from. */
+  basedOn: number;
+  /** The strip's lift when the post beat its usual (same rules), else null. */
+  lift: number | null;
+}
+
+/**
+ * A post's standing against its usual, or null when its account + post type
+ * has no usual yet (too few posts). `lift` is set only when the dashboard's
+ * strip would call it a win — a post a few hours old is "below" its usual by
+ * definition, so the page never shows a below-usual ratio.
+ */
+export function againstUsual(c: WinnerCandidate): AgainstUsual | null {
+  if (!judged(c)) return null;
+  return {
+    metric: c.metric ?? "views",
+    usual: measure(c).usual,
+    basedOn: c.baselinePosts,
+    lift: winLift(c),
+  };
+}
