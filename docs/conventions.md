@@ -554,7 +554,7 @@ errors go to the self-hosted GlitchTip), so Dependabot and fork PRs run it too.
   A card about one screen names it in `audience.usersOf` (e.g. `["/[brand]/production"]`, `["/[brand]/queue/*"]`,
   `["modal:clip-editor"]`) so only people who opened it in the last 30 days get the pop-up; leave it off only
   for news everyone needs.
-  The pop-up opens at most once every 20 hours (`popupFor`), so cards shipped the same day reach people
+  The pop-up opens at most once every 20 hours per person (`popupFor`) and per browser across tabs (`popup-claim.ts`), so cards shipped the same day reach people
   together — still, one card per thing people would notice; tweaks to a feature ship without one.
 - **Make it measurable.** Routes are tracked automatically (`UsageTracker`). Something that isn't a
   route — a modal, a panel, a button that matters — calls `trackUsage("<area>:<thing>")` from
