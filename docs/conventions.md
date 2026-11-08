@@ -681,6 +681,9 @@ Rules:
   uncached function AND invalidates the tag, so the user who acted sees the
   result immediately and the next plain load recomputes. Mount fetches stay on
   the cached path.
-- Keep an entry under Next's 2 MB `unstable_cache` ceiling (the production
-  report is ~1 MB).
+- Keep an entry under Next's 2 MB `unstable_cache` ceiling. Over it, Next logs
+  `items over 2MB can not be cached`, stores nothing and returns the value, so
+  nothing looks broken but every request recomputes. A payload that grows with
+  a brand's rows goes through `compressedCache` (`src/lib/compressed-cache.ts`,
+  gzip + base64), as the production and content reports do.
 
