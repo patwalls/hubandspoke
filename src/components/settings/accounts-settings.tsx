@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useLocalDate } from "@/lib/hooks/use-local-date";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -50,8 +51,9 @@ const STATUS_TONE_CLASS: Record<AccountErrorTone, string> = {
 
 /** Last refresh / last sync cell: date, or a labelled error with context.
  *  Full raw error stays in the hover title. */
-function AccountStatusCell({ at, error }: { at: string | Date | null; error: string | null }) {
-  const date = at ? new Date(at).toLocaleDateString() : "never";
+export function AccountStatusCell({ at, error }: { at: string | Date | null; error: string | null }) {
+  const formatDate = useLocalDate();
+  const date = at ? formatDate(at) : "never";
   if (!error) return <>{date}</>;
   const view = describeAccountError(error);
   return (

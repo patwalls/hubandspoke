@@ -11,9 +11,21 @@ import { test, expect } from "@playwright/test";
 const utcHour = new Date().getUTCHours();
 const timezoneId = utcHour >= 10 ? "Pacific/Kiritimati" : "Pacific/Pago_Pago";
 
-test.use({ timezoneId });
+test.use({ timezoneId, locale: "de-DE" });
 
-for (const path of ["/matg", "/starter-story", "/starter-story/content"]) {
+const pages: Array<{ path: string; ready?: string }> = [
+  { path: "/matg", ready: "Date range" },
+  { path: "/starter-story", ready: "Date range" },
+  { path: "/starter-story/content", ready: "Date range" },
+  // Timestamps from server props, formatted in render (HUBANDSPOKE-6).
+  { path: "/starter-story/accounts" },
+  { path: "/starter-story/accounts/brand-assets" },
+  { path: "/starter-story/scheduled" },
+  { path: "/settings/links" },
+  { path: "/settings/sync-errors" },
+];
+
+for (const { path, ready } of pages) {
   test(`${path} hydrates without a mismatch in ${timezoneId}`, async ({ page }) => {
     const errors: string[] = [];
     page.on("console", (msg) => {
@@ -23,7 +35,7 @@ for (const path of ["/matg", "/starter-story", "/starter-story/content"]) {
 
     await page.goto(path);
     await expect(page).not.toHaveURL(/\/login/);
-    await expect(page.getByText("Date range").first()).toBeVisible();
+    if (ready) await expect(page.getByText(ready).first()).toBeVisible();
     // Give the post-hydration re-render a beat to surface any recoverable error.
     await page.waitForTimeout(1500);
 

@@ -1,5 +1,6 @@
 "use client";
 
+import { useHydrated, formatDisplayDate } from "@/lib/hooks/use-local-date";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
@@ -24,8 +25,9 @@ export interface SyncErrorItem {
   lastPerformanceSyncError: string;
 }
 
-function timeAgo(iso: string | null): string {
+function timeAgo(iso: string | null, hydrated: boolean): string {
   if (!iso) return "—";
+  if (!hydrated) return formatDisplayDate(iso, false);
   const ms = Date.now() - new Date(iso).getTime();
   const min = Math.floor(ms / 60_000);
   if (min < 1) return "just now";
@@ -38,6 +40,7 @@ function timeAgo(iso: string | null): string {
 
 export function SyncErrorsTable({ items }: { items: SyncErrorItem[] }) {
   const router = useRouter();
+  const hydrated = useHydrated();
   const [isPending, startTransition] = useTransition();
   const [retryingId, setRetryingId] = useState<string | null>(null);
 
@@ -122,7 +125,7 @@ export function SyncErrorsTable({ items }: { items: SyncErrorItem[] }) {
                 </div>
               </TableCell>
               <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-                {timeAgo(item.lastPerformanceSyncAt)}
+                {timeAgo(item.lastPerformanceSyncAt, hydrated)}
               </TableCell>
               <TableCell className="text-right">
                 <Button

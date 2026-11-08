@@ -153,6 +153,15 @@ guard (`requestSeq` in `content-report.tsx`). Event handlers can still
 call `new Date()`. `tests/e2e/dashboard-hydration.spec.ts` catches a
 regression (run the dev server with `TZ=UTC`).
 
+**The same goes for timestamps a client component renders from server
+props** (page props, `initialData`): use `useLocalDate()` or, for "5m ago"
+labels, `useHydrated()` from `src/lib/hooks/use-local-date.ts`, never a bare
+`toLocaleDateString()` or `Date.now()` in render (HUBANDSPOKE-6,
+2026-11-08). Numbers in that HTML pin the locale: `toLocaleString("en-US")`.
+Data fetched after mount isn't in the server HTML and needs neither. Add new
+server-rendered surfaces to `dashboard-hydration.spec.ts` and
+`server-dates-hydration.test.ts`.
+
 The reference migration is `src/components/dashboard/content-view.tsx`
 — copy that shape for a new list view.
 
