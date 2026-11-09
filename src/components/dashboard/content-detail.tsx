@@ -132,7 +132,7 @@ import { recordVisit } from "@/lib/hooks/use-recent-items";
 import { startVisibleInterval } from "@/lib/visible-interval";
 import { validatePublishedLinkPlatform } from "@/lib/published-link-validation";
 import { trackUsage } from "@/lib/usage/track";
-import { ViewsAgainstUsual } from "@/components/dashboard/views-against-usual";
+import { ViewsAgainstUsual, WhyItWon } from "@/components/dashboard/views-against-usual";
 import type { AgainstUsual } from "@/lib/winners/pick";
 import { acceptsPastedLink, isPagePaste, pastedPostLink } from "@/lib/paste-to-publish";
 import { HandoffButton } from "./handoff-button";
@@ -3648,6 +3648,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                 : "Reported"}
             {item.postType !== "newsletter" && <ViewsAgainstUsual brand={brand} value={againstUsual} />}
           </p>
+          {item.postType !== "newsletter" && <WhyItWon brand={brand} value={againstUsual} />}
         </div>
         <div className="rounded-lg border border-border bg-card p-4">
           <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">

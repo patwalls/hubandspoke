@@ -34,3 +34,24 @@ export function ViewsAgainstUsual({ brand, value }: { brand: string; value: Agai
     </span>
   );
 }
+
+/**
+ * Under the Views card's footer on a post that beat its usual: the
+ * `winner-notes` cron's one-line "why it won" (Haiku, written once per
+ * winner). Renders nothing until the note exists, or when the post isn't a
+ * win right now (`withWhy` in pick.ts). Clamped to two lines; the full note is
+ * the tooltip.
+ */
+export function WhyItWon({ brand, value }: { brand: string; value: AgainstUsual | null }) {
+  const why = value?.lift != null ? value.why : null;
+  useEffect(() => {
+    if (why) trackUsage("content:why-it-won", brand);
+  }, [why, brand]);
+
+  if (!why) return null;
+  return (
+    <p className="mt-1.5 line-clamp-2 text-xs text-muted-foreground" title={why} data-testid="why-it-won">
+      <span className="font-medium text-foreground/80">Why it won:</span> {why}
+    </p>
+  );
+}

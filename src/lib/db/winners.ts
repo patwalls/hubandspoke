@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   againstUsual,
+  withWhy,
   pickWinners,
   type AgainstUsual,
   scoreFormats,
@@ -122,7 +123,7 @@ async function getCandidates(brand: string, days: number): Promise<WinnerRow[]> 
  * One published post against its own account + post type's median over the
  * 90 days before it went out (the post page's Views card). Null for an
  * unpublished post, one with no account or views, or an account without a
- * usual yet. The window is anchored on the post's own publish date, so an old
+ * usual yet. A win carries the `winner-notes` cron's "why it won" line. The window is anchored on the post's own publish date, so an old
  * post is judged against what was normal then, not now.
  */
 export async function getPostAgainstUsual(itemId: string): Promise<AgainstUsual | null> {
@@ -133,8 +134,9 @@ export async function getPostAgainstUsual(itemId: string): Promise<AgainstUsual 
     baseline_median: string | number | null;
     baseline_likes_median: string | number | null;
     baseline_posts: string | number;
+    win_note: WinNote | null;
   }>(sql`
-    SELECT p.views, p.likes, coalesce(p.post_type, '') AS post_type,
+    SELECT p.views, p.likes, coalesce(p.post_type, '') AS post_type, p.win_note,
            percentile_cont(0.5) WITHIN GROUP (ORDER BY b.views) AS baseline_median,
            percentile_cont(0.5) WITHIN GROUP (ORDER BY b.likes) AS baseline_likes_median,
            count(b.id) AS baseline_posts
@@ -151,11 +153,11 @@ export async function getPostAgainstUsual(itemId: string): Promise<AgainstUsual 
        AND p.account_id IS NOT NULL
        AND p.views IS NOT NULL
        AND p.published_at IS NOT NULL
-     GROUP BY p.id, p.views, p.likes, p.post_type
+     GROUP BY p.id, p.views, p.likes, p.post_type, p.win_note
   `);
   const r = Array.from(rows)[0];
   if (!r) return null;
-  return againstUsual({
+  const standing = againstUsual({
     id: itemId,
     title: null,
     views: Number(r.views),
@@ -165,4 +167,5 @@ export async function getPostAgainstUsual(itemId: string): Promise<AgainstUsual 
     likes: Number(r.likes ?? 0),
     baselineLikesMedian: Number(r.baseline_likes_median ?? 0),
   });
+  return withWhy(standing, r.win_note?.note);
 }
