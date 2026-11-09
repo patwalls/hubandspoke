@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildMyWorkDigest, type DigestRow } from "./digest";
+import { buildMyWorkDigest, previousDigestSend, type DigestRow, type DigestWin } from "./digest";
 import type { RowNews } from "./news";
 
 const row = (id: string, status = "Assigned"): DigestRow => ({
@@ -143,5 +143,73 @@ describe("buildMyWorkDigest", () => {
       expect(d.stuck).toBe(8);
       expect(d.text).toContain("8 of these have waited 3+ days to move on.");
     });
+  });
+});
+
+describe("your wins (wins-reach-makers M4)", () => {
+  const win = (id: string, lift: number, why = `Why ${id}`): DigestWin => ({
+    id,
+    title: `Win ${id}`,
+    brand: "starter-story",
+    postType: "tiktok",
+    lift,
+    why,
+  });
+
+  it("lists up to three wins under the button, best first, with ×N and why", () => {
+    const d = buildMyWorkDigest({
+      ...base,
+      yourTurn: [row("a")],
+      toReview: [],
+      wins: [win("w1", 2.1), win("w2", 14), win("w3", 3), win("w4", 1.6)],
+    })!;
+    expect(d.wins.map((w) => w.id)).toEqual(["w2", "w3", "w1"]);
+    expect(d.html).toContain("Posts you edited beat their usual");
+    expect(d.html).toContain("14× its usual");
+    expect(d.html).toContain("Why w2");
+    expect(d.html).toContain("https://hs.test/starter-story/content/w2");
+    // Good news never outranks the work: the section comes after the button.
+    expect(d.html.indexOf("Open My Work")).toBeLessThan(d.html.indexOf("data-digest-wins"));
+    expect(d.text.indexOf("Open My Work")).toBeLessThan(d.text.indexOf("Posts you edited"));
+    expect(d.subject).not.toContain("usual");
+  });
+
+  it("a win alone never sends an email", () => {
+    expect(buildMyWorkDigest({ ...base, yourTurn: [], toReview: [], wins: [win("w1", 4)] })).toBeNull();
+  });
+
+  it("no wins → no section; a single win reads singular", () => {
+    const none = buildMyWorkDigest({ ...base, yourTurn: [row("a")], toReview: [] })!;
+    expect(none.html).not.toContain("data-digest-wins");
+    const one = buildMyWorkDigest({ ...base, yourTurn: [row("a")], toReview: [], wins: [win("w1", 4)] })!;
+    expect(one.text).toContain("A post you edited beat its usual");
+  });
+
+  it("escapes the note and title", () => {
+    const d = buildMyWorkDigest({
+      ...base,
+      yourTurn: [row("a")],
+      toReview: [],
+      wins: [{ ...win("w1", 4, "Used <b>bold</b> hook"), title: "A & B" }],
+    })!;
+    expect(d.html).toContain("Used &lt;b&gt;bold&lt;/b&gt; hook");
+    expect(d.html).toContain("A &amp; B");
+  });
+});
+
+describe("previousDigestSend", () => {
+  const at = (iso: string) => previousDigestSend(new Date(iso)).toISOString();
+  it("the weekday 12:00 run looks back to the run before it", () => {
+    expect(at("2026-11-10T12:00:05Z")).toBe("2026-11-09T12:00:00.000Z"); // Tue → Mon
+  });
+  it("Monday's run covers the weekend from Friday's run", () => {
+    expect(at("2026-11-09T12:00:05Z")).toBe("2026-11-06T12:00:00.000Z");
+  });
+  it("a preview before today's run shows what today's email will carry", () => {
+    expect(at("2026-11-10T09:00:00Z")).toBe("2026-11-09T12:00:00.000Z");
+    expect(at("2026-11-08T18:00:00Z")).toBe("2026-11-06T12:00:00.000Z"); // Sunday
+  });
+  it("a preview after today's run shows what tomorrow's will carry", () => {
+    expect(at("2026-11-10T15:00:00Z")).toBe("2026-11-10T12:00:00.000Z");
   });
 });

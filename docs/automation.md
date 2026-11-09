@@ -947,6 +947,13 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
   links only open a page; the answer saves on the tap there, so mail
   scanners that follow links change nothing. Rules in
   `src/lib/my-work/answer.ts`.
+- **Your wins (2026-11-09, wins-reach-makers M4):** under the button, up to
+  3 posts the recipient is the editor of whose `win_note` the `winner-notes`
+  cron wrote since the previous run (`previousDigestSend`: the latest
+  weekday 12:00 UTC at least an hour back, so Monday covers Friday on), each
+  with its ×N and the note. The cron notes a post once, so a win is in one
+  email. `getMyNewWins` in `queries.ts`. Never in the subject and never a
+  reason to send: nothing waiting still means no email.
 - **Stuck hand-offs first (2026-11-02, handoffs-dont-stall M3):** a To
   review or Ready To Publish row that has sat 3+ days in that status (same
   rule as In Production's "waiting Nd", `src/lib/production/waiting.ts`;
