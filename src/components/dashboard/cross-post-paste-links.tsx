@@ -7,7 +7,10 @@ import { AlertTriangle, Check, ExternalLink, UploadIcon } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { postTypeLabel } from "@/lib/badge-colors";
-import { validatePublishedLinkPlatform } from "@/lib/published-link-validation";
+import {
+  shareLinkWarning,
+  validatePublishedLinkPlatform,
+} from "@/lib/published-link-validation";
 import { trackUsage } from "@/lib/usage/track";
 import { READY_CHANGED_EVENT } from "@/lib/publish/events";
 import { nextOpenId } from "@/lib/publish/next-open";
@@ -109,11 +112,20 @@ function PasteRow({
   const canEdit = useCanEditBrand(brand);
   // A link from another platform than the post is caught before it's saved.
   const mismatch = validatePublishedLinkPlatform(link.trim(), row.postType);
+  // A share link never brings back views: the first Enter warns, a second
+  // Enter keeps it anyway.
+  const shareWarn = mismatch ? null : shareLinkWarning(link);
+  const [shareOk, setShareOk] = useState(false);
   const label = postTypeLabel(row.postType);
 
   async function publish() {
     const url = link.trim();
     if (!url || mismatch || !canEdit) return;
+    if (shareWarn && !shareOk) {
+      setShareOk(true);
+      trackUsage("publish:share-link-warned", brand);
+      return;
+    }
     setBusy(true);
     try {
       const res = await fetch(`/api/production-items/${row.id}/publish`, {
@@ -168,7 +180,10 @@ function PasteRow({
             value={link}
             disabled={busy || !canEdit}
             title={canEdit ? undefined : "View only — you don't have edit access to this brand"}
-            onChange={(e) => setLink(e.target.value)}
+            onChange={(e) => {
+              setLink(e.target.value);
+              setShareOk(false);
+            }}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault();
@@ -179,6 +194,18 @@ function PasteRow({
           />
         )}
       </div>
+      {shareWarn && !publishedLink ? (
+        <div
+          className="mt-1 flex items-center gap-1.5 text-[11px] text-amber-600 dark:text-amber-400"
+          data-testid="publish-link-share-warning"
+        >
+          <AlertTriangle className="size-3 shrink-0" />
+          <span>
+            {shareWarn}
+            {shareOk ? " Press Enter again to use it anyway." : null}
+          </span>
+        </div>
+      ) : null}
       {mismatch && !publishedLink ? (
         <div className="mt-1 flex items-center gap-1.5 text-[11px] text-amber-600 dark:text-amber-400">
           <AlertTriangle className="size-3" />
