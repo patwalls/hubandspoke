@@ -43,6 +43,15 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-11-09-facebook-share-link-views",
+    shippedAt: "2026-11-09T15:12:46Z",
+    kind: "fix",
+    title: "Facebook posts saved with a share link now get their views",
+    body: "A Facebook post saved with a link from the Share button used to stay at zero views, because that link doesn't say which post it is. The app now follows it to the real post and fills in the views, likes and comments, and it folds away the extra copy of that post that sometimes appeared in Content.",
+    screen: "/[brand]/content",
+    audience: { usersOf: ["/[brand]/content"] },
+  },
+  {
     id: "2026-11-08-post-beat-usual",
     shippedAt: "2026-11-08T22:00:36Z",
     kind: "feature",

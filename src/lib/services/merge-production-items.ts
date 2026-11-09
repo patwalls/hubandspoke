@@ -177,29 +177,23 @@ export async function mergeProductionItems(
     // content_events.content_item_id (CASCADE)
     // notifications.content_item_id (CASCADE)
 
-    const repointTables = [
-      "transcripts",
-      "production_item_media",
-      "clip_ideas",
-      "content_drafts",
-      "repurpose_triggers",
-      "cross_post_fit_verdicts",
-      "view_snapshots",
-      "cross_post_decisions",
-      "content_comments",
-      "content_events",
-      "notifications",
-    ];
+    const repointColumns: Record<string, string> = {
+      transcripts: "production_item_id",
+      production_item_media: "production_item_id",
+      clip_ideas: "source_production_item_id",
+      content_drafts: "production_item_id",
+      repurpose_triggers: "production_item_id",
+      cross_post_fit_verdicts: "source_item_id",
+      view_snapshots: "production_item_id",
+      cross_post_decisions: "source_item_id",
+      content_comments: "content_item_id",
+      content_events: "content_item_id",
+      notifications: "content_item_id",
+    };
 
     // Repoint foreign keys from secondary to primary
     // Most tables use CASCADE delete, so soft-delete of secondary will clean up automatically
-    for (const table of repointTables) {
-      const columnName = table === "clip_ideas"
-        ? "source_production_item_id"
-        : table === "cross_post_decisions"
-        ? "source_item_id"
-        : "production_item_id";
-
+    for (const [table, columnName] of Object.entries(repointColumns)) {
       try {
         // Try to update all references from secondary to primary
         await db.execute(

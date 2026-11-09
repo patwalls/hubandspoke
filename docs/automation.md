@@ -499,6 +499,17 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
   `uniq_production_items_account_platform_content_id`. Stamps
   `accounts.lastContentSyncAt` on success, `lastContentSyncError` on
   failure. Writes `syncLogs` with `sync_type=account-content-sync:<platform>`.
+- **Facebook share links (2026-11-09):** before fetching, a `facebook` sync runs
+  `reconcileFacebookShareLinks` (`src/lib/services/facebook-share-links.ts`) on rows
+  saved with a `facebook.com/share/…` link and no `platform_content_id`, up to 40 per
+  sync, newest first. A free plain GET with `redirect: "manual"` follows the link; the
+  row takes the post's real link, so the upsert below matches it instead of adding a
+  duplicate. A row the sync already made for that post (`created_via =
+  sync:account-content`, same link) is merged into the saved row with
+  `mergeProductionItems` (saved row kept, as in schedule-reconcile) and its likes,
+  comments, estimate flag and thumbnail are copied over. Links that don't reach a post
+  (dead, login wall) leave the row untouched and retry next sync. Failures here never
+  fail the sync.
 - **Permanent vs transient failures:** `isPermanentSyncFailure` (deactivated
   TikTok, not-found Threads, nonexistent Facebook page via SC
   `accountDoesNotExist:true`, personal-profile LinkedIn URL) flips the account
