@@ -305,11 +305,77 @@ export function parseFacebookAccountInput(raw: string): FacebookAccountInput {
   };
 }
 
+const FACEBOOK_HOSTS = new Set([
+  "facebook.com",
+  "www.facebook.com",
+  "m.facebook.com",
+  "web.facebook.com",
+]);
+
+/** Facebook pages where the query string, not the path, says which post it is. */
+const FACEBOOK_QUERY_PAGES = /^\/(photo\.php|permalink\.php|story\.php|photo|watch)\/?$/;
+
+function parseFacebookUrl(url: string | null | undefined): URL | null {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    return FACEBOOK_HOSTS.has(u.hostname.toLowerCase()) ? u : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The `key=value` that names the post on a query-style Facebook page
+ * (`/photo.php?fbid=…`). Null everywhere else: on those pages the path is the
+ * identity, and stripping the query is right.
+ */
+export function facebookPostParam(u: URL): string | null {
+  if (!FACEBOOK_HOSTS.has(u.hostname.toLowerCase())) return null;
+  if (!FACEBOOK_QUERY_PAGES.test(u.pathname)) return null;
+  for (const key of ["story_fbid", "fbid", "v"]) {
+    const value = u.searchParams.get(key);
+    if (value) return `${key}=${value}`;
+  }
+  return null;
+}
+
+/**
+ * A `facebook.com/share/…` link: the short form Facebook's Share button hands
+ * out. It names no post on its own; `resolveFacebookShareLink` follows it.
+ */
+export function isFacebookShareLink(url: string | null | undefined): boolean {
+  return parseFacebookUrl(url)?.pathname.startsWith("/share/") ?? false;
+}
+
+/**
+ * The link the account sync stores for a post, given any URL for it. Null when
+ * the URL isn't a post (a login wall, a checkpoint, another share link), so a
+ * bad redirect can never replace a saved link.
+ */
+export function canonicalFacebookPostUrl(
+  url: string | null | undefined
+): string | null {
+  const u = parseFacebookUrl(url);
+  if (!u) return null;
+  const path = u.pathname;
+  if (FACEBOOK_QUERY_PAGES.test(path)) {
+    const param = facebookPostParam(u);
+    return param ? `https://www.facebook.com${path}?${param}` : null;
+  }
+  const isPost =
+    /^\/reel\/\d+\/?$/.test(path) ||
+    /^\/[^/]+\/(posts|videos)\/[^/]+(\/[^/]+)?\/?$/.test(path) ||
+    /^\/[^/]+\/photos\/.+/.test(path);
+  return isPost ? `https://www.facebook.com${path}` : null;
+}
+
 /**
  * Loose URL key for fallback dedup when neither side has a `platform_content_id`
  * we can extract (rare — short links, custom domains). Strips query string,
  * fragment, trailing slash, leading `www.`, and folds `threads.com` →
- * `threads.net`. Returns null for inputs that don't parse as URLs.
+ * `threads.net`, keeping only the param that names a Facebook post on
+ * `/photo.php`-style pages. Returns null for inputs that don't parse as URLs.
  */
 export function looseUrlKey(url: string | null | undefined): string | null {
   if (!url) return null;
@@ -320,7 +386,8 @@ export function looseUrlKey(url: string | null | undefined): string | null {
       .replace(/^www\./, "")
       .replace(/^threads\.com$/, "threads.net");
     const path = u.pathname.replace(/\/+$/, "");
-    return `${host}${path}`;
+    const fbParam = facebookPostParam(u);
+    return `${host}${path}${fbParam ? `?${fbParam}` : ""}`;
   } catch {
     return url.toLowerCase().split(/[?#]/)[0].replace(/\/+$/, "") || null;
   }

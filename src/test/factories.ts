@@ -237,6 +237,8 @@ export async function createTestUser(
 }
 
 export interface CreateTestAccountOptions {
+  /** Page URL; the Facebook sync requires one. */
+  url?: string | null;
   brand?: string;
   platform?: string;
   handle?: string;
@@ -270,6 +272,7 @@ export async function createTestAccount(
   const [row] = await db
     .insert(accounts)
     .values({
+      url: opts.url ?? null,
       brandId: brand.id,
       platform: opts.platform ?? "x",
       handle: opts.handle ?? `vitest-acct-${randomSuffix()}`,

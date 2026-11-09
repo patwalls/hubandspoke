@@ -36,7 +36,8 @@ import type { PostType } from "@/lib/platform-field-schemas";
 import { scGetWithRetry } from "@/lib/services/sc-client";
 export { SC_RETRY_DELAYS_MS } from "@/lib/services/sc-client";
 import type { SCTweet } from "@/lib/services/sc-fetchers";
-import { extractContentId, looseUrlKey } from "@/lib/platform-url";
+import { extractContentId, facebookPostParam, looseUrlKey } from "@/lib/platform-url";
+import { reconcileFacebookShareLinks } from "@/lib/services/facebook-share-links";
 import { estimateViewsFromLikes } from "@/lib/services/view-estimator";
 
 // ─── Support matrix ───────────────────────────────────────────────────────
@@ -847,7 +848,8 @@ function normalizeUrl(url: string): string | null {
     const isYouTubeWatch =
       /(?:^|\.)youtube\.com$/i.test(parsed.hostname) && pathname === "/watch";
     const v = isYouTubeWatch ? parsed.searchParams.get("v") : null;
-    const suffix = v ? `?v=${v}` : "";
+    const fbParam = facebookPostParam(parsed);
+    const suffix = v ? `?v=${v}` : fbParam ? `?${fbParam}` : "";
     return `${parsed.origin}${pathname}${suffix}`.toLowerCase();
   } catch {
     return null;
@@ -1267,6 +1269,11 @@ export async function syncAccountContent(
             "Facebook content sync requires a page URL — re-add the account with the full facebook.com/page-slug URL"
           );
         }
+        // Before the upsert: a share link has to be a real post link by the
+        // time incoming posts are matched, or the sync adds a duplicate row.
+        await reconcileFacebookShareLinks(accountId).catch((err) => {
+          console.error("[facebook-share-links] sweep failed", err);
+        });
         const r = await fetchFacebookPostsPaged(row.url, maxPages);
         fetched.push(...r.items);
         credits += r.credits;

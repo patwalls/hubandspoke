@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { derivePlatformContentId, parseLinkedInAccountInput } from "./platform-url";
+import {
+  canonicalFacebookPostUrl,
+  derivePlatformContentId,
+  isFacebookShareLink,
+  looseUrlKey,
+  parseLinkedInAccountInput,
+} from "./platform-url";
 
 describe("parseLinkedInAccountInput", () => {
   it("parses a full company URL into slug + canonical company url", () => {
@@ -92,5 +98,47 @@ describe("derivePlatformContentId", () => {
   it("is null for a link it can't read, or no link", () => {
     expect(derivePlatformContentId("newsletter", "https://example.com/issue-12")).toBeNull();
     expect(derivePlatformContentId("instagram_reel", null)).toBeNull();
+  });
+});
+
+describe("Facebook share links", () => {
+  it("recognizes a share link on any Facebook host, and nothing else", () => {
+    expect(isFacebookShareLink("https://www.facebook.com/share/p/19igfL5kHn/")).toBe(true);
+    expect(isFacebookShareLink("https://m.facebook.com/share/v/1CC7ehNLZx/")).toBe(true);
+    expect(isFacebookShareLink("https://www.facebook.com/reel/123/")).toBe(false);
+    expect(isFacebookShareLink("https://evil.example/share/p/abc/")).toBe(false);
+    expect(isFacebookShareLink(null)).toBe(false);
+  });
+
+  it("reduces a redirect target to the exact link the account sync stores", () => {
+    expect(
+      canonicalFacebookPostUrl(
+        "https://www.facebook.com/starterstoryofficial/posts/pfbid02LQ?rdid=abc&share_url=https%3A%2F%2Fx"
+      )
+    ).toBe("https://www.facebook.com/starterstoryofficial/posts/pfbid02LQ");
+    expect(
+      canonicalFacebookPostUrl("https://m.facebook.com/reel/2059793341393233/?rdid=abc")
+    ).toBe("https://www.facebook.com/reel/2059793341393233/");
+  });
+
+  it("keeps the query param that names the post on php-style pages", () => {
+    expect(
+      canonicalFacebookPostUrl("https://www.facebook.com/photo.php?fbid=42&set=a.1&type=3")
+    ).toBe("https://www.facebook.com/photo.php?fbid=42");
+  });
+
+  it("refuses anything that isn't a post, so a login wall never overwrites a link", () => {
+    expect(canonicalFacebookPostUrl("https://www.facebook.com/login/?next=x")).toBeNull();
+    expect(canonicalFacebookPostUrl("https://www.facebook.com/checkpoint/1501092823525282/")).toBeNull();
+    expect(canonicalFacebookPostUrl("https://www.facebook.com/share/p/abc/")).toBeNull();
+    expect(canonicalFacebookPostUrl("https://www.facebook.com/photo.php")).toBeNull();
+    expect(canonicalFacebookPostUrl("https://evil.example/a/posts/1")).toBeNull();
+  });
+
+  it("looseUrlKey doesn't fold every Facebook photo into one key", () => {
+    const a = looseUrlKey("https://www.facebook.com/photo.php?fbid=1&set=a.9");
+    const b = looseUrlKey("https://www.facebook.com/photo.php?fbid=2&set=a.9");
+    expect(a).not.toBe(b);
+    expect(a).toBe(looseUrlKey("https://www.facebook.com/photo.php?fbid=1"));
   });
 });
