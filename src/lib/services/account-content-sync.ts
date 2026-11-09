@@ -11,7 +11,8 @@
  *                  an account is first added. Cost-capped by `maxPages`.
  *
  * Platform support (documented in docs/automation.md):
- *   youtube    — long + shorts, full catalog via continuationToken
+ *   youtube    — long + shorts, full catalog via continuationToken;
+ *                community posts latest page only (both modes)
  *   instagram  — full history via next_max_id
  *   tiktok     — full history via max_cursor
  *   linkedin   — company pages only, max 7 pages (platform cap)
@@ -176,6 +177,19 @@ interface SCShort {
   commentCountInt?: number;
   likeCountInt?: number;
   publishDate?: string;
+}
+
+/** `/v1/youtube/channel/community-posts` item (shape from SC's docs,
+ *  2026-11-09). No comment count in the feed. */
+export interface SCCommunityPost {
+  id?: string;
+  url?: string;
+  content?: string;
+  image?: string;
+  images?: string[];
+  likeCount?: number;
+  publishedTime?: string;
+  publishedTimeText?: string;
 }
 
 interface SCInstagramPost {
@@ -454,6 +468,58 @@ async function fetchYouTubeShortsBackfill(
   // Best-effort credit accounting — SC doesn't return a page count.
   const estimatedCredits = Math.max(1, Math.ceil(items.length / 30));
   return { items, credits: estimatedCredits };
+}
+
+export function normalizeYouTubeCommunityPost(
+  p: SCCommunityPost
+): NormalizedItem | null {
+  const url = p.url ?? (p.id ? `https://www.youtube.com/post/${p.id}` : null);
+  const contentId = p.id ?? extractContentId("youtube_community", url);
+  if (!url || !contentId) return null;
+  const body = (p.content ?? "").trim();
+  const rawDate = p.publishedTime ? new Date(p.publishedTime) : null;
+  const publishedAt =
+    rawDate && !Number.isNaN(rawDate.getTime()) ? rawDate : null;
+  return {
+    platformContentId: contentId,
+    publishedLink: url,
+    postType: "youtube_community",
+    title: body
+      ? body.slice(0, 120) + (body.length > 120 ? "..." : "")
+      : "(No caption)",
+    thumbnail: p.image ?? p.images?.[0] ?? null,
+    publishedAt,
+    publishedDate: publishedAt
+      ? publishedAt.toISOString().split("T")[0]
+      : parseRelativeTime(p.publishedTimeText ?? ""),
+    // No view count in the feed — upsertItems estimates views from likes.
+    views: null,
+    likes: p.likeCount ?? null,
+    comments: null,
+    contentBody: body || null,
+    contentBodySource: body ? "scrape_creators" : null,
+  };
+}
+
+/**
+ * Community posts made straight on YouTube (not through Hub & Spoke).
+ * Latest page only, in both modes: Starter Story's 2025 community rows
+ * carry `published_link = 'starterstory.com'`, so paging back through
+ * history would insert a second copy of every one of them.
+ * 404 = the channel has no community tab.
+ */
+async function fetchYouTubeCommunityLatest(
+  handle: string
+): Promise<{ items: NormalizedItem[]; credits: number }> {
+  const data = await scGetJsonNullOn404("/v1/youtube/channel/community-posts", {
+    handle: handle.startsWith("@") ? handle : `@${handle}`,
+  });
+  if (!data) return { items: [], credits: 0 };
+  const posts = (data.posts as SCCommunityPost[]) || [];
+  const items = posts
+    .map(normalizeYouTubeCommunityPost)
+    .filter((i): i is NormalizedItem => i !== null);
+  return { items, credits: 1 };
 }
 
 async function fetchInstagramPostsPaged(
@@ -1206,6 +1272,17 @@ export async function syncAccountContent(
           credits += shorts.credits;
         } catch (err) {
           partialError = err instanceof Error ? err.message : String(err);
+        }
+        pages += 1;
+        // Third pass: community posts. Same rule as shorts — a failure here
+        // keeps what the other two passes already fetched.
+        try {
+          const community = await fetchYouTubeCommunityLatest(row.handle);
+          fetched.push(...community.items);
+          credits += community.credits;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          partialError = partialError ? `${partialError}; ${msg}` : msg;
         }
         pages += 1;
         break;

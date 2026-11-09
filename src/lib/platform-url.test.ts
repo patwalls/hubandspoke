@@ -89,6 +89,28 @@ describe("derivePlatformContentId", () => {
     ).toBe("ABC123");
   });
 
+  // Community links had no id before 2026-11-09, so the community sync pass
+  // could only match the 196 Starter Story rows by loose URL — and the `?si=`
+  // share links editors paste would never have matched the sync's clean URL.
+  it("reads a YouTube community post id from both link shapes", () => {
+    const id = "Ugkx-TbUFdDHy_8khcakLQSGo2zbJxGZOUfX";
+    expect(
+      derivePlatformContentId("youtube_community", `http://youtube.com/post/${id}?si=WwD8pkA6IzT72FCw`),
+    ).toBe(id);
+    expect(
+      derivePlatformContentId(
+        "youtube_community",
+        `https://www.youtube.com/channel/UCabc/community?lb=${id}`,
+      ),
+    ).toBe(id);
+  });
+
+  it("still reads a video id from a youtube_community row that holds a Shorts link", () => {
+    expect(
+      derivePlatformContentId("youtube_community", "https://youtube.com/shorts/Ar8yKK2liUw"),
+    ).toBe("Ar8yKK2liUw");
+  });
+
   it("falls back to the host when the post type isn't set", () => {
     expect(derivePlatformContentId(null, "https://x.com/someone/status/1234567890")).toBe(
       "1234567890",

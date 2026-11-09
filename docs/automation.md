@@ -328,8 +328,9 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
     retried after 1s then 3s (`SC_RETRY_DELAYS_MS`); 4xx is never retried.
     Same helper backs
     `scFetchJson`, so the per-post enrichers get the retry too.
-  - **YouTube shorts failure is partial, not fatal:** if `/channel/shorts`
-    still 5xx after retries, the long-form items already fetched are upserted
+  - **YouTube shorts / community failure is partial, not fatal:** if
+    `/channel/shorts` or `/channel/community-posts` still 5xx after retries,
+    the items already fetched are upserted
     and the run is logged to `sync_logs` as `error` (transient, account stays
     active) with the shorts message in `accounts.last_content_sync_error`.
 
@@ -568,6 +569,19 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
     internally; costs more credits). Both endpoints 404 on channels with
     no Shorts feed (common for long-form-only podcasts) — we soft-fail and
     return empty so the long-form pass still upserts.
+  - YouTube Community (third pass, 2026-11-09) →
+    `/v1/youtube/channel/community-posts`, **latest page only in both
+    modes** (`fetchYouTubeCommunityLatest`). Before this, community posts
+    only existed if made in Hub & Spoke; posts made straight on YouTube now
+    land as `postType: youtube_community`, `format: null`, body in
+    `content_body`, views estimated from likes (the feed has no view or
+    comment count). No history backfill on purpose: Starter Story's 164
+    community rows from Mar–Sep 2025 carry `published_link =
+    'starterstory.com'`, so paging back would insert a duplicate of each.
+    404 (no community tab) = empty; a 5xx is partial like shorts. Matching
+    tracked rows relies on `extractContentId` reading the `Ugkx…` id from
+    `/post/<id>` and `?lb=<id>` links (the `?si=` share links editors paste
+    never matched SC's clean URL by string).
   - Instagram → `next_max_id` until `more_available=false`
   - TikTok → `max_cursor` until `has_more=false`
   - LinkedIn → `page=1..7` (LinkedIn caps at 7 pages)
@@ -575,7 +589,8 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
   - Threads → no cursor; platform exposes only ~20–30 recent posts
 - **Cost envelope:** 1 SC credit per page. `maxPages` defaults to 1 for
   `latest`, 50 for `backfill`. A new YouTube account auto-backfill costs
-  ≤ ~100 credits (long + shorts).
+  ≤ ~100 credits (long + shorts). The community pass adds 1 credit per
+  YouTube account per run (every 30 min → ~48/day/channel).
 - **Dedup priority** (inside `loadExisting`):
   1. Match by `(accountId, platform_content_id)` — primary
   2. For legacy rows missing the column, derive id on the fly from

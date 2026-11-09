@@ -47,7 +47,8 @@ export function platformOf(
  * when the URL doesn't match a known shape — caller should leave the column
  * NULL rather than guess.
  *
- *   YouTube  → 11-char video id from `?v=`, `/shorts/`, `/embed/`, `youtu.be/`
+ *   YouTube  → 11-char video id from `?v=`, `/shorts/`, `/embed/`, `youtu.be/`;
+ *              community post id (`Ugkx…`) from `/post/` or `?lb=`
  *   IG       → shortcode after `/p/`, `/reel/`, `/reels/`, or `/tv/`
  *   Threads  → code after `/post/`
  *   X        → numeric id after `/status/`
@@ -63,6 +64,10 @@ export function extractContentId(
   if (!platform) return null;
   switch (platform) {
     case "youtube": {
+      // Community posts: `/post/<id>` or `/community?lb=<id>`. Their ids
+      // (`Ugkx…`, `Ugz…`) are longer than a video id, so check them first.
+      const post = url.match(/(?:\/post\/|[?&]lb=)(Ug[\w-]+)/);
+      if (post) return post[1];
       const m = url.match(/(?:v=|\/shorts\/|\/embed\/|youtu\.be\/)([\w-]{11})/);
       return m?.[1] ?? null;
     }
