@@ -12,7 +12,8 @@ import {
 } from "./split";
 import { htmlToPlainText } from "@/lib/comments/sanitize";
 import { rowNews, type RowNews } from "./news";
-import { buildMyWorkDigest } from "./digest";
+import { buildMyWorkDigest, DIGEST_WINS, previousDigestSend, type DigestWin } from "./digest";
+import type { WinNote } from "@/lib/db/schema";
 
 const REVIEWER_WINDOW_DAYS = 30;
 
@@ -220,11 +221,12 @@ export function appBaseUrl(): string {
  * Shared by the `my-work-digest` task and the /my-work/email preview, so the
  * preview is exactly what lands in the inbox.
  */
-export async function loadMyWorkDigest(userId: string, name: string | null) {
+export async function loadMyWorkDigest(userId: string, name: string | null, now: Date = new Date()) {
   const { yourTurn, toReview } = await getMyWork(userId);
-  const [news, since] = await Promise.all([
+  const [news, since, wins] = await Promise.all([
     getRowNews(userId, [...new Set([...yourTurn, ...toReview].map((r) => r.id))]),
     getStatusSinceMany([...toReview, ...yourTurn].map((r) => r.id)),
+    getMyNewWins(userId, previousDigestSend(now)),
   ]);
   // No status history (a post synced in already in Review): updatedAt, as on /my-work.
   const sinceOf = (r: (typeof toReview)[number]) => since.get(r.id) ?? r.updatedAt;
@@ -237,8 +239,47 @@ export async function loadMyWorkDigest(userId: string, name: string | null) {
     news,
     reviewSince,
     turnSince,
+    wins,
+    now,
     baseUrl: appBaseUrl(),
   });
+}
+
+/**
+ * Posts `userId` edited whose "why it won" note the `winner-notes` cron wrote
+ * after `since` (wins-reach-makers M4). The cron notes a post once, when it
+ * first counts as a win, so a win lands in exactly one morning email.
+ */
+export async function getMyNewWins(userId: string, since: Date): Promise<DigestWin[]> {
+  const rows = await db
+    .select({
+      id: productionItems.id,
+      title: productionItems.title,
+      brand: productionItems.brand,
+      postType: productionItems.postType,
+      winNote: productionItems.winNote,
+    })
+    .from(productionItems)
+    .where(
+      and(
+        eq(productionItems.editorUserId, userId),
+        isNull(productionItems.deletedAt),
+        sql`${productionItems.winNote} IS NOT NULL`,
+        sql`(${productionItems.winNote}->>'generatedAt')::timestamptz > ${since.toISOString()}`,
+      ),
+    )
+    .orderBy(sql`(${productionItems.winNote}->>'lift')::numeric DESC`)
+    .limit(DIGEST_WINS);
+  return rows
+    .filter((r): r is typeof r & { winNote: WinNote } => !!r.winNote?.note)
+    .map((r) => ({
+      id: r.id,
+      title: r.title,
+      brand: r.brand,
+      postType: r.postType,
+      lift: Number(r.winNote.lift),
+      why: r.winNote.note,
+    }));
 }
 
 /**

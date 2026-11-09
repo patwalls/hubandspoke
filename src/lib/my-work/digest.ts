@@ -22,11 +22,52 @@
  *   and one line under the subject counts them. Before this a Ready To Publish
  *   post read just "Ready To Publish" and could sit below five fresh Assigned
  *   rows, so a week-old post looked like any other.
+ * - Your wins go under the button (wins-reach-makers M4): up to three posts
+ *   you edited that beat their account's usual since the last email, each
+ *   with its ×N and "why it won". Never in the subject and never a reason to
+ *   send — the email is still about what's waiting.
  */
 import { postTypeDisplay } from "@/lib/platforms";
 import { waitingInStatus } from "@/lib/production/waiting";
+import { formatLift } from "@/lib/winners/pick";
 import { ANSWERS, waited } from "./answer";
 import type { RowNews } from "./news";
+
+/**
+ * A post you edited that beat its account's usual (wins-reach-makers M4):
+ * the `winner-notes` cron judged it a win and wrote its "why it won" since
+ * the last morning email, so each win is in exactly one email.
+ */
+export interface DigestWin {
+  id: string;
+  title: string | null;
+  brand: string;
+  postType?: string | null;
+  /** The lift when the note was written (pick.ts rules). */
+  lift: number;
+  why: string;
+}
+
+/** At most this many wins in one email — the list of work stays the point. */
+export const DIGEST_WINS = 3;
+
+/** The digest goes out at 12:00 UTC on weekdays (src/jobs/crontab.ts). */
+const SEND_HOUR_UTC = 12;
+
+/**
+ * When the previous morning email went out, as seen from `now`: the latest
+ * weekday 12:00 UTC at least an hour before `now` (so the 12:00 run itself
+ * looks back to the run before it). Monday's email covers Friday 12:00 on —
+ * the weekend's wins aren't lost. The preview page uses the same rule, so it
+ * shows the wins the next email will carry.
+ */
+export function previousDigestSend(now: Date): Date {
+  const t = new Date(now.getTime() - 60 * 60 * 1000);
+  const d = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate(), SEND_HOUR_UTC));
+  if (d > t) d.setUTCDate(d.getUTCDate() - 1);
+  while (d.getUTCDay() === 0 || d.getUTCDay() === 6) d.setUTCDate(d.getUTCDate() - 1);
+  return d;
+}
 
 export interface DigestRow {
   id: string;
@@ -48,6 +89,8 @@ export interface DigestInput {
   now?: Date;
   /** App origin, no trailing slash. */
   baseUrl: string;
+  /** Your posts that became wins since the last email (best first). */
+  wins?: DigestWin[];
 }
 
 export interface DigestEmail {
@@ -58,6 +101,8 @@ export interface DigestEmail {
   top: { row: DigestRow; why: string; answerable: boolean }[];
   /** Rows (in or beyond the top) stuck 3+ days in Review / Ready To Publish. */
   stuck: number;
+  /** The wins the email lists, under the work. */
+  wins: DigestWin[];
 }
 
 export const DIGEST_TOP = 5;
@@ -134,7 +179,7 @@ export function buildMyWorkDigest(input: DigestInput): DigestEmail | null {
   const subject = `${plural(total, "thing", "things")} waiting on you — ${parts.join(", ")}`;
   const greeting = input.firstName ? `Morning ${input.firstName},` : "Morning,";
   const myWorkUrl = `${baseUrl}/my-work`;
-  const itemUrl = (r: DigestRow) => `${baseUrl}/${r.brand}/content/${r.id}`;
+  const itemUrl = (r: { brand: string; id: string }) => `${baseUrl}/${r.brand}/content/${r.id}`;
   const more = total - top.length;
   const stuckLine =
     stuck > 0
@@ -142,8 +187,30 @@ export function buildMyWorkDigest(input: DigestInput): DigestEmail | null {
       : null;
   const answerUrl = (r: DigestRow, kind: string) => `${baseUrl}/my-work/answer/${r.id}?a=${kind}`;
   // "starter-story · Instagram Reel" — brand, then the platform when known.
-  const where = (r: DigestRow) =>
+  const where = (r: { brand: string; postType?: string | null }) =>
     [r.brand, postTypeDisplay(r.postType).label].filter(Boolean).join(" · ");
+
+  // Wins sit under the button: good news, never ahead of what's waiting.
+  const wins = [...(input.wins ?? [])]
+    .filter((w) => w.why.trim())
+    .sort((a, b) => b.lift - a.lift)
+    .slice(0, DIGEST_WINS);
+  const winsHeading = wins.length === 1 ? "A post you edited beat its usual" : "Posts you edited beat their usual";
+  const winsHtml = wins.length
+    ? `
+      <div data-digest-wins style="margin-top:22px;padding-top:12px;border-top:1px solid #eee;">
+        <p style="font-size:13px;font-weight:600;color:#111;margin:0 0 4px;">${escapeHtml(winsHeading)}</p>${wins
+          .map(
+            (w) => `
+        <div style="padding:6px 0;">
+          <a href="${itemUrl(w)}" style="color:#111;text-decoration:none;font-size:13px;">${escapeHtml(w.title || "(Untitled)")}</a>
+          <span style="color:#16a34a;font-size:12px;font-weight:600;"> ${escapeHtml(formatLift(w.lift))} its usual</span>
+          <div style="color:#666;font-size:12px;margin-top:2px;">${escapeHtml(where(w))} · ${escapeHtml(w.why.trim())}</div>
+        </div>`,
+          )
+          .join("")}
+      </div>`
+    : "";
 
   const text = [
     greeting,
@@ -159,6 +226,16 @@ export function buildMyWorkDigest(input: DigestInput): DigestEmail | null {
     ...(more > 0 ? ["", `…and ${more} more.`] : []),
     "",
     `Open My Work: ${myWorkUrl}`,
+    ...(wins.length
+      ? [
+          "",
+          winsHeading,
+          ...wins.map(
+            (w) =>
+              `- ${w.title || "(Untitled)"} (${where(w)}) — ${formatLift(w.lift)} its usual. ${w.why}\n  ${itemUrl(w)}`,
+          ),
+        ]
+      : []),
     "",
     `Turn this email off: ${baseUrl}/my-work/email`,
     "— Hub & Spoke",
@@ -192,12 +269,12 @@ export function buildMyWorkDigest(input: DigestInput): DigestEmail | null {
       <table cellpadding="0" cellspacing="0" style="width:100%;max-width:560px;border-collapse:collapse;">${li}
       </table>
       ${more > 0 ? `<p style="color:#666;font-size:13px;">…and ${more} more.</p>` : ""}
-      <p style="margin-top:18px;"><a href="${myWorkUrl}" style="background:#16a34a;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;display:inline-block;">Open My Work</a></p>
+      <p style="margin-top:18px;"><a href="${myWorkUrl}" style="background:#16a34a;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;display:inline-block;">Open My Work</a></p>${winsHtml}
       <p style="color:#999;font-size:12px;">You get this on weekdays when something is waiting on you. <a href="${baseUrl}/my-work/email" style="color:#999;">Turn it off</a>.</p>
       <p style="color:#999;font-size:12px;">— Hub &amp; Spoke</p>
     `;
 
-  return { subject, text, html, top, stuck };
+  return { subject, text, html, top, stuck, wins };
 }
 
 function escapeHtml(s: string): string {

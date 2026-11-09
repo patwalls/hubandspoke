@@ -33,8 +33,8 @@ export default async function MyWorkEmailPage() {
         </Link>
         <h1 className="text-xl font-semibold text-foreground mt-1">Morning email</h1>
         <p className="text-xs text-muted-foreground mt-0.5">
-          Weekday mornings (12:00 UTC, 8am New York): what&apos;s waiting on you and the five to do first. No email on
-          days when nothing is waiting.
+          Weekday mornings (12:00 UTC, 8am New York): what&apos;s waiting on you and the five to do first, plus any post
+          you edited that beat its usual since the last one. No email on days when nothing is waiting.
         </p>
       </div>
 
