@@ -6,7 +6,9 @@ import { ShortLinksSettings } from "./short-links-settings";
 import { SyncErrorsTable } from "./sync-errors-table";
 import { BrandAssetsSettings } from "./brand-assets-settings";
 import { ScheduledReview } from "@/components/dashboard/scheduled-review";
+import { QueueView } from "@/components/dashboard/queue-view";
 import type { ShortLink } from "@/lib/services/short-links";
+import type { ProductionItem } from "@/types";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: () => {}, push: () => {} }),
@@ -42,6 +44,19 @@ afterEach(() => {
 
 const link = { id: "l1", slug: "abc", targetUrl: "https://example.com", lastClickedAt: "2026-09-16T02:30:00.000Z", clickCount: 3, createdAt: AT } as unknown as ShortLink;
 
+// The queue's All tab paints from server props (HUBANDSPOKE-8). Enough rows for
+// the "Show all N rows" footer.
+const queueItems = Array.from({ length: 1234 }, (_, i) => ({
+  id: `q${i}`,
+  brand: "b",
+  title: `Idea ${i}`,
+  sourceType: "original",
+  pillarPublishedDate: "2026-10-19",
+  status: "Idea",
+  prediction: { prediction: 850, p25: 400, p75: 999, confidence: "med", cohortBreakdown: [{ label: "x", n: 3, median: 500 }] },
+})) as unknown as ProductionItem[];
+const queueView = () => createElement(QueueView, { brand: "b", initialItems: queueItems, initialSource: "all", clippableFormats: [], formatNameToId: {} });
+
 const CASES: Array<[string, () => ReactElement]> = [
   ["AccountStatusCell", () => createElement(AccountStatusCell, { at: AT, error: null })],
   ["AccountStatusCell with a warning", () => createElement(AccountStatusCell, { at: AT, error: "rate limit" })],
@@ -49,6 +64,7 @@ const CASES: Array<[string, () => ReactElement]> = [
   ["SyncErrorsTable", () => createElement(SyncErrorsTable, { items: [{ id: "i1", brand: "b", title: "t", lastPerformanceSyncAt: AT, lastPerformanceSyncError: "x", url: null, platform: [] } as never] })],
   ["BrandAssetsSettings", () => createElement(BrandAssetsSettings, { brand: "b", brandLabel: "B", initialWatermarks: [{ id: "w1", fileName: "logo.png", sizeBytes: 10, createdAt: AT }], initialGuidelines: null, initialCtaFallbackUrl: null })],
   ["ScheduledReview", () => createElement(ScheduledReview, { brand: "b", initialData: { suggestions: [], needsAttention: [{ id: "n1", title: "t", postType: null, scheduledAt: AT, expectedPublishAt: AT }], watching: [] } })],
+  ["QueueView", queueView],
 ];
 
 describe.each(CASES)("%s hydration", (_name, el) => {
@@ -59,5 +75,24 @@ describe.each(CASES)("%s hydration", (_name, el) => {
   it("renders the same HTML when the minute rolls over before hydration", () => {
     const later = new Date(NOW.getTime() + 60_000);
     expect(renderAt("UTC", later, el)).toBe(renderAt("UTC", NOW, el));
+  });
+});
+
+describe("QueueView numbers", () => {
+  it("renders the same HTML for an en-US server and a German browser", () => {
+    const server = renderToString(queueView());
+    expect(server).toContain("1,234");
+
+    const real = Number.prototype.toLocaleString;
+    const browser = vi
+      .spyOn(Number.prototype, "toLocaleString")
+      .mockImplementation(function (this: number, locale, options) {
+        return real.call(this, locale ?? "de-DE", options);
+      });
+    try {
+      expect(renderToString(queueView())).toBe(server);
+    } finally {
+      browser.mockRestore();
+    }
   });
 });

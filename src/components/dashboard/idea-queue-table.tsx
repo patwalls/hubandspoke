@@ -60,7 +60,7 @@ function formatCompact(n: number | null | undefined): string {
   if (n >= 1_000_000)
     return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}K`;
-  return n.toLocaleString();
+  return n.toLocaleString("en-US"); // in the server HTML: never the browser's locale
 }
 
 const CONFIDENCE_DOT: Record<string, string> = {
@@ -418,7 +418,7 @@ export function IdeaQueueTable({
                 <tr>
                   <td colSpan={99} className="px-4 py-3 text-center">
                     <button type="button" onClick={() => setShowAllRows(true)} className="text-sm text-primary hover:underline">
-                      Show all {sortedItems.length.toLocaleString()} rows
+                      Show all {sortedItems.length.toLocaleString("en-US")} rows
                     </button>
                   </td>
                 </tr>

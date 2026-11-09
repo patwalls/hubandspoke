@@ -23,6 +23,9 @@ const pages: Array<{ path: string; ready?: string }> = [
   { path: "/starter-story/scheduled" },
   { path: "/settings/links" },
   { path: "/settings/sync-errors" },
+  // The All tab paints its rows from server props (HUBANDSPOKE-8).
+  { path: "/starter-story/queue", ready: "Queue" },
+  { path: "/all/queue", ready: "Queue" },
 ];
 
 for (const { path, ready } of pages) {
