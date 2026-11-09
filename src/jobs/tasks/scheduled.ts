@@ -610,9 +610,10 @@ export const formatEditorRulesTask: Task = async (_payload, helpers) => {
 };
 
 /**
- * Every 3 h at :40: write a one-line "why it won" note for each post on a
- * brand dashboard's "Beat their usual" strip that has none yet (one Haiku
- * call per new winner — at most 5 per brand, a handful a day once caught up).
+ * Every 3 h at :40: write a one-line "why it won" note for each of the week's
+ * posts that beat their usual and have none yet (one Haiku call per new
+ * winner — at most WIN_NOTES_PER_BRAND per brand, a handful a day once caught
+ * up). Shown on the dashboard strip and the post page.
  * Writes `production_items.win_note` only. Idempotent — noted winners are
  * skipped, so a rerun is free.
  */

@@ -136,6 +136,8 @@ export interface AgainstUsual {
   basedOn: number;
   /** The strip's lift when the post beat its usual (same rules), else null. */
   lift: number | null;
+  /** The cron's one-line "why it won" note — only alongside a lift. */
+  why?: string | null;
 }
 
 /**
@@ -144,6 +146,18 @@ export interface AgainstUsual {
  * strip would call it a win — a post a few hours old is "below" its usual by
  * definition, so the page never shows a below-usual ratio.
  */
+/**
+ * Attach a post's "why it won" note to its standing — only when the post is a
+ * win right now. A note written when the post won stays on the row after its
+ * lift fades (or the rules change), and a "why it won" under a post that no
+ * longer reads as a win would contradict the line above it.
+ */
+export function withWhy(a: AgainstUsual | null, note: string | null | undefined): AgainstUsual | null {
+  if (!a) return null;
+  const why = a.lift != null && note?.trim() ? note.trim() : null;
+  return { ...a, why };
+}
+
 export function againstUsual(c: WinnerCandidate): AgainstUsual | null {
   if (!judged(c)) return null;
   return {

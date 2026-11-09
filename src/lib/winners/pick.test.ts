@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { pickWinners, formatLift, scoreFormats, againstUsual, type WinnerCandidate } from "./pick";
+import { pickWinners, formatLift, scoreFormats, againstUsual, withWhy, type WinnerCandidate } from "./pick";
 
 const c = (id: string, views: number, baselineMedian: number, baselinePosts = 10): WinnerCandidate => ({
   id,
@@ -142,5 +142,20 @@ describe("againstUsual", () => {
   it("judges estimated-view post types on likes", () => {
     const r = againstUsual({ ...c("li", 9_000, 1_000), metric: "likes", likes: 100, baselineLikesMedian: 20 });
     expect(r).toEqual({ metric: "likes", usual: 20, basedOn: 10, lift: 5 });
+  });
+});
+
+describe("withWhy", () => {
+  const win = { metric: "views" as const, usual: 1_000, basedOn: 10, lift: 6 };
+  it("attaches the note to a post that is a win now", () => {
+    expect(withWhy(win, " Opened on the price. ")?.why).toBe("Opened on the price.");
+  });
+  it("drops a stale note when the post no longer reads as a win", () => {
+    expect(withWhy({ ...win, lift: null }, "Opened on the price.")?.why).toBeNull();
+  });
+  it("has no why without a note, and nothing without a usual", () => {
+    expect(withWhy(win, null)?.why).toBeNull();
+    expect(withWhy(win, "  ")?.why).toBeNull();
+    expect(withWhy(null, "Opened on the price.")).toBeNull();
   });
 });

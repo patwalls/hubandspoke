@@ -16,8 +16,10 @@ import type { Winner } from "@/lib/winners/pick";
  * posts that landed closest to its median and writes one sentence.
  *
  * Written once per post, the first time the `winner-notes` cron (every 3 h)
- * sees it on the strip, and stored on `production_items.win_note`. Never on a
- * page load. A post that keeps winning keeps its note.
+ * sees it among the week's winners (the strip's 5, and since 2026-11-09 up to
+ * WIN_NOTES_PER_BRAND for the post page), and stored on
+ * `production_items.win_note`. Never on a page load. A post that keeps winning
+ * keeps its note.
  */
 
 const MODEL = "claude-haiku-5-5";
@@ -26,6 +28,13 @@ export const WIN_NOTE_VERSION = `${MODEL}:why-it-won:v1`;
 const MAX_NOTE_CHARS = 180;
 const MAX_FIELD_CHARS = 400;
 const TYPICAL_POSTS = 5;
+/**
+ * Winners noted per brand per run. The dashboard strip shows 5, but the post
+ * page (wins-reach-makers M2, 2026-11-09) shows the note on ANY post that beat
+ * its usual, so the cron notes every winner of the week, best lift first, up
+ * to this cap. Once caught up it is a handful of new winners a day.
+ */
+export const WIN_NOTES_PER_BRAND = 20;
 
 /** The text the model compares: what a viewer saw and read. */
 export interface PostText {
@@ -208,7 +217,7 @@ export async function refreshWinNotes(opts: {
   const {
     log = () => {},
     now = new Date(),
-    getWinners = (b: string) => getRecentWinners(b),
+    getWinners = (b: string) => getRecentWinners(b, { limit: WIN_NOTES_PER_BRAND }),
     explain = explainWinner,
   } = opts;
   const slugs =
