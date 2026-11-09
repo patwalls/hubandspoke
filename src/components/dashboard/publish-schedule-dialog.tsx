@@ -16,7 +16,10 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { trackUsage } from "@/lib/usage/track";
-import { validatePublishedLinkPlatform } from "@/lib/published-link-validation";
+import {
+  shareLinkWarning,
+  validatePublishedLinkPlatform,
+} from "@/lib/published-link-validation";
 import { useCanEditBrand } from "@/components/brand-access";
 
 // The one and only path to status='Published' / status='Scheduled'. The
@@ -151,11 +154,22 @@ export function PublishScheduleDialog({
     ? validatePublishedLinkPlatform(link.trim(), postType)
     : null;
 
+  // A share link saves fine but never brings back views: say so, and let a
+  // second Save / Enter keep it anyway (some posts have no other link).
+  const shareWarn = linkValid ? shareLinkWarning(link) : null;
+  const [shareOk, setShareOk] = useState(false);
+  useEffect(() => setShareOk(false), [link]);
+
   const saveDisabled =
     !canEdit || submitting || (mode === "publish" && (!linkValid || !!mismatch));
 
   async function handleSave() {
     if (saveDisabled) return;
+    if (mode === "publish" && shareWarn && !shareOk) {
+      setShareOk(true);
+      trackUsage("publish:share-link-warned", brand);
+      return;
+    }
     setSubmitting(true);
     try {
       const payload: Record<string, unknown> = { mode };
@@ -283,6 +297,17 @@ export function PublishScheduleDialog({
                 >
                   <AlertTriangle className="size-3 shrink-0" />
                   {mismatch}
+                </p>
+              ) : shareWarn ? (
+                <p
+                  className="flex items-center gap-1.5 text-[11px] text-amber-600 dark:text-amber-400"
+                  data-testid="publish-link-share-warning"
+                >
+                  <AlertTriangle className="size-3 shrink-0" />
+                  <span>
+                    {shareWarn}
+                    {shareOk ? " Save again to use it anyway." : null}
+                  </span>
                 </p>
               ) : pasteTip && !link ? (
                 <p
