@@ -198,7 +198,7 @@ export function buildMyWorkDigest(input: DigestInput): DigestEmail | null {
   const winsHeading = wins.length === 1 ? "A post you edited beat its usual" : "Posts you edited beat their usual";
   const winsHtml = wins.length
     ? `
-      <div data-digest-wins style="margin-top:22px;padding-top:12px;border-top:1px solid #eee;">
+      <div data-digest-wins style="max-width:560px;margin-top:22px;padding-top:12px;border-top:1px solid #eee;">
         <p style="font-size:13px;font-weight:600;color:#111;margin:0 0 4px;">${escapeHtml(winsHeading)}</p>${wins
           .map(
             (w) => `
