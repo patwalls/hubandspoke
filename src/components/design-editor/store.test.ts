@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { buildPlaybookTemplate } from "@/lib/design-editor/playbook-template";
-import { rehighlight } from "./page-canvas";
+import { rehighlight, shiftBoldMask, wordRange } from "./page-canvas";
 import { commands, createDesignStore } from "./store";
 
 const doc = () => buildPlaybookTemplate();
@@ -66,6 +66,31 @@ describe("rehighlight", () => {
   });
   it("drops a phrase that no longer exists", () => {
     expect(rehighlight("plain", [{ phrase: "gone", color: "#FF3B3B" }])).toEqual([{ text: "plain" }]);
+  });
+  it("bolds only the marked characters, not every copy of the phrase, and layers with colour", () => {
+    const text = "a ($200/mo) b ($200/mo)";
+    const bold = [...text].map((_, i) => i >= 2 && i < 11);
+    expect(rehighlight(text, [{ phrase: "b", color: "#FF3B3B" }], bold)).toEqual([
+      { text: "a " },
+      { text: "($200/mo)", bold: true },
+      { text: " " },
+      { text: "b", color: "#FF3B3B" },
+      { text: " ($200/mo)" },
+    ]);
+  });
+});
+
+describe("bold editing helpers", () => {
+  it("grows a selection (or a caret) to whole words", () => {
+    expect(wordRange("framer: website", 10, 12)).toEqual([8, 15]);
+    expect(wordRange("framer: website", 3, 3)).toEqual([0, 7]);
+    expect(wordRange("framer: website", 0, 15)).toEqual([0, 15]);
+  });
+  it("keeps bold on the same characters when text is typed before or inside them", () => {
+    const mask = [false, false, true, true]; // "a bb" with "bb" bold
+    expect(shiftBoldMask("a bb", "xa bb", mask)).toEqual([false, false, false, true, true]);
+    expect(shiftBoldMask("a bb", "a bbb", mask)).toEqual([false, false, true, true, true]);
+    expect(shiftBoldMask("a bb", "a b", mask)).toEqual([false, false, true]);
   });
 
   it("groups: patch/remove/ungroup act on the members only; a duplicate leaves the group", () => {

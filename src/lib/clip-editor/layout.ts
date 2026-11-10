@@ -14,7 +14,7 @@
  * whether the two renderers agree — they both draw the same pre-broken lines,
  * centered on the same x.
  */
-import type { LayerAnchor, TextStyle } from "./doc";
+import type { FontId, LayerAnchor, TextStyle } from "./doc";
 import { FONTS, measureTextEm } from "./fonts";
 
 /** Line pitch in em. Tight, like a social hook. */
@@ -26,6 +26,9 @@ export interface LaidOutWord {
   ref: number;
   /** Force a new line before this word (an Enter typed in the hook). */
   hardBreakBefore?: boolean;
+  /** Measure this word in another font than the style's (a bold word in a
+   *  design text box). */
+  fontId?: FontId;
 }
 
 export interface LaidOutLine {
@@ -130,7 +133,7 @@ export function layoutTextBlock(args: {
   // Letter spacing is added after every glyph (as CSS does), so a word is
   // wider by one spacing per character and a space by one.
   const spacing = (args.letterSpacingEm ?? args.style.letterSpacing ?? 0) * fontSizePx;
-  const widths = words.map((w) => measureTextEm(font, w.text) * fontSizePx + spacing * [...w.text].length);
+  const widths = words.map((w) => measureTextEm(w.fontId ? FONTS[w.fontId] : font, w.text) * fontSizePx + spacing * [...w.text].length);
   const spaceWidth = measureTextEm(font, " ") * fontSizePx + spacing;
 
   const breaks = (args.balance ? balancedBreak : greedyBreak)(

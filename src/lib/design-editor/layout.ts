@@ -5,11 +5,28 @@
  */
 import { layoutTextBlock, type LaidOutWord } from "@/lib/clip-editor/layout";
 import { LINE_HEIGHT_EM } from "@/lib/clip-editor/layout";
+import type { FontId } from "@/lib/clip-editor/doc";
 import type { DesignCrop, DesignSpan, DesignTextElement } from "./doc";
 
+/** The heavier weight of the same family a bold span draws in — the element
+ *  font itself when the family ships nothing bolder (Anton, Bangers, …;
+ *  the inline editor's Bold button is disabled for those). */
+const BOLDER: Partial<Record<FontId, FontId>> = {
+  "inter-regular": "inter-bold",
+  "inter-semibold": "inter-bold",
+  "montserrat-medium": "montserrat-bold",
+  "montserrat-semibold": "montserrat-bold",
+  "montserrat-bold": "montserrat-extrabold",
+  "poppins-semibold": "poppins-extrabold",
+};
+export function boldFontId(fontId: FontId): FontId {
+  return BOLDER[fontId] ?? fontId;
+}
+
 export interface DesignLine {
-  /** Each word with its colour (from its span) — drawn as one run each. */
-  words: Array<{ text: string; color: string | null }>;
+  /** Each word with its colour and weight (from its span) — drawn as one
+   *  run each. `fontId` is set only on a bold word (the bolder font). */
+  words: Array<{ text: string; color: string | null; fontId?: FontId }>;
   /** Left edge of the line in canvas px, after alignment. */
   x: number;
   /** Top of the line box in canvas px. */
@@ -32,7 +49,8 @@ export interface DesignTextLayout {
  *  preceded it — they become a paragraph gap in the layout. */
 type ParaWord = LaidOutWord & { color: string | null; blankBefore?: number };
 
-function spanWords(spans: DesignSpan[], uppercase: boolean): ParaWord[] {
+function spanWords(spans: DesignSpan[], uppercase: boolean, baseFont: FontId): ParaWord[] {
+  const bold = boldFontId(baseFont);
   const out: ParaWord[] = [];
   let blank = 0;
   // A span that ENDS with "\n" (a highlighted phrase starting the next line
@@ -55,6 +73,7 @@ function spanWords(spans: DesignSpan[], uppercase: boolean): ParaWord[] {
           text: uppercase ? t.toUpperCase() : t,
           ref: si,
           color: span.color ?? null,
+          ...(span.bold && bold !== baseFont ? { fontId: bold } : {}),
           ...(first ? { hardBreakBefore: true } : {}),
           ...(first && blank > 0 ? { blankBefore: blank } : {}),
         });
@@ -72,12 +91,12 @@ function spanWords(spans: DesignSpan[], uppercase: boolean): ParaWord[] {
 const PARAGRAPH_GAP = 0.65;
 
 function layoutAt(el: DesignTextElement, fontSizePx: number): DesignTextLayout {
-  const words = spanWords(el.spans, el.style.uppercase);
+  const words = spanWords(el.spans, el.style.uppercase, el.style.fontId);
   // The shared engine works in canvas-% units; feed it a canvas whose height
   // makes `sizePct` equal our px, and whose width equals the box width.
   const canvas = { width: el.w, height: 100 };
   const base = layoutTextBlock({
-    words: words.map((w) => ({ text: w.text, ref: w.ref, hardBreakBefore: w.hardBreakBefore })),
+    words: words.map((w) => ({ text: w.text, ref: w.ref, hardBreakBefore: w.hardBreakBefore, fontId: w.fontId })),
     style: {
       fontId: el.style.fontId,
       sizePct: fontSizePx, // height is 100 → sizePct == px
@@ -125,8 +144,9 @@ function layoutAt(el: DesignTextElement, fontSizePx: number): DesignTextLayout {
     offset += lineGaps[li];
     const lineWords = line.words.map((w) => {
       const color = words[wi]?.color ?? null;
+      const fontId = words[wi]?.fontId;
       wi += 1;
-      return { text: w.text, color };
+      return { text: w.text, color, ...(fontId ? { fontId } : {}) };
     });
     const x =
       el.style.align === "left"

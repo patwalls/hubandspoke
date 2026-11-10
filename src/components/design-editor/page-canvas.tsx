@@ -21,7 +21,7 @@ import { layoutStatCard, sparklineSvg, svgDataUrl } from "@/lib/design-editor/st
 import { arrowBendPoint, arrowEnds, arrowFromEnds, arrowSvg, bendFromPoint, snapAngle } from "@/lib/design-editor/arrow";
 import { pageVideo } from "@/lib/design-editor/doc";
 import { activeCue, buildDesignCaptionCues, layoutCaptionCue } from "@/lib/design-editor/captions";
-import { coverGeometry, cropForOffset, layoutDesignText, softenLook, textEditorMetrics } from "@/lib/design-editor/layout";
+import { boldFontId, coverGeometry, cropForOffset, layoutDesignText, softenLook, textEditorMetrics } from "@/lib/design-editor/layout";
 import { elementSnapTargets, snapMove, snapResize, snapThreshold, type SnapGuide } from "@/lib/editor/snap";
 import { commands, useDesign } from "./store";
 
@@ -776,7 +776,14 @@ function TextView({
           }}
         >
           {line.words.map((w, wi) => (
-            <span key={wi} style={w.color ? { color: w.color } : undefined}>
+            <span
+              key={wi}
+              style={
+                w.color || w.fontId
+                  ? { ...(w.color ? { color: w.color } : {}), ...(w.fontId ? { fontFamily: `"${FONTS[w.fontId].cssFamily}"`, fontWeight: FONTS[w.fontId].cssWeight } : {}) }
+                  : undefined
+              }
+            >
               {(wi > 0 ? " " : "") + w.text}
             </span>
           ))}
@@ -789,7 +796,9 @@ function TextView({
 /**
  * Inline editing: a textarea in the element's box and font. Highlights
  * survive an edit — the coloured phrases are re-applied to the new text —
- * and the toolbar colours the current textarea selection.
+ * and the toolbar colours the current textarea selection. Bold is by
+ * position, not phrase (bolding one "($200/mo)" must not bold the other):
+ * a per-character mask that shifts with each edit (shiftBoldMask).
  *
  * What you typed is kept however the editor closes — Done, ⌘↵, blur, or the
  * editor simply going away because you clicked something else on the stage
@@ -805,6 +814,8 @@ function TextEditor({ el, onSave, onClose }: { el: DesignTextElement; onSave: (s
   const [colored, setColored] = useState<Array<{ phrase: string; color: string }>>(
     el.spans.filter((s) => s.color).map((s) => ({ phrase: s.text, color: s.color! })),
   );
+  const [bold, setBold] = useState<boolean[]>(() => el.spans.flatMap((s) => Array<boolean>(s.text.length).fill(!!s.bold)));
+  const canBold = boldFontId(el.style.fontId) !== el.style.fontId;
   const ref = useRef<HTMLTextAreaElement | null>(null);
   useEffect(() => {
     ref.current?.focus();
@@ -820,16 +831,16 @@ function TextEditor({ el, onSave, onClose }: { el: DesignTextElement; onSave: (s
   const [pickerValue, setPickerValue] = useState(el.style.color);
 
   // Saved at most once: by Done/⌘↵/blur, or on unmount. Escape marks it done unsaved.
-  const latest = useRef({ text, colored, el, onSave });
+  const latest = useRef({ text, colored, bold, el, onSave });
   useLayoutEffect(() => {
-    latest.current = { text, colored, el, onSave };
+    latest.current = { text, colored, bold, el, onSave };
   });
   const done = useRef(false);
   const save = useCallback(() => {
     if (done.current) return;
     done.current = true;
     const cur = latest.current;
-    const spans = rehighlight(cur.text, cur.colored);
+    const spans = rehighlight(cur.text, cur.colored, cur.bold);
     if (JSON.stringify(spans) !== JSON.stringify(cur.el.spans)) cur.onSave(spans);
   }, []);
   useEffect(() => {
@@ -852,6 +863,19 @@ function TextEditor({ el, onSave, onClose }: { el: DesignTextElement; onSave: (s
     });
     if (!range) ta.focus();
   };
+  const toggleBold = () => {
+    const ta = ref.current;
+    if (!ta || !canBold) return;
+    const [start, end] = wordRange(text, ta.selectionStart, ta.selectionEnd);
+    if (start === end) return;
+    setBold((prev) => {
+      const next = [...prev];
+      const on = !Array.from({ length: end - start }, (_, i) => start + i).every((i) => prev[i] || /\s/.test(text[i]));
+      for (let i = start; i < end; i++) next[i] = on;
+      return next;
+    });
+    ta.focus();
+  };
   const onPickerOpenChange = (open: boolean) => {
     const ta = ref.current;
     if (!ta) return;
@@ -871,7 +895,11 @@ function TextEditor({ el, onSave, onClose }: { el: DesignTextElement; onSave: (s
       <textarea
         ref={ref}
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => {
+          const next = e.target.value;
+          setBold((prev) => shiftBoldMask(text, next, prev));
+          setText(next);
+        }}
         onBlur={() => {
           if (!pickerOpen.current) commit();
         }}
@@ -882,6 +910,10 @@ function TextEditor({ el, onSave, onClose }: { el: DesignTextElement; onSave: (s
             onClose();
           }
           if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) commit();
+          if (e.key.toLowerCase() === "b" && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault();
+            toggleBold();
+          }
         }}
         className="h-full w-full resize-none overflow-hidden bg-white/10 p-0 outline outline-[4px] outline-sky-500"
         style={{
@@ -921,6 +953,15 @@ function TextEditor({ el, onSave, onClose }: { el: DesignTextElement; onSave: (s
           label="Custom colour"
           className="px-2 py-1 text-[20px]"
         />
+        <button
+          type="button"
+          onClick={toggleBold}
+          disabled={!canBold}
+          title={canBold ? "Bold the selected words (⌘B)" : "This font has no bolder weight"}
+          className="rounded border border-border px-3 py-1 font-bold disabled:opacity-40"
+        >
+          B
+        </button>
         <button type="button" onClick={() => paint(null)} className="rounded border border-border px-3 py-1">
           Plain
         </button>
@@ -932,8 +973,33 @@ function TextEditor({ el, onSave, onClose }: { el: DesignTextElement; onSave: (s
   );
 }
 
-/** Split `text` into spans so each coloured phrase keeps its colour. */
-export function rehighlight(text: string, colored: Array<{ phrase: string; color: string }>): DesignSpan[] {
+/** A selection grown to whole words, so bold never splits a word into two
+ *  spans (layout breaks words at span edges). */
+export function wordRange(text: string, start: number, end: number): [number, number] {
+  let s = Math.min(start, end);
+  let e = Math.max(start, end);
+  while (s > 0 && !/\s/.test(text[s - 1]) && (s < e ? !/\s/.test(text[s]) : true)) s--;
+  while (e < text.length && !/\s/.test(text[e]) && (e > s ? !/\s/.test(text[e - 1]) : true)) e++;
+  return [s, e];
+}
+
+/** Carry a per-character bold mask across a textarea edit: the unchanged
+ *  head and tail keep theirs, typed characters take the weight of the
+ *  character before them (typing on after a bold word stays bold). */
+export function shiftBoldMask(prevText: string, nextText: string, mask: boolean[]): boolean[] {
+  let p = 0;
+  const max = Math.min(prevText.length, nextText.length);
+  while (p < max && prevText[p] === nextText[p]) p++;
+  let t = 0;
+  while (t < max - p && prevText[prevText.length - 1 - t] === nextText[nextText.length - 1 - t]) t++;
+  const inserted = nextText.length - p - t;
+  const inherit = p > 0 ? !!mask[p - 1] : false;
+  return [...mask.slice(0, p), ...Array<boolean>(inserted).fill(inherit), ...mask.slice(prevText.length - t)].slice(0, nextText.length);
+}
+
+/** Split `text` into spans so each coloured phrase keeps its colour and
+ *  each character marked in `bold` stays bold. */
+export function rehighlight(text: string, colored: Array<{ phrase: string; color: string }>, bold: boolean[] = []): DesignSpan[] {
   const marks: Array<{ start: number; end: number; color: string }> = [];
   const lower = text.toLowerCase();
   for (const c of colored) {
@@ -948,14 +1014,19 @@ export function rehighlight(text: string, colored: Array<{ phrase: string; color
       from = end;
     }
   }
-  marks.sort((a, b) => a.start - b.start);
+  const colorAt: Array<string | null> = Array(text.length).fill(null);
+  for (const m of marks) for (let i = m.start; i < m.end; i++) colorAt[i] = m.color;
   const spans: DesignSpan[] = [];
-  let cursor = 0;
-  for (const m of marks) {
-    if (m.start > cursor) spans.push({ text: text.slice(cursor, m.start) });
-    spans.push({ text: text.slice(m.start, m.end), color: m.color });
-    cursor = m.end;
+  let last: { color: string | null; bold: boolean } | null = null;
+  for (let i = 0; i < text.length; i++) {
+    const cur = { color: colorAt[i], bold: !!bold[i] };
+    if (last && last.color === cur.color && last.bold === cur.bold) {
+      spans[spans.length - 1].text += text[i];
+    } else {
+      spans.push({ text: text[i], ...(cur.color ? { color: cur.color } : {}), ...(cur.bold ? { bold: true } : {}) });
+      last = cur;
+    }
   }
-  if (cursor < text.length || spans.length === 0) spans.push({ text: text.slice(cursor) });
+  if (spans.length === 0) spans.push({ text: "" });
   return spans;
 }

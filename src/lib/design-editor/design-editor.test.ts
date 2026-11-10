@@ -227,6 +227,16 @@ describe("layoutDesignText", () => {
     expect(layout.overflows).toBe(false);
     expect(layout.fontSizePx).toBeLessThan(80);
   });
+
+  it("a bold span draws (and measures) in the font's bolder weight; a font with none ignores it", () => {
+    const inter = { ...el, spans: [{ text: "framer: " }, { text: "website", bold: true }], style: { ...el.style, fontId: "inter-regular" as const, uppercase: false } };
+    const plain = layoutDesignText({ ...inter, spans: [{ text: "framer: website" }] });
+    const bolded = layoutDesignText(inter);
+    expect(bolded.lines[0].words.map((w) => w.fontId)).toEqual([undefined, "inter-bold"]);
+    expect(bolded.lines[0].widthPx).toBeGreaterThan(plain.lines[0].widthPx);
+    expect(fontsUsed({ background: "#000000", elements: [inter] } as never).map((f) => f.id)).toEqual(["inter-regular", "inter-bold"]);
+    expect(layoutDesignText({ ...el, spans: [{ text: "x", bold: true }] }).lines[0].words[0].fontId).toBeUndefined(); // anton
+  });
 });
 
 describe("textEditorMetrics (the inline editor matches the drawn text)", () => {

@@ -8,7 +8,7 @@
 import { FONTS } from "@/lib/clip-editor/fonts";
 import type { DesignArrowElement, DesignElement, DesignPage, DesignStatCardElement, DesignTextElement, Rgba } from "./doc";
 import { arrowSvg } from "./arrow";
-import { coverGeometry, layoutDesignText, softenLook } from "./layout";
+import { boldFontId, coverGeometry, layoutDesignText, softenLook } from "./layout";
 import { layoutChannel, type ChannelInfo } from "./channel";
 import { layoutStatCard, sparklineSvg, svgDataUrl } from "./stat-card";
 
@@ -65,7 +65,10 @@ function textNodes(el: DesignTextElement, origin: { x: number; y: number } = { x
         type: "span",
         props: {
           key: wi,
-          style: w.color ? { color: w.color } : {},
+          style: {
+            ...(w.color ? { color: w.color } : {}),
+            ...(w.fontId ? { fontFamily: FONTS[w.fontId].cssFamily, fontWeight: FONTS[w.fontId].cssWeight } : {}),
+          },
           children: (wi > 0 ? " " : "") + w.text,
         },
       })),
@@ -250,7 +253,7 @@ export function videoPageLayers(page: DesignPage): { under: DesignPage; over: De
 /** The fonts a page needs, for satori's `fonts` option. */
 export function fontsUsed(page: DesignPage): Array<(typeof FONTS)[keyof typeof FONTS]> {
   const ids = new Set(
-    page.elements.flatMap((el) => (el.type === "text" || el.type === "captions" ? [el.style.fontId] : el.type === "channel" ? (["inter-semibold", "inter-regular", "anton"] as const) : el.type === "statCard" ? (["inter-semibold", "inter-bold", "inter-regular"] as const) : [])),
+    page.elements.flatMap((el) => (el.type === "text" ? [el.style.fontId, ...(el.spans.some((s) => s.bold) ? [boldFontId(el.style.fontId)] : [])] : el.type === "captions" ? [el.style.fontId] : el.type === "channel" ? (["inter-semibold", "inter-regular", "anton"] as const) : el.type === "statCard" ? (["inter-semibold", "inter-bold", "inter-regular"] as const) : [])),
   );
   return [...ids].map((id) => FONTS[id]);
 }

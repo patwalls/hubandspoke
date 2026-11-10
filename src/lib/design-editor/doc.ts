@@ -47,9 +47,10 @@ const textStyleSchema = z.object({
 export type DesignTextStyle = z.infer<typeof textStyleSchema>;
 
 /** Text is a list of spans so a phrase can be highlighted ("$69K/MONTH SAAS"
- *  in green) without becoming a separate element. `\n` inside a span is a
- *  hard line break. */
-const spanSchema = z.object({ text: z.string().max(2000), color: hexColor.optional() });
+ *  in green) or bolded without becoming a separate element. `\n` inside a
+ *  span is a hard line break. `bold` draws the span in the element font's
+ *  bolder sibling (layout.ts → boldFontId); a font with none ignores it. */
+const spanSchema = z.object({ text: z.string().max(2000), color: hexColor.optional(), bold: z.boolean().optional() });
 export type DesignSpan = z.infer<typeof spanSchema>;
 
 /**
