@@ -88,7 +88,7 @@ export function AcademyHome({
         <div className="mx-auto mb-3 flex size-11 items-center justify-center rounded-xl bg-orange-500/10 text-orange-600">
           <GraduationCap className="size-5" />
         </div>
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">Hub &amp; Spoke Academy</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">Hub &amp; Spoke Learning Center</h1>
         <p className="mx-auto mt-2 max-w-xl text-sm text-muted-foreground">
           Short training videos on how to use Hub &amp; Spoke — watch them in order, or search for what you need.
         </p>
@@ -98,7 +98,7 @@ export function AcademyHome({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="What are you trying to do?"
-            aria-label="Search the Academy"
+            aria-label="Search the Learning Center"
             className="h-11 w-full rounded-xl border border-border bg-background pl-9 pr-3 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
         </div>
@@ -167,7 +167,7 @@ export function AcademyHome({
 
             {category.videos.length === 0 ? (
               <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
-                <p>No videos in this category yet — only Academy editors can see it.</p>
+                <p>No videos in this category yet — only Learning Center editors can see it.</p>
                 {canEdit && (
                   <div className="flex gap-2">
                     <Button variant="outline" size="sm" onClick={() => setEditing({ kind: "video", categoryId: category.id })}>
@@ -186,7 +186,7 @@ export function AcademyHome({
                   return (
                     <div key={video.id} className="group relative">
                       <Link
-                        href={`/academy/${video.slug}`}
+                        href={`/learning-center/${video.slug}`}
                         className={cn(
                           "flex h-full flex-col gap-2 rounded-xl border border-border bg-card p-4 transition-colors hover:border-orange-300 hover:bg-orange-50/40 dark:hover:bg-orange-950/20",
                           completed && "border-emerald-200 dark:border-emerald-900",

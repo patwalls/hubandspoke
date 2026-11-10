@@ -14,10 +14,10 @@ interface PageProps {
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { slug } = await params;
   const video = flattenVideos(await getAcademyLibrary()).find((v) => v.slug === slug);
-  return { title: `${video?.title ?? "Academy"} · Hub & Spoke Academy` };
+  return { title: `${video?.title ?? "Learning Center"} · Hub & Spoke Learning Center` };
 }
 
-/** /academy/[slug] — one training video, with the library sidebar and prev/next. */
+/** /learning-center/[slug] — one training video, with the library sidebar and prev/next. */
 export default async function AcademyVideoRoute({ params }: PageProps) {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");

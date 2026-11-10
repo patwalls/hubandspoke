@@ -24,8 +24,8 @@ describe("help search", () => {
     expect(rankPassages(rows, "the and of", 3)).toEqual([]);
   });
 
-  it("reads the real docs/features.md and finds the Academy row", () => {
+  it("reads the real docs/features.md and finds the Learning Center row", () => {
     expect(featurePassages().length).toBeGreaterThan(50);
-    expect(searchFeatureDocs("academy training videos").some((p) => /academy/i.test(p.title))).toBe(true);
+    expect(searchFeatureDocs("learning center training videos").some((p) => /learning center/i.test(p.title))).toBe(true);
   });
 });

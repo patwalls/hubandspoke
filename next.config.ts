@@ -7,6 +7,14 @@ const nextConfig: NextConfig = {
   async headers() {
     return [{ source: "/:path*", headers: SECURITY_HEADERS }];
   },
+  // The Academy was renamed the Learning Center (2026-11-10): old links and
+  // bookmarks keep working. (/api/academy is unchanged — not matched here.)
+  async redirects() {
+    return [
+      { source: "/academy", destination: "/learning-center", permanent: true },
+      { source: "/academy/:slug", destination: "/learning-center/:slug", permanent: true },
+    ];
+  },
   // Next 16.3+ rewrites CLAUDE.md with its own agent-rules block on every
   // `next dev` run under an agent, leaving every session's tree dirty.
   // CLAUDE.md is hand-maintained here.

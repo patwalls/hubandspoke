@@ -86,7 +86,7 @@ export function VideoFormDialog({
       if (!res.ok) throw new Error(data.error ?? "Couldn't save the video");
       toast.success(video ? "Video updated" : "Video added");
       onClose();
-      router.push(`/academy/${data.video.slug}`);
+      router.push(`/learning-center/${data.video.slug}`);
       router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Couldn't save the video");
@@ -100,7 +100,7 @@ export function VideoFormDialog({
       <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{video ? "Edit video" : "Add a video"}</DialogTitle>
-          <DialogDescription>Everyone in Hub &amp; Spoke can watch it. Only Academy editors (Sam, Pat, Evgeny) can change it.</DialogDescription>
+          <DialogDescription>Everyone in Hub &amp; Spoke can watch it. Only Learning Center editors (Sam, Pat, Evgeny) can change it.</DialogDescription>
         </DialogHeader>
 
         {/* Fields are in the same order they appear on the video page. */}

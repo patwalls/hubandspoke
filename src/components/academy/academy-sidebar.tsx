@@ -107,15 +107,15 @@ export function AcademySidebar({
     <aside className="hidden w-80 shrink-0 lg:block">
       <nav
         className="sticky top-20 max-h-[calc(100vh-6rem)] space-y-6 overflow-y-auto pb-8 pr-2"
-        aria-label="Academy"
+        aria-label="Learning Center"
         onDragEnd={() => {
           setDrag(null);
           setDrop(null);
         }}
       >
         <div className="space-y-0.5">
-          <div className="px-3 pb-1 text-[14px] font-semibold text-foreground">Academy</div>
-          <Link href="/academy" aria-current={activeVideoId === null ? "page" : undefined} className={item(activeVideoId === null)}>
+          <div className="px-3 pb-1 text-[14px] font-semibold text-foreground">Learning Center</div>
+          <Link href="/learning-center" aria-current={activeVideoId === null ? "page" : undefined} className={item(activeVideoId === null)}>
             Home
           </Link>
         </div>
@@ -184,7 +184,7 @@ export function AcademySidebar({
                     }}
                   >
                     {canEdit && <GripVertical className={cn(grip, "-ml-1")} aria-hidden />}
-                    <Link href={`/academy/${v.slug}`} aria-current={active ? "page" : undefined} className={item(active)} draggable={false}>
+                    <Link href={`/learning-center/${v.slug}`} aria-current={active ? "page" : undefined} className={item(active)} draggable={false}>
                       <span className={cn(v.comingSoon && "opacity-60")}>{v.title}</span>
                       {progress[v.id]?.completed ? (
                         <Check className="size-3.5 shrink-0 text-emerald-600" aria-label="Completed" />

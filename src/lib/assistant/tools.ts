@@ -39,7 +39,7 @@ export const ASSISTANT_TOOLS: Anthropic.Tool[] = [
   {
     name: "search_help",
     description:
-      "Search Hub & Spoke's own help: Academy training videos (with their learn points, action items and guides) and the product's feature documentation. Use this FIRST for any 'how does X work' / 'how do I' / 'what does Y mean' question. Search again with different words if the first results don't answer it.",
+      "Search Hub & Spoke's own help: Learning Center training videos (with their learn points, action items and guides) and the product's feature documentation. Use this FIRST for any 'how does X work' / 'how do I' / 'what does Y mean' question. Search again with different words if the first results don't answer it.",
     input_schema: { type: "object", properties: { query: str("Keywords, e.g. 'cross post queue' or 'ready to publish status'") }, required: ["query"] },
   },
   {
@@ -145,7 +145,7 @@ async function searchHelp(query: string, baseUrl: string) {
     3,
   ).map(({ v }) => ({
     title: v.title,
-    url: `${baseUrl}/academy/${v.slug}`,
+    url: `${baseUrl}/learning-center/${v.slug}`,
     summary: v.summary,
     you_will_learn: v.learnPoints.map((p) => (p.time ? `${p.time} ${p.text}` : p.text)),
     action_items: v.actionItems,

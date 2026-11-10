@@ -7,7 +7,7 @@ export async function requireAcademyEditor(): Promise<GuardResult> {
   const guard = await requireSession();
   if (guard.response) return guard;
   if (!isAcademyEditor(guard.session)) {
-    return { response: NextResponse.json({ error: "Only Academy editors can change this" }, { status: 403 }) };
+    return { response: NextResponse.json({ error: "Only Learning Center editors can change this" }, { status: 403 }) };
   }
   return guard;
 }

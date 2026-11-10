@@ -261,7 +261,7 @@ export function AssistantPanel() {
             <ArrowUp className="size-4" />
           </button>
         </form>
-        <p className="px-4 pb-2 text-center text-[11px] text-muted-foreground/70">Beta — answers can be wrong. Check the Academy for the full walkthrough.</p>
+        <p className="px-4 pb-2 text-center text-[11px] text-muted-foreground/70">Beta — answers can be wrong. Check the Learning Center for the full walkthrough.</p>
       </aside>
     </>
   );

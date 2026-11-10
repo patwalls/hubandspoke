@@ -73,7 +73,7 @@ export function AcademyVideoPage({
     const res = await fetch(`/api/academy/videos/${video.id}`, { method: "DELETE" });
     if (!res.ok) return toast.error("Couldn't delete the video");
     toast.success("Video deleted");
-    router.push("/academy");
+    router.push("/learning-center");
     router.refresh();
   }
 
@@ -88,7 +88,7 @@ export function AcademyVideoPage({
 
       {/* Main */}
       <article className="min-w-0 flex-1 max-w-3xl">
-        <Link href="/academy" className="mb-4 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground lg:hidden">
+        <Link href="/learning-center" className="mb-4 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground lg:hidden">
           <ArrowLeft className="size-3" /> All videos
         </Link>
         <div className="flex items-center gap-2">
@@ -228,7 +228,7 @@ export function AcademyVideoPage({
         </div>
         <nav className="mt-8 grid gap-3 border-t border-border pt-6 sm:grid-cols-2" aria-label="Previous and next video">
           {prev ? (
-            <Link href={`/academy/${prev.slug}`} className="group rounded-xl border border-border p-4 hover:border-orange-300">
+            <Link href={`/learning-center/${prev.slug}`} className="group rounded-xl border border-border p-4 hover:border-orange-300">
               <span className="flex items-center gap-1 text-xs text-muted-foreground">
                 <ArrowLeft className="size-3" /> Previous
               </span>
@@ -238,7 +238,7 @@ export function AcademyVideoPage({
             <span />
           )}
           {next && (
-            <Link href={`/academy/${next.slug}`} className="group rounded-xl border border-border p-4 text-right hover:border-orange-300">
+            <Link href={`/learning-center/${next.slug}`} className="group rounded-xl border border-border p-4 text-right hover:border-orange-300">
               <span className="flex items-center justify-end gap-1 text-xs text-muted-foreground">
                 Next <ArrowRight className="size-3" />
               </span>

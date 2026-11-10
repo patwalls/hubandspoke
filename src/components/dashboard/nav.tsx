@@ -320,18 +320,18 @@ export function DashboardNav({
             <NotificationBell />
             <DropdownMenu>
               <DropdownMenuTrigger
-                aria-label="Learn: Academy, What's new, API & MCP"
-                title="Academy"
+                aria-label="Learn: Learning Center, What's new, API & MCP"
+                title="Learning Center"
                 className="inline-flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <GraduationCap className="size-[15px]" strokeWidth={1.75} />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="min-w-56">
                 <DropdownMenuItem
-                  onClick={() => router.push("/academy")}
+                  onClick={() => router.push("/learning-center")}
                   className="cursor-pointer"
                 >
-                  Hub &amp; Spoke Academy
+                  Hub &amp; Spoke Learning Center
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={() => window.dispatchEvent(new Event(OPEN_WHATS_NEW_EVENT))}
