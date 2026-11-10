@@ -22,6 +22,7 @@ import { arrowBendPoint, arrowEnds, arrowFromEnds, arrowSvg, bendFromPoint, snap
 import { pageVideo } from "@/lib/design-editor/doc";
 import { activeCue, buildDesignCaptionCues, layoutCaptionCue } from "@/lib/design-editor/captions";
 import { boldFontId, coverGeometry, cropForOffset, layoutDesignText, softenLook, textEditorMetrics } from "@/lib/design-editor/layout";
+import { formatRange, insertRich, isRangeBold, richRuns, richToSpans, spansToRich, wordRange, type RichText } from "@/lib/design-editor/rich-text";
 import { elementSnapTargets, snapMove, snapResize, snapThreshold, type SnapGuide } from "@/lib/editor/snap";
 import { commands, useDesign } from "./store";
 
@@ -794,53 +795,95 @@ function TextView({
 }
 
 /**
- * Inline editing: a textarea in the element's box and font. Highlights
- * survive an edit — the coloured phrases are re-applied to the new text —
- * and the toolbar colours the current textarea selection. Bold is by
- * position, not phrase (bolding one "($200/mo)" must not bold the other):
- * a per-character mask that shifts with each edit (shiftBoldMask).
+ * Inline editing, like a doc: a contenteditable box in the element's box and
+ * font that draws each run in its colour and weight LIVE — select words and
+ * click a colour, B or ⌘B and it shows at once (a textarea could only show
+ * plain text, so formatting appeared only after Done; Sam, 2026-11-10).
+ * Formatting is by position (rich-text.ts): the model is the source of
+ * truth; typing is left to the browser and read back, while formatting,
+ * Enter, paste and undo go through the model and redraw the box.
  *
  * What you typed is kept however the editor closes — Done, ⌘↵, blur, or the
  * editor simply going away because you clicked something else on the stage
- * (selecting ends editing on pointer-down, before the textarea ever blurs:
- * that dropped Pat's typing, 2026-10-27). Only Escape throws it away.
+ * (selecting ends editing on pointer-down, before the box ever blurs: that
+ * dropped Pat's typing, 2026-10-27). Only Escape throws it away.
  */
 function TextEditor({ el, onSave, onClose }: { el: DesignTextElement; onSave: (spans: DesignSpan[]) => void; onClose: () => void }) {
   const font = FONTS[el.style.fontId];
-  const initial = el.spans.map((s) => s.text).join("");
-  const [text, setText] = useState(initial);
-  // Same size, pitch and vertical position as the drawn text, live as you type.
-  const metrics = useMemo(() => textEditorMetrics(el, text), [el, text]);
-  const [colored, setColored] = useState<Array<{ phrase: string; color: string }>>(
-    el.spans.filter((s) => s.color).map((s) => ({ phrase: s.text, color: s.color! })),
+  const boldFont = FONTS[boldFontId(el.style.fontId)];
+  const canBold = boldFont.id !== font.id;
+  const ref = useRef<HTMLDivElement | null>(null);
+  const rich = useRef<RichText>(spansToRich(el.spans));
+  // Re-render on every change so the box keeps the drawn text's fitted size.
+  const [liveSpans, setLiveSpans] = useState(el.spans);
+  const metrics = useMemo(() => textEditorMetrics(el, liveSpans), [el, liveSpans]);
+  const [boldActive, setBoldActive] = useState(false);
+  const history = useRef<{ past: RichText[]; future: RichText[]; lastTyped: number }>({ past: [], future: [], lastTyped: 0 });
+
+  const draw = useCallback(
+    (sel?: [number, number]) => {
+      const root = ref.current;
+      if (!root) return;
+      drawRich(root, rich.current, { cssFamily: boldFont.cssFamily, cssWeight: boldFont.cssWeight }, canBold);
+      if (sel) setSelectionOffsets(root, sel[0], sel[1]);
+    },
+    [boldFont, canBold],
   );
-  const [bold, setBold] = useState<boolean[]>(() => el.spans.flatMap((s) => Array<boolean>(s.text.length).fill(!!s.bold)));
-  const canBold = boldFontId(el.style.fontId) !== el.style.fontId;
-  const ref = useRef<HTMLTextAreaElement | null>(null);
   useEffect(() => {
-    ref.current?.focus();
-    ref.current?.select();
+    draw();
+    const root = ref.current;
+    if (!root) return;
+    root.focus();
+    setSelectionOffsets(root, 0, rich.current.text.length);
+  }, [draw]);
+
+  const selection = (): [number, number] => (ref.current ? getSelectionOffsets(ref.current) : [0, 0]);
+  const refreshActive = useCallback(() => {
+    if (!ref.current || document.activeElement !== ref.current) return;
+    const [s, e] = getSelectionOffsets(ref.current);
+    setBoldActive(isRangeBold(rich.current, s, e));
   }, []);
+  useEffect(() => {
+    document.addEventListener("selectionchange", refreshActive);
+    return () => document.removeEventListener("selectionchange", refreshActive);
+  }, [refreshActive]);
+
+  /** Snapshot for ⌘Z. A run of typing (keys within half a second of each
+   *  other) is one step; formatting, Enter and paste are always their own. */
+  const remember = (typing = false) => {
+    const h = history.current;
+    const now = Date.now();
+    if (!typing || now - h.lastTyped > 500) h.past.push(rich.current);
+    h.lastTyped = typing ? now : 0;
+    h.future = [];
+  };
+  const change = (next: RichText, sel: [number, number]) => {
+    remember();
+    rich.current = next;
+    draw(sel);
+    setLiveSpans(richToSpans(rich.current));
+    refreshActive();
+  };
 
   const doc = useDesign((s) => s.doc);
   const usedColors = useMemo(() => colorsInDesignDoc(doc), [doc]);
-  // The custom-colour picker takes focus from the textarea, so remember the
+  // The custom-colour picker takes focus from the box, so remember the
   // selection when it opens and don't treat that blur as leaving the editor.
   const pickerOpen = useRef(false);
   const pickerRange = useRef<[number, number]>([0, 0]);
   const [pickerValue, setPickerValue] = useState(el.style.color);
 
   // Saved at most once: by Done/⌘↵/blur, or on unmount. Escape marks it done unsaved.
-  const latest = useRef({ text, colored, bold, el, onSave });
+  const latest = useRef({ el, onSave });
   useLayoutEffect(() => {
-    latest.current = { text, colored, bold, el, onSave };
+    latest.current = { el, onSave };
   });
   const done = useRef(false);
   const save = useCallback(() => {
     if (done.current) return;
     done.current = true;
     const cur = latest.current;
-    const spans = rehighlight(cur.text, cur.colored, cur.bold);
+    const spans = richToSpans(rich.current);
     if (JSON.stringify(spans) !== JSON.stringify(cur.el.spans)) cur.onSave(spans);
   }, []);
   useEffect(() => {
@@ -851,71 +894,96 @@ function TextEditor({ el, onSave, onClose }: { el: DesignTextElement; onSave: (s
     save();
     onClose();
   };
-  const selectedPhrase = (start: number, end: number) => text.slice(start, end).trim();
-  const paint = (color: string | null, range?: [number, number]) => {
-    const ta = ref.current;
-    if (!ta) return;
-    const sel = range ? selectedPhrase(...range) : selectedPhrase(ta.selectionStart, ta.selectionEnd);
-    if (!sel) return;
-    setColored((prev) => {
-      const rest = prev.filter((c) => c.phrase.toLowerCase() !== sel.toLowerCase());
-      return color ? [...rest, { phrase: sel, color }] : rest;
-    });
-    if (!range) ta.focus();
+
+  const format = (patch: { color?: string | null; bold?: boolean }, range?: [number, number]) => {
+    const [s, e] = range ?? selection();
+    const { rt, range: grown } = formatRange(rich.current, s, e, patch);
+    if (grown[0] === grown[1]) return;
+    change(rt, grown);
   };
   const toggleBold = () => {
-    const ta = ref.current;
-    if (!ta || !canBold) return;
-    const [start, end] = wordRange(text, ta.selectionStart, ta.selectionEnd);
-    if (start === end) return;
-    setBold((prev) => {
-      const next = [...prev];
-      const on = !Array.from({ length: end - start }, (_, i) => start + i).every((i) => prev[i] || /\s/.test(text[i]));
-      for (let i = start; i < end; i++) next[i] = on;
-      return next;
-    });
-    ta.focus();
+    if (!canBold) return;
+    const [s, e] = selection();
+    format({ bold: !isRangeBold(rich.current, s, e) }, [s, e]);
+  };
+  const insert = (str: string) => {
+    const [s, e] = selection();
+    change(insertRich(rich.current, s, e, str), [s + str.length, s + str.length]);
+  };
+  const undo = (redo: boolean) => {
+    const h = history.current;
+    const from = redo ? h.future : h.past;
+    const prev = from.pop();
+    if (!prev) return;
+    (redo ? h.past : h.future).push(rich.current);
+    rich.current = prev;
+    draw([prev.text.length, prev.text.length]);
+    setLiveSpans(richToSpans(rich.current));
   };
   const onPickerOpenChange = (open: boolean) => {
-    const ta = ref.current;
-    if (!ta) return;
+    const root = ref.current;
+    if (!root) return;
     pickerOpen.current = open;
     if (open) {
-      pickerRange.current = [ta.selectionStart, ta.selectionEnd];
-      const sel = selectedPhrase(ta.selectionStart, ta.selectionEnd).toLowerCase();
-      setPickerValue(colored.find((c) => c.phrase.toLowerCase() === sel)?.color ?? el.style.color);
+      pickerRange.current = getSelectionOffsets(root);
+      const [s] = wordRange(rich.current.text, ...pickerRange.current);
+      setPickerValue(rich.current.styles[s]?.color ?? el.style.color);
     } else {
-      ta.focus();
-      ta.setSelectionRange(...pickerRange.current);
+      root.focus();
+      setSelectionOffsets(root, ...pickerRange.current);
     }
   };
 
   return (
     <div style={{ position: "absolute", left: el.x, top: el.y, width: el.w, height: el.h }} onPointerDown={(e) => e.stopPropagation()}>
-      <textarea
+      <div
         ref={ref}
-        value={text}
-        onChange={(e) => {
-          const next = e.target.value;
-          setBold((prev) => shiftBoldMask(text, next, prev));
-          setText(next);
+        role="textbox"
+        aria-multiline="true"
+        aria-label="Text"
+        contentEditable="plaintext-only"
+        suppressContentEditableWarning
+        spellCheck={false}
+        onInput={() => {
+          // Typing is the browser's; read the result back into the model.
+          const root = ref.current;
+          if (!root) return;
+          remember(true);
+          rich.current = readRich(root);
+          setLiveSpans(richToSpans(rich.current));
         }}
+        onPaste={(e) => {
+          e.preventDefault();
+          insert(e.clipboardData.getData("text/plain").replace(/\r\n?/g, "\n"));
+        }}
+        onDrop={(e) => e.preventDefault()}
         onBlur={() => {
           if (!pickerOpen.current) commit();
         }}
         onKeyDown={(e) => {
           e.stopPropagation();
+          const mod = e.metaKey || e.ctrlKey;
           if (e.key === "Escape") {
             done.current = true;
             onClose();
-          }
-          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) commit();
-          if (e.key.toLowerCase() === "b" && (e.metaKey || e.ctrlKey)) {
+          } else if (e.key === "Enter" && mod) {
+            e.preventDefault();
+            commit();
+          } else if (e.key === "Enter") {
+            e.preventDefault();
+            insert("\n");
+          } else if (mod && e.key.toLowerCase() === "b") {
             e.preventDefault();
             toggleBold();
+          } else if (mod && e.key.toLowerCase() === "z") {
+            e.preventDefault();
+            undo(e.shiftKey);
+          } else if (mod && e.key.toLowerCase() === "y") {
+            e.preventDefault();
+            undo(true);
           }
         }}
-        className="h-full w-full resize-none overflow-hidden bg-white/10 p-0 outline outline-[4px] outline-sky-500"
+        className="h-full w-full overflow-hidden whitespace-pre-wrap break-words bg-white/10 p-0 outline outline-[4px] outline-sky-500"
         style={{
           fontFamily: `"${font.cssFamily}"`,
           fontWeight: font.cssWeight,
@@ -926,6 +994,7 @@ function TextEditor({ el, onSave, onClose }: { el: DesignTextElement; onSave: (s
           color: el.style.color,
           textAlign: el.style.align,
           textTransform: el.style.uppercase ? "uppercase" : "none",
+          caretColor: el.style.color,
         }}
       />
       <div
@@ -938,7 +1007,7 @@ function TextEditor({ el, onSave, onClose }: { el: DesignTextElement; onSave: (s
           ["#22E07A", "Green"],
           ["#FFE14D", "Yellow"],
         ].map(([c, label]) => (
-          <button key={c} type="button" onClick={() => paint(c)} className="rounded px-3 py-1 font-semibold text-black" style={{ background: c }}>
+          <button key={c} type="button" onClick={() => format({ color: c })} className="rounded px-3 py-1 font-semibold text-black" style={{ background: c }}>
             {label}
           </button>
         ))}
@@ -946,7 +1015,7 @@ function TextEditor({ el, onSave, onClose }: { el: DesignTextElement; onSave: (s
           value={pickerValue}
           onChange={(hex) => {
             setPickerValue(hex);
-            paint(hex, pickerRange.current);
+            format({ color: hex }, pickerRange.current);
           }}
           onOpenChange={onPickerOpenChange}
           usedColors={usedColors}
@@ -957,12 +1026,13 @@ function TextEditor({ el, onSave, onClose }: { el: DesignTextElement; onSave: (s
           type="button"
           onClick={toggleBold}
           disabled={!canBold}
+          aria-pressed={boldActive}
           title={canBold ? "Bold the selected words (⌘B)" : "This font has no bolder weight"}
-          className="rounded border border-border px-3 py-1 font-bold disabled:opacity-40"
+          className={cn("rounded border border-border px-3 py-1 font-bold disabled:opacity-40", boldActive && "bg-foreground text-background")}
         >
           B
         </button>
-        <button type="button" onClick={() => paint(null)} className="rounded border border-border px-3 py-1">
+        <button type="button" onClick={() => format({ color: null, bold: false })} className="rounded border border-border px-3 py-1">
           Plain
         </button>
         <button type="button" onClick={commit} className="rounded bg-foreground px-3 py-1 font-semibold text-background">
@@ -973,60 +1043,76 @@ function TextEditor({ el, onSave, onClose }: { el: DesignTextElement; onSave: (s
   );
 }
 
-/** A selection grown to whole words, so bold never splits a word into two
- *  spans (layout breaks words at span edges). */
-export function wordRange(text: string, start: number, end: number): [number, number] {
-  let s = Math.min(start, end);
-  let e = Math.max(start, end);
-  while (s > 0 && !/\s/.test(text[s - 1]) && (s < e ? !/\s/.test(text[s]) : true)) s--;
-  while (e < text.length && !/\s/.test(text[e]) && (e > s ? !/\s/.test(text[e - 1]) : true)) e++;
-  return [s, e];
+/** Draw the model into the editable box: one span per run, styled the way
+ *  the stage draws it. A trailing <br> lets a final empty line show. */
+function drawRich(root: HTMLElement, rt: RichText, bold: { cssFamily: string; cssWeight: number }, canBold: boolean) {
+  const nodes: Node[] = richRuns(rt).map((r) => {
+    const span = document.createElement("span");
+    span.dataset.run = "";
+    if (r.color) {
+      span.dataset.color = r.color;
+      span.style.color = r.color;
+    }
+    if (r.bold) {
+      span.dataset.bold = "";
+      if (canBold) {
+        span.style.fontFamily = `"${bold.cssFamily}"`;
+        span.style.fontWeight = String(bold.cssWeight);
+      }
+    }
+    span.textContent = r.text;
+    return span;
+  });
+  if (rt.text === "" || rt.text.endsWith("\n")) nodes.push(document.createElement("br"));
+  root.replaceChildren(...nodes);
 }
 
-/** Carry a per-character bold mask across a textarea edit: the unchanged
- *  head and tail keep theirs, typed characters take the weight of the
- *  character before them (typing on after a bold word stays bold). */
-export function shiftBoldMask(prevText: string, nextText: string, mask: boolean[]): boolean[] {
-  let p = 0;
-  const max = Math.min(prevText.length, nextText.length);
-  while (p < max && prevText[p] === nextText[p]) p++;
-  let t = 0;
-  while (t < max - p && prevText[prevText.length - 1 - t] === nextText[nextText.length - 1 - t]) t++;
-  const inserted = nextText.length - p - t;
-  const inherit = p > 0 ? !!mask[p - 1] : false;
-  return [...mask.slice(0, p), ...Array<boolean>(inserted).fill(inherit), ...mask.slice(prevText.length - t)].slice(0, nextText.length);
+/** The box's text back as a model: each character styled by the run span
+ *  it sits in (text typed outside any span — an emptied box — is plain). */
+function readRich(root: HTMLElement): RichText {
+  let text = "";
+  const styles: RichText["styles"] = [];
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const value = n.nodeValue ?? "";
+    const run = (n.parentElement?.closest("[data-run]") as HTMLElement | null) ?? null;
+    const st = run && root.contains(run) ? { color: run.dataset.color ?? null, bold: run.dataset.bold !== undefined } : { color: null, bold: false };
+    text += value;
+    for (let i = 0; i < value.length; i++) styles.push({ ...st });
+  }
+  return { text, styles };
 }
 
-/** Split `text` into spans so each coloured phrase keeps its colour and
- *  each character marked in `bold` stays bold. */
-export function rehighlight(text: string, colored: Array<{ phrase: string; color: string }>, bold: boolean[] = []): DesignSpan[] {
-  const marks: Array<{ start: number; end: number; color: string }> = [];
-  const lower = text.toLowerCase();
-  for (const c of colored) {
-    const p = c.phrase.trim().toLowerCase();
-    if (!p) continue;
-    let from = 0;
-    while (from <= lower.length) {
-      const start = lower.indexOf(p, from);
-      if (start < 0) break;
-      const end = start + p.length;
-      if (!marks.some((m) => start < m.end && end > m.start)) marks.push({ start, end, color: c.color });
-      from = end;
+function getSelectionOffsets(root: HTMLElement): [number, number] {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || !root.contains(sel.anchorNode)) return [0, 0];
+  const r = sel.getRangeAt(0);
+  const at = (node: Node, offset: number) => {
+    const range = document.createRange();
+    range.selectNodeContents(root);
+    range.setEnd(node, offset);
+    return range.toString().length;
+  };
+  return [at(r.startContainer, r.startOffset), at(r.endContainer, r.endOffset)];
+}
+
+function setSelectionOffsets(root: HTMLElement, start: number, end: number) {
+  const find = (target: number): [Node, number] => {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let seen = 0;
+    let last: Text | null = null;
+    for (let n = walker.nextNode() as Text | null; n; n = walker.nextNode() as Text | null) {
+      const len = n.length;
+      if (target <= seen + len) return [n, target - seen];
+      seen += len;
+      last = n;
     }
-  }
-  const colorAt: Array<string | null> = Array(text.length).fill(null);
-  for (const m of marks) for (let i = m.start; i < m.end; i++) colorAt[i] = m.color;
-  const spans: DesignSpan[] = [];
-  let last: { color: string | null; bold: boolean } | null = null;
-  for (let i = 0; i < text.length; i++) {
-    const cur = { color: colorAt[i], bold: !!bold[i] };
-    if (last && last.color === cur.color && last.bold === cur.bold) {
-      spans[spans.length - 1].text += text[i];
-    } else {
-      spans.push({ text: text[i], ...(cur.color ? { color: cur.color } : {}), ...(cur.bold ? { bold: true } : {}) });
-      last = cur;
-    }
-  }
-  if (spans.length === 0) spans.push({ text: "" });
-  return spans;
+    return last ? [last, last.length] : [root, root.childNodes.length];
+  };
+  const range = document.createRange();
+  range.setStart(...find(start));
+  range.setEnd(...find(end));
+  const sel = window.getSelection();
+  sel?.removeAllRanges();
+  sel?.addRange(range);
 }

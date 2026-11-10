@@ -188,9 +188,9 @@ export function layoutDesignText(el: DesignTextElement): DesignTextLayout {
  */
 export function textEditorMetrics(
   el: DesignTextElement,
-  text: string,
+  text: string | DesignSpan[],
 ): { fontSizePx: number; lineHeightPx: number; paddingTopPx: number } {
-  const layout = layoutDesignText({ ...el, spans: [{ text }] });
+  const layout = layoutDesignText({ ...el, spans: typeof text === "string" ? [{ text }] : text });
   const pitch = layout.linePitchPx;
   // No words (an emptied box): the caret line sits where one line would.
   const top = layout.lines.length
