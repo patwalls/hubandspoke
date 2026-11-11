@@ -63,6 +63,8 @@ test("flag on → AI draft opens; a drag is undoable and autosaves", async ({ pa
   await thumbs.nth(0).click();
   await page.mouse.click(box.x + 60 * s, box.y + 60 * s);
   await expect(page.locator("section").filter({ hasText: /Swap picture|Page 1/ }).first()).toBeVisible();
+  // A stored photo offers the AI upscale (the job itself costs money — not run here).
+  if (await page.getByText("Swap picture").isVisible()) await expect(page.getByRole("button", { name: "Enhance + blur background" })).toBeVisible();
 
   await page.getByRole("button", { name: "Save draft & close" }).click();
   await expect(page.getByText("Editor beta")).toBeHidden();

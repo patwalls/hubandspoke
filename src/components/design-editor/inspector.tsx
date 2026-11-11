@@ -5,7 +5,7 @@
 import { createContext, useContext, useMemo, useRef, useState } from "react";
 import { ColorPicker } from "@/components/editor/color-picker";
 import { colorsInDesignDoc } from "@/lib/design-editor/colors";
-import { ArrowDownIcon, ArrowUpIcon, CameraIcon, CopyIcon, CropIcon, GroupIcon, ImageIcon, Layers2Icon, Loader2Icon, LockIcon, MonitorIcon, ScissorsIcon, Trash2Icon, UngroupIcon, UnlockIcon, UploadIcon, XIcon } from "lucide-react";
+import { ArrowDownIcon, ArrowUpIcon, CameraIcon, CopyIcon, CropIcon, GroupIcon, ImageIcon, Layers2Icon, Loader2Icon, LockIcon, MonitorIcon, ScissorsIcon, SparklesIcon, Trash2Icon, UngroupIcon, UnlockIcon, UploadIcon, XIcon } from "lucide-react";
 import { LogoPicker } from "@/components/editor/logo-picker";
 import { cn } from "@/lib/utils";
 import { FONT_IDS } from "@/lib/clip-editor/doc";
@@ -20,6 +20,7 @@ import type { ImageCandidate } from "@/lib/services/design-editor/assets";
 import type { DesignFrame, DesignFramesState } from "@/lib/services/design-editor/frames";
 import type { DesignPhoto, DesignPhotosState } from "@/lib/services/design-editor/photos";
 import { imageSourceKey } from "@/lib/editor/image-source";
+import { canEnhance } from "@/lib/design-editor/enhance";
 import { ARROW_HEADS, newElementId } from "@/lib/design-editor/doc";
 import { arrowEnds, arrowFromEnds } from "@/lib/design-editor/arrow";
 import { commands, useDesign } from "./store";
@@ -45,6 +46,10 @@ export interface InspectorProps {
   onSplit?: (elementId: string) => void;
   /** A cutout is being made right now (for this or another element). */
   cutoutBusy?: string | null;
+  /** Enhance (AI upscale, optionally with a portrait-lens background blur). */
+  onEnhance?: (elementId: string, blur: boolean) => void;
+  /** `${elementId}:${blur}` while an enhancement runs. */
+  enhanceBusy?: string | null;
   /** Scan the video for dashboard / revenue screens (`force` rescans). */
   onFindScreens?: (force: boolean) => void;
   onDeletePhoto?: (photo: DesignPhoto) => void;
@@ -72,7 +77,7 @@ export function formatSec(sec: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-export function Inspector({ doc, mode, images, frames, photos, source, brand, onPickImage, onGrabFrame, onUpload, onCutout, onSplit, cutoutBusy, onFindScreens, onDeletePhoto, onAdjust, onSeekClip, channels, dmKeyword, onChangeDmKeyword, onRerunFrames }: InspectorProps) {
+export function Inspector({ doc, mode, images, frames, photos, source, brand, onPickImage, onGrabFrame, onUpload, onCutout, onSplit, cutoutBusy, onEnhance, enhanceBusy, onFindScreens, onDeletePhoto, onAdjust, onSeekClip, channels, dmKeyword, onChangeDmKeyword, onRerunFrames }: InspectorProps) {
   const apply = useDesign((s) => s.apply);
   const selection = useDesign((s) => s.selection);
   const select = useDesign((s) => s.select);
@@ -275,6 +280,7 @@ export function Inspector({ doc, mode, images, frames, photos, source, brand, on
               </div>
             </div>
           )}
+          {el.type === "image" && onEnhance && <EnhancePanel el={el} photos={photos} onEnhance={onEnhance} busy={enhanceBusy ?? null} />}
         </Panel>
       )}
       {el.type === "image" && (
@@ -283,6 +289,36 @@ export function Inspector({ doc, mode, images, frames, photos, source, brand, on
       {el.type === "captions" && <CaptionsPanel el={el} patch={(fn, key) => patch<DesignCaptionsElement>(fn, key)} />}
     </div>
     </UsedColorsContext.Provider>
+  );
+}
+
+/** Enhance: the Canva-style AI upscale. gpt-image-2 redraws the picture
+ *  crisp at ~2048px, same person and framing (lib/design-editor/enhance.ts);
+ *  "+ blur background" adds a portrait-lens blur behind the person. The
+ *  result replaces the picture (⌘Z brings the original back) and stays in
+ *  the video's library under "Enhanced". */
+function EnhancePanel({ el, photos, onEnhance, busy }: { el: DesignImageElement; photos: DesignPhotosState; onEnhance: (elementId: string, blur: boolean) => void; busy: string | null }) {
+  const key = imageSourceKey(el.src);
+  const fromLibrary = photos.photos.find((p) => imageSourceKey(p.src) === key);
+  if (!canEnhance(el.src) || fromLibrary?.kind === "cutout") return null;
+  if (fromLibrary?.kind === "enhanced") {
+    return <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><SparklesIcon className="size-3 text-violet-500" /> Enhanced with AI · ⌘Z for the original</p>;
+  }
+  const running = busy !== null && busy.startsWith(`${el.id}:`);
+  const button = (blur: boolean, label: string, title: string, primary: boolean) => (
+    <button type="button" disabled={busy !== null} onClick={() => onEnhance(el.id, blur)} title={title} className={cn("inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-medium disabled:opacity-50", primary ? "border-violet-300 bg-violet-50 text-violet-900 hover:bg-violet-100 dark:bg-violet-950/40 dark:text-violet-200" : "border-border hover:bg-muted")}>
+      {busy === `${el.id}:${blur}` ? <Loader2Icon className="size-3 animate-spin" /> : <SparklesIcon className="size-3" />} {label}
+    </button>
+  );
+  return (
+    <div className="flex flex-col gap-1" data-testid="enhance-panel">
+      <span className="text-[11px] font-medium text-muted-foreground">Enhance with AI</span>
+      <div className="flex flex-wrap gap-1">
+        {button(false, "Enhance", "Upscale and sharpen this picture with AI: a crisp, high-resolution version with the same person, pose and framing. About a minute.", true)}
+        {button(true, "Enhance + blur background", "Enhance, and give it a portrait-lens look: the person tack sharp, the background softly blurred. About a minute.", false)}
+      </div>
+      {running && <span className="text-[11px] text-muted-foreground">Enhancing… about a minute. Keep editing; it swaps in when ready.</span>}
+    </div>
   );
 }
 
@@ -406,6 +442,7 @@ export function PicturePicker({ title, images, frames, photos, source, brand, on
   const uploads = photos.photos.filter((p) => p.kind === "upload");
   const cutouts = photos.photos.filter((p) => p.kind === "cutout");
   const screens = photos.photos.filter((p) => p.kind === "screen");
+  const enhanced = photos.photos.filter((p) => p.kind === "enhanced");
   const library = (list: DesignPhoto[], checker = false) => (
     <div className="grid grid-cols-3 gap-1">
       {list.map((p) => (
@@ -441,6 +478,12 @@ export function PicturePicker({ title, images, frames, photos, source, brand, on
       <button type="button" disabled={uploading} onClick={() => fileRef.current?.click()} title="Add photos of the founder — several at once is fine. They're kept with the source video for every future post made from it." className="inline-flex items-center justify-center gap-1.5 self-start rounded-md border border-border px-2 py-1.5 text-[11px] font-medium hover:bg-muted disabled:opacity-50">
         {uploading ? <Loader2Icon className="size-3 animate-spin" /> : <UploadIcon className="size-3" />} Upload photos of the founder
       </button>
+      {enhanced.length > 0 && (
+        <>
+          <span className="text-[11px] text-muted-foreground">Enhanced with AI</span>
+          {library(enhanced)}
+        </>
+      )}
       {cutouts.length > 0 && (
         <>
           <span className="text-[11px] text-muted-foreground">Cutouts (background removed)</span>

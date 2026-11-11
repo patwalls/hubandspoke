@@ -896,7 +896,7 @@ export async function createTestDesignRender(
  * A picture in a source video's design library (`design_photos`). Cleaned
  * up by the FK cascade from the owning item.
  */
-export async function createTestDesignPhoto(opts: { productionItemId: string; kind?: "upload" | "cutout" | "screen"; s3Key?: string; createdAt?: Date }): Promise<typeof designPhotos.$inferSelect> {
+export async function createTestDesignPhoto(opts: { productionItemId: string; kind?: "upload" | "cutout" | "screen" | "enhanced"; sourceKey?: string | null; s3Key?: string; createdAt?: Date }): Promise<typeof designPhotos.$inferSelect> {
   const [row] = await db
     .insert(designPhotos)
     .values({
@@ -905,6 +905,7 @@ export async function createTestDesignPhoto(opts: { productionItemId: string; ki
       label: "vitest photo",
       s3Bucket: "vitest-bucket",
       s3Key: opts.s3Key ?? `vitest/photo-${randomSuffix()}.jpg`,
+      sourceKey: opts.sourceKey ?? null,
       ...(opts.createdAt ? { createdAt: opts.createdAt } : {}),
     })
     .returning();

@@ -60,6 +60,7 @@ import { AttachDmKeywordDialog } from "@/components/dashboard/attach-dm-keyword-
 import type { ImageCandidate } from "@/lib/services/design-editor/assets";
 import type { DesignFramesState } from "@/lib/services/design-editor/frames";
 import type { DesignPhoto, DesignPhotosState } from "@/lib/services/design-editor/photos";
+import { imageSourceKey } from "@/lib/editor/image-source";
 import type { HeroCoverResult } from "@/lib/services/design-editor/hero";
 import type { CoverStyleCard, CoverStyleState } from "@/lib/services/design-editor/cover-styles";
 import { CoverStylesPanel } from "./cover-styles-panel";
@@ -79,6 +80,7 @@ import { useCanEditBrand } from "@/components/brand-access";
 const AUTOSAVE_DELAY_MS = 900;
 const FRAMES_POLL_MS = 2500;
 const PHOTOS_POLL_MS = 3000;
+const ENHANCE_POLL_MS = 3000;
 // The first-open AI draft. Raise it as the draft step does more work, so
 // the loading bar stays honest. The worker draft measured 39.7s in prod
 // (2026-10-14); with the founder look-up (web search) 89s locally (2026-10-16).
@@ -291,6 +293,8 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
   const [photos, setPhotos] = useState<DesignPhotosState>(session.photos);
   /** The element a cutout is being made for ("hero" for the hero cover). */
   const [cutoutBusy, setCutoutBusy] = useState<string | null>(null);
+  /** `${elementId}:${blur}` while an Enhance runs on the worker. */
+  const [enhanceBusy, setEnhanceBusy] = useState<string | null>(null);
   /** A frame grab the user asked for; swapped in when the worker delivers it. */
   const pendingGrab = useRef<{ elementId: string | null; pageIndex: number; sec: number } | null>(null);
   const [busy, setBusy] = useState<null | "regen" | "export" | "hero" | "style">(null);
@@ -595,6 +599,46 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
       toast.success("Split into two layers", { description: "Grouped: drag moves both. Click the photo again to pick one layer; drag a stat card or shape between them in Layers." });
     } finally {
       setCutoutBusy(null);
+    }
+  };
+
+  /** Enhance (AI upscale) a picture: the worker redraws it with
+   *  gpt-image-2 (~1 min), we poll, then swap the enhanced copy into the
+   *  same element with the same framing. One undo step brings the original
+   *  back; the copy stays in the library under "Enhanced with AI". */
+  const enhanceElement = async (elementId: string, blur: boolean) => {
+    const el = page.elements.find((e) => e.id === elementId);
+    if (!el || el.type !== "image" || enhanceBusy) return;
+    const src = el.src;
+    setEnhanceBusy(`${elementId}:${blur}`);
+    const toastId = `enhance-${elementId}`;
+    toast.loading(blur ? "Enhancing + blurring the background…" : "Enhancing the picture…", { id: toastId, description: "About a minute. Keep editing — it swaps in when it's ready." });
+    try {
+      const url = `/api/production-items/${session.item.id}/design/enhance`;
+      type Status = { state: "done"; photo: DesignPhoto } | { state: "pending" } | { state: "failed"; error: string } | { state: "none" } | { error: string };
+      const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ src, blur }) });
+      let status = (await res.json().catch(() => ({ error: "Enhance failed" }))) as Status;
+      const deadline = Date.now() + 5 * 60_000;
+      while ("state" in status && (status.state === "pending" || status.state === "none") && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, ENHANCE_POLL_MS));
+        const poll = await fetch(`${url}?src=${encodeURIComponent(JSON.stringify(src))}&blur=${blur ? 1 : 0}`).catch(() => null);
+        if (poll?.ok) status = (await poll.json()) as Status;
+      }
+      if (!("state" in status) || status.state !== "done") {
+        const error = "error" in status ? status.error : "It took too long — try again";
+        return void toast.error("Couldn't enhance the picture", { id: toastId, description: error });
+      }
+      const photo = status.photo;
+      setPhotos((s) => ({ ...s, photos: [photo, ...s.photos.filter((x) => x.id !== photo.id)] }));
+      setImageUrls((m) => ({ ...m, [elementId]: photo.previewUrl }));
+      // The element may be on another page by now (or deleted).
+      const { doc: cur } = storeApi.getState();
+      const at = cur.pages.findIndex((pg) => pg.elements.some((e) => e.id === elementId && e.type === "image" && imageSourceKey(e.src) === imageSourceKey(src)));
+      if (at < 0) return void toast.success("Enhanced", { id: toastId, description: "It's in the picture panel under “Enhanced with AI”." });
+      apply(commands.patchElement(at, elementId, (e) => (e.type === "image" ? { ...e, src: photo.src } : e)));
+      toast.success("Enhanced", { id: toastId, description: "⌘Z brings the original back." });
+    } finally {
+      setEnhanceBusy(null);
     }
   };
 
@@ -1068,7 +1112,7 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
         {stylesOpen && !isTemplate ? (
           <CoverStylesPanel brand={brand} format={session.item.format} busyId={styleBusyId} onPick={applyStyle} onClose={() => setStylesOpen(false)} />
         ) : (
-        <Inspector doc={doc} mode={mode} images={images} frames={frames} photos={photos} source={session.source} brand={brand} onPickImage={swapImage} onGrabFrame={(elementId, sec) => void grabFrame(elementId, sec)} onUpload={upload} onCutout={isTemplate ? undefined : (id) => void cutoutElement(id)} onSplit={isTemplate ? undefined : (id) => void splitElement(id)} cutoutBusy={cutoutBusy} onFindScreens={isTemplate ? undefined : (force) => void findScreens(force)} onDeletePhoto={isTemplate ? undefined : (p) => void deletePhoto(p)} onAdjust={(id) => storeApi.getState().setEditing(id)} onSeekClip={(sec) => { seekClip(sec); setPlaying(true); }} channels={session.channels} dmKeyword={dmKeyword} onChangeDmKeyword={isTemplate ? undefined : () => setKeywordOpen(true)} onRerunFrames={isTemplate ? undefined : () => void rerunFrames()} />
+        <Inspector doc={doc} mode={mode} images={images} frames={frames} photos={photos} source={session.source} brand={brand} onPickImage={swapImage} onGrabFrame={(elementId, sec) => void grabFrame(elementId, sec)} onUpload={upload} onCutout={isTemplate ? undefined : (id) => void cutoutElement(id)} onSplit={isTemplate ? undefined : (id) => void splitElement(id)} cutoutBusy={cutoutBusy} onEnhance={isTemplate ? undefined : (id, blur) => void enhanceElement(id, blur)} enhanceBusy={enhanceBusy} onFindScreens={isTemplate ? undefined : (force) => void findScreens(force)} onDeletePhoto={isTemplate ? undefined : (p) => void deletePhoto(p)} onAdjust={(id) => storeApi.getState().setEditing(id)} onSeekClip={(sec) => { seekClip(sec); setPlaying(true); }} channels={session.channels} dmKeyword={dmKeyword} onChangeDmKeyword={isTemplate ? undefined : () => setKeywordOpen(true)} onRerunFrames={isTemplate ? undefined : () => void rerunFrames()} />
         )}
         {!isTemplate && (
           <AttachDmKeywordDialog

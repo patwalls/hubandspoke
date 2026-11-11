@@ -2,7 +2,8 @@
  * A source video's extra picture library (`design_photos`, keyed by the
  * PILLAR like the filmstrip): photos of the founder the team uploads, the
  * cutouts the browser makes (background removed), and the dashboard /
- * revenue screens the `design-screens` job finds in the video. Every post
+ * revenue screens the `design-screens` job finds in the video, and the
+ * AI-enhanced copies the `design-enhance` job makes (lib/design-editor/enhance.ts). Every post
  * made from the video sees the same library, so a photo uploaded for one
  * carousel is there for the next.
  */
@@ -16,14 +17,15 @@ import type { DesignImageSource } from "@/lib/design-editor/doc";
 import { imageSourceKey } from "@/lib/editor/image-source";
 import type { ImageCandidate } from "@/lib/design-editor/brand-assets";
 
-export type DesignPhotoKind = "upload" | "cutout" | "screen";
+export type DesignPhotoKind = "upload" | "cutout" | "screen" | "enhanced";
 
 export interface DesignPhoto extends ImageCandidate {
   id: string;
   kind: DesignPhotoKind;
   width: number | null;
   height: number | null;
-  /** cutout: `imageSourceKey` of the picture it was cut from. */
+  /** cutout: `imageSourceKey` of the picture it was cut from; enhanced:
+   *  `enhanceSourceKey` (picture + blur or not). */
   sourceKey: string | null;
   /** screen: seconds into the video. */
   sec: number | null;
@@ -137,7 +139,7 @@ export async function screensPending(sourceItemId: string): Promise<boolean> {
   return ((queued as unknown as Array<{ n: number }>)[0]?.n ?? 0) > 0;
 }
 
-async function toPhoto(row: typeof designPhotos.$inferSelect): Promise<DesignPhoto> {
+export async function toPhoto(row: typeof designPhotos.$inferSelect): Promise<DesignPhoto> {
   const src: DesignImageSource = { kind: "s3", bucket: row.s3Bucket, key: row.s3Key };
   return {
     id: row.id,
