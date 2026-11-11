@@ -268,7 +268,7 @@ export function Inspector({ doc, mode, images, frames, photos, source, brand, on
               <span className="text-[11px] font-medium text-muted-foreground">Remove background</span>
               <div className="flex flex-wrap gap-1">
                 {onSplit && (
-                  <button type="button" disabled={!!cutoutBusy} onClick={() => onSplit(el.id)} title="Keep this picture as the background layer and put the cut-out person on a new layer right above it, lined up exactly — so you can slide a stat card, shape or text between them. Runs in your browser; the first time downloads the model." className="inline-flex items-center gap-1.5 rounded-md border border-pink-300 bg-pink-50 px-2 py-1 text-[11px] font-medium text-pink-900 hover:bg-pink-100 disabled:opacity-50 dark:bg-pink-950/40 dark:text-pink-200">
+                  <button type="button" disabled={!!cutoutBusy} onClick={() => onSplit(el.id)} title="Keep this picture as the background layer and put the cut-out person on a new layer right above it, lined up exactly — so you can slide a stat card, shape or text between them. Runs in your browser; the first time downloads the model." className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-[11px] font-medium hover:bg-muted disabled:opacity-50">
                     {cutoutBusy === el.id ? <Loader2Icon className="size-3 animate-spin" /> : <Layers2Icon className="size-3" />} Split into layers
                   </button>
                 )}
@@ -305,8 +305,10 @@ function EnhancePanel({ el, photos, onEnhance, busy }: { el: DesignImageElement;
     return <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><SparklesIcon className="size-3 text-violet-500" /> Enhanced with AI · ⌘Z for the original</p>;
   }
   const running = busy !== null && busy.startsWith(`${el.id}:`);
-  const button = (blur: boolean, label: string, title: string, primary: boolean) => (
-    <button type="button" disabled={busy !== null} onClick={() => onEnhance(el.id, blur)} title={title} className={cn("inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-medium disabled:opacity-50", primary ? "border-violet-300 bg-violet-50 text-violet-900 hover:bg-violet-100 dark:bg-violet-950/40 dark:text-violet-200" : "border-border hover:bg-muted")}>
+  // Plain outline buttons, like "Erase only": a tinted fill reads as
+  // "already on" next to the Fill/Fit toggle (Pat, 2026-11-11).
+  const button = (blur: boolean, label: string, title: string) => (
+    <button type="button" disabled={busy !== null} onClick={() => onEnhance(el.id, blur)} title={title} className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-[11px] font-medium hover:bg-muted disabled:opacity-50">
       {busy === `${el.id}:${blur}` ? <Loader2Icon className="size-3 animate-spin" /> : <SparklesIcon className="size-3" />} {label}
     </button>
   );
@@ -314,8 +316,8 @@ function EnhancePanel({ el, photos, onEnhance, busy }: { el: DesignImageElement;
     <div className="flex flex-col gap-1" data-testid="enhance-panel">
       <span className="text-[11px] font-medium text-muted-foreground">Enhance with AI</span>
       <div className="flex flex-wrap gap-1">
-        {button(false, "Enhance", "Upscale and sharpen this picture with AI: a crisp, high-resolution version with the same person, pose and framing. About a minute.", true)}
-        {button(true, "Enhance + blur background", "Enhance, and give it a portrait-lens look: the person tack sharp, the background softly blurred. About a minute.", false)}
+        {button(false, "Enhance", "Upscale and sharpen this picture with AI: a crisp, high-resolution version with the same person, pose and framing. About a minute.")}
+        {button(true, "Enhance + blur background", "Enhance, and give it a portrait-lens look: the person tack sharp, the background softly blurred. About a minute.")}
       </div>
       {running && <span className="text-[11px] text-muted-foreground">Enhancing… about a minute. Keep editing; it swaps in when ready.</span>}
     </div>
