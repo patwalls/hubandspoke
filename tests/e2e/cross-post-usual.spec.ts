@@ -78,8 +78,12 @@ test("Select usual checks the accounts the format usually goes to", async ({ pag
 
     const usual = page.getByRole("button", { name: "Select usual (2)" });
     await expect(usual).toBeVisible({ timeout: 15_000 });
-    // The moment worth seeing: the dialog as it opens, the button beside Select all.
-    if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT, fullPage: true });
+    // The moment worth seeing: the dialog as it opens, the button beside
+    // Select all (after the dialog's fade-in).
+    if (process.env.E2E_SHOT) {
+      await page.waitForTimeout(500);
+      await page.screenshot({ path: process.env.E2E_SHOT, fullPage: true });
+    }
     await usual.click();
 
     await expect(page.getByRole("checkbox", { name: new RegExp(`e2e_tiktok_${stamp}`) })).toBeChecked();
