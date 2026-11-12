@@ -6,8 +6,9 @@ interface RouteContext {
   params: Promise<{ id: string }>;
 }
 
-// Runs the CTA target picker (one Opus call) — give it the same headroom as the
-// regenerate-cta route so a cold start doesn't 504.
+// Runs the CTA target picker on its "fast" tier (Haiku 5.5, low effort — ~1-2 s
+// instead of Opus's ~9 s); keep the headroom so a slow episode search or a
+// cold start doesn't 504.
 export const maxDuration = 60;
 
 /**

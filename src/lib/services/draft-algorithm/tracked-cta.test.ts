@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildDestinationUrl } from "./tracked-cta";
+import { buildDestinationUrl, ctaPlannerConfig } from "./tracked-cta";
 import { renderCtaExemplars, CTA_EXEMPLARS } from "./cta-exemplars";
 
 describe("buildDestinationUrl", () => {
@@ -68,5 +68,21 @@ describe("renderCtaExemplars", () => {
     for (const ex of CTA_EXEMPLARS) {
       expect(ex.copyLine.trim().endsWith(":")).toBe(true);
     }
+  });
+});
+
+describe("ctaPlannerConfig", () => {
+  // The DM-keyword dialog waits on the "fast" tier (suggested Destination) —
+  // Opus at high effort made editors wait ~9 s for a pre-fill they can edit.
+  it("fast tier (DM-keyword suggestion) is a light model at low effort", () => {
+    // …and one search round: left uncapped, Haiku searched one query per turn
+    // (4 turns, ~6 s) and ate most of the win.
+    expect(ctaPlannerConfig("fast")).toEqual({ model: "claude-haiku-5-5", effort: "low", searchRounds: 1 });
+  });
+
+  // The published CTA copy keeps the full model — speeding up the dialog must
+  // not downgrade the CTA that ships in a post.
+  it("full tier (published CTA) stays on Opus at high effort", () => {
+    expect(ctaPlannerConfig("full")).toEqual({ model: "claude-opus-5-5", effort: "high", searchRounds: null });
   });
 });

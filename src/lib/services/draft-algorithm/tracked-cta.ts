@@ -41,8 +41,31 @@ const STARTER_STORY_BRAND = "starter-story";
 // The clone-on-write into content_drafts is the CALLER's job — this service is
 // pure "produce the cta string + side-effect the tracking link".
 
-const MODEL = "claude-opus-5-5";
 export const TRACKED_CTA_VERSION = 2;
+
+/** Which model runs the CTA planner.
+ *  - "full": the CTA that ships in a post (Regenerate CTA, draft algorithm,
+ *    cross-post). Opus at high effort — the copy line is published verbatim.
+ *  - "fast": the DM-keyword dialog's suggested Destination. Only the link is
+ *    used (the copy line is thrown away), the editor sees and can change it,
+ *    and they sit waiting on it. Opus/high took ~9 s. Haiku/low turns are
+ *    ~1 s each, but left alone it searched one query per turn (4 turns,
+ *    ~6 s), so the fast tier also gets ONE search round (parallel queries)
+ *    before it must propose: 2 turns. */
+export type CtaPlannerTier = "full" | "fast";
+
+export function ctaPlannerConfig(tier: CtaPlannerTier): {
+  model: string;
+  effort: "low" | "medium" | "high";
+  /** find_episode rounds before the model must propose; null = no cap
+   *  beyond the loop's iteration limit. */
+  searchRounds: number | null;
+} {
+  return tier === "fast"
+    ? { model: "claude-haiku-5-5", effort: "low", searchRounds: 1 }
+    : // Opus 5.5 defaults to "medium"; Opus 4.7 ran at "high". Keep "high".
+      { model: "claude-opus-5-5", effort: "high", searchRounds: null };
+}
 
 const BASE_URL = process.env.SHORT_LINKS_BASE_URL ?? "https://go.starterstory.com";
 
@@ -105,7 +128,7 @@ export async function generateTrackedCta(
   }
 
   const leadMagnets = await listLeadMagnets();
-  const plan = await planCta({ ...args, leadMagnets });
+  const plan = await planCta({ ...args, leadMagnets }, "full");
 
   const destinationUrl = buildDestinationUrl(
     plan.targetUrl,
@@ -221,7 +244,7 @@ export async function suggestCtaDestination(args: {
     pillarTitle,
     formatInstructions,
     leadMagnets,
-  });
+  }, "fast");
 
   return buildDestinationUrl(plan.targetUrl, channel, item.utmCampaign ?? null);
 }
@@ -338,8 +361,10 @@ Call propose_cta exactly once with: copy_line, target_type, target_url, and lead
 
 async function planCta(
   args: GenerateTrackedCtaArgs & { leadMagnets: LeadMagnet[] },
+  tier: CtaPlannerTier,
 ): Promise<CtaPlan> {
   const client = new Anthropic();
+  const { model, effort, searchRounds } = ctaPlannerConfig(tier);
   const channel = args.channel as CtaChannel;
 
   const tools: Anthropic.Tool[] = [
@@ -423,6 +448,11 @@ async function planCta(
     ``,
     `## TASK`,
     `Decide the best target for this post, then call propose_cta once.`,
+    ...(searchRounds === 1
+      ? [
+          `You get ONE round of find_episode: if you search, make every query you'd try (guest, company, title) as parallel calls in that one turn. After the results come back, call propose_cta.`,
+        ]
+      : []),
   ].join("\n");
 
   const messages: Anthropic.MessageParam[] = [
@@ -430,15 +460,15 @@ async function planCta(
   ];
 
   const MAX_ITERATIONS = 4;
+  let rounds = 0;
   for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
     const response = await client.messages.create({
-      model: MODEL,
-      // Opus 5.5 always thinks and thinking counts toward max_tokens; 1024
-      // (sized for Opus 4.7 with no thinking) could cut the turn off before
-      // propose_cta.
+      model,
+      // Opus 5.5 / Haiku 5.5 always think and thinking counts toward
+      // max_tokens; 1024 (sized for Opus 4.7 with no thinking) could cut the
+      // turn off before propose_cta.
       max_tokens: 8000,
-      // Opus 5.5 defaults to "medium"; Opus 4.7 ran at "high". Keep "high".
-      output_config: { effort: "high" },
+      output_config: { effort },
       system: SYSTEM_PROMPT,
       tools,
       tool_choice: { type: "auto" },
@@ -466,11 +496,19 @@ async function planCta(
       );
     }
 
-    // Service the find_episode calls (and surface an error for anything else,
-    // nudging the model back to propose_cta).
-    const results: Anthropic.ToolResultBlockParam[] = [];
-    for (const tu of toolUses) {
-      if (tu.name === "find_episode") {
+    // Service the find_episode calls in parallel (and surface an error for
+    // anything else, nudging the model back to propose_cta). Results keep the
+    // tool_use order.
+    const results: Anthropic.ToolResultBlockParam[] = await Promise.all(
+      toolUses.map(async (tu): Promise<Anthropic.ToolResultBlockParam> => {
+        if (tu.name !== "find_episode") {
+          return {
+            type: "tool_result",
+            tool_use_id: tu.id,
+            content: JSON.stringify({ error: `Unknown tool: ${tu.name}` }),
+            is_error: true,
+          };
+        }
         const query = String((tu.input as { query?: unknown })?.query ?? "").trim();
         let content = "[]";
         try {
@@ -486,17 +524,17 @@ async function planCta(
         } catch {
           content = JSON.stringify({ error: "episode search unavailable" });
         }
-        results.push({ type: "tool_result", tool_use_id: tu.id, content });
-      } else if (tu.name !== "propose_cta") {
-        results.push({
-          type: "tool_result",
-          tool_use_id: tu.id,
-          content: JSON.stringify({ error: `Unknown tool: ${tu.name}` }),
-          is_error: true,
-        });
-      }
-    }
-    messages.push({ role: "user", content: results });
+        return { type: "tool_result", tool_use_id: tu.id, content };
+      }),
+    );
+    rounds++;
+    const searchesSpent = searchRounds !== null && rounds >= searchRounds;
+    messages.push({
+      role: "user",
+      content: searchesSpent
+        ? [...results, { type: "text", text: "Search round used. Call propose_cta now." }]
+        : results,
+    });
   }
 
   throw new Error(
