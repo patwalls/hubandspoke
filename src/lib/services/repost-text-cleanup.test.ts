@@ -1,6 +1,10 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type Anthropic from "@anthropic-ai/sdk";
-import { stripDateOpenerWithLLM } from "./repost-text-cleanup";
+import {
+  clearDateOpenerMemo,
+  removeOpenerLine,
+  stripDateOpenerWithLLM,
+} from "./repost-text-cleanup";
 
 // Build a minimal stub of the Anthropic client whose `messages.create`
 // returns the response shape we care about (a single `tool_use` block).
@@ -21,7 +25,7 @@ function fakeClient(response: {
             {
               type: "tool_use",
               id: "tool_test",
-              name: response.toolName ?? "return_body",
+              name: response.toolName ?? "return_opener",
               input: response.toolInput ?? {},
             } as unknown as Anthropic.ContentBlock,
           ];
@@ -37,86 +41,118 @@ function fakeClient(response: {
   } as { client: Anthropic; calls: number };
 }
 
+const OPENER_POST =
+  "8 years ago today:\n\nI woke up at 6AM and dragged myself to Starbucks on 17th and 8th.";
+const OPENER_CLEANED =
+  "I woke up at 6AM and dragged myself to Starbucks on 17th and 8th.";
+
+describe("removeOpenerLine", () => {
+  it("removes the first line and the blank lines after it", () => {
+    expect(removeOpenerLine(OPENER_POST, "8 years ago today:")).toBe(OPENER_CLEANED);
+  });
+
+  it("matches the opener with surrounding whitespace trimmed, keeps CRLF", () => {
+    expect(
+      removeOpenerLine("  8 years ago today: \r\n\r\nLine one\r\nLine two", "8 years ago today:"),
+    ).toBe("Line one\r\nLine two");
+  });
+
+  it("changes nothing when the body does not start with that line", () => {
+    const body = "Something else first.\n8 years ago today:\nmore";
+    expect(removeOpenerLine(body, "8 years ago today:")).toBe(body);
+  });
+
+  it("changes nothing when the opener is only the start of the first line", () => {
+    const body = "8 years ago today I learned the lesson of my career.\nMore.";
+    expect(removeOpenerLine(body, "8 years ago today")).toBe(body);
+  });
+
+  it("never empties the body (opener with nothing after it)", () => {
+    expect(removeOpenerLine("Last year:\n\n", "Last year:")).toBe("Last year:\n\n");
+  });
+
+  it("changes nothing for an empty opener", () => {
+    expect(removeOpenerLine(OPENER_POST, "  ")).toBe(OPENER_POST);
+  });
+});
+
 describe("stripDateOpenerWithLLM", () => {
-  it("returns the cleaned body when the LLM removed the opener", async () => {
-    const original =
-      "8 years ago today:\n\nI woke up at 6AM and dragged myself to Starbucks on 17th and 8th.";
-    const cleaned =
-      "I woke up at 6AM and dragged myself to Starbucks on 17th and 8th.";
-    const fake = fakeClient({ toolInput: { body: cleaned } });
-    const result = await stripDateOpenerWithLLM(original, {
-      client: fake.client,
-    });
-    expect(result).toBe(cleaned);
+  beforeEach(() => clearDateOpenerMemo());
+
+  it("removes the opener the model named", async () => {
+    const fake = fakeClient({ toolInput: { opener: "8 years ago today:" } });
+    const result = await stripDateOpenerWithLLM(OPENER_POST, { client: fake.client });
+    expect(result).toBe(OPENER_CLEANED);
     expect(fake.calls).toBe(1);
   });
 
-  it("returns the input unchanged when the LLM detected no opener", async () => {
+  it("returns the input unchanged when the model found no opener", async () => {
     const original =
       "Today is the start of something new — here's what we're building.";
-    const fake = fakeClient({ toolInput: { body: original } });
-    const result = await stripDateOpenerWithLLM(original, {
-      client: fake.client,
-    });
-    expect(result).toBe(original);
+    const fake = fakeClient({ toolInput: { opener: "" } });
+    expect(await stripDateOpenerWithLLM(original, { client: fake.client })).toBe(original);
+  });
+
+  it("ignores a model answer that is not the body's first line (no rewriting)", async () => {
+    const fake = fakeClient({ toolInput: { opener: "I woke up at 6AM" } });
+    expect(await stripDateOpenerWithLLM(OPENER_POST, { client: fake.client })).toBe(
+      OPENER_POST,
+    );
+  });
+
+  it("asks once per body: the next cross-post of the same caption skips the call", async () => {
+    const fake = fakeClient({ toolInput: { opener: "8 years ago today:" } });
+    await stripDateOpenerWithLLM(OPENER_POST, { client: fake.client });
+    const again = await stripDateOpenerWithLLM(OPENER_POST, { client: fake.client });
+    expect(again).toBe(OPENER_CLEANED);
+    expect(fake.calls).toBe(1);
+  });
+
+  it("does not remember a failure — the next call asks again", async () => {
+    const failing = fakeClient({ throws: new Error("boom") });
+    expect(await stripDateOpenerWithLLM(OPENER_POST, { client: failing.client })).toBe(
+      OPENER_POST,
+    );
+    const ok = fakeClient({ toolInput: { opener: "8 years ago today:" } });
+    expect(await stripDateOpenerWithLLM(OPENER_POST, { client: ok.client })).toBe(
+      OPENER_CLEANED,
+    );
+    expect(ok.calls).toBe(1);
   });
 
   it("skips the LLM call entirely on null input", async () => {
-    const fake = fakeClient({ toolInput: { body: "shouldn't be called" } });
-    const result = await stripDateOpenerWithLLM(null, { client: fake.client });
-    expect(result).toBeNull();
+    const fake = fakeClient({ toolInput: { opener: "x" } });
+    expect(await stripDateOpenerWithLLM(null, { client: fake.client })).toBeNull();
     expect(fake.calls).toBe(0);
   });
 
   it("skips the LLM call on whitespace-only input", async () => {
-    const fake = fakeClient({ toolInput: { body: "shouldn't be called" } });
-    const result = await stripDateOpenerWithLLM("   \n  ", {
-      client: fake.client,
-    });
-    expect(result).toBe("   \n  ");
+    const fake = fakeClient({ toolInput: { opener: "x" } });
+    expect(await stripDateOpenerWithLLM("   \n  ", { client: fake.client })).toBe("   \n  ");
     expect(fake.calls).toBe(0);
   });
 
   it("skips the LLM call on very short input (can't contain an opener+body)", async () => {
-    const fake = fakeClient({ toolInput: { body: "shouldn't be called" } });
-    const result = await stripDateOpenerWithLLM("Hi.", {
-      client: fake.client,
-    });
-    expect(result).toBe("Hi.");
+    const fake = fakeClient({ toolInput: { opener: "x" } });
+    expect(await stripDateOpenerWithLLM("Hi.", { client: fake.client })).toBe("Hi.");
     expect(fake.calls).toBe(0);
   });
 
-  it("fails soft when the LLM throws — returns the original body", async () => {
-    const original =
-      "8 years ago today:\n\nI woke up at 6AM and dragged myself to a Starbucks.";
-    const fake = fakeClient({ throws: new Error("boom") });
-    const result = await stripDateOpenerWithLLM(original, {
-      client: fake.client,
-    });
-    expect(result).toBe(original);
-  });
-
-  it("fails soft when the tool returns an empty body — returns the original", async () => {
-    const original =
-      "8 years ago today:\n\nI woke up at 6AM and dragged myself to a Starbucks.";
-    const fake = fakeClient({ toolInput: { body: "   " } });
-    const result = await stripDateOpenerWithLLM(original, {
-      client: fake.client,
-    });
-    expect(result).toBe(original);
+  it("fails soft when the tool input has no opener string", async () => {
+    const fake = fakeClient({ toolInput: { body: "old shape" } });
+    expect(await stripDateOpenerWithLLM(OPENER_POST, { client: fake.client })).toBe(
+      OPENER_POST,
+    );
   });
 
   it("fails soft when no tool_use block is returned — returns the original", async () => {
-    const original =
-      "8 years ago today:\n\nI woke up at 6AM and dragged myself to a Starbucks.";
     const fake = fakeClient({
       contentOverride: [
         { type: "text", text: "I forgot to use the tool" } as unknown as Anthropic.ContentBlock,
       ],
     });
-    const result = await stripDateOpenerWithLLM(original, {
-      client: fake.client,
-    });
-    expect(result).toBe(original);
+    expect(await stripDateOpenerWithLLM(OPENER_POST, { client: fake.client })).toBe(
+      OPENER_POST,
+    );
   });
 });
