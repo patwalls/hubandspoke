@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/popover";
 import type { NotificationItem } from "@/lib/notifications/to-item";
 import { PostTypeTag } from "@/components/my-work/up-next";
+import { notificationText } from "@/lib/notifications/text";
 
 type ApiShape = {
   items: NotificationItem[];
@@ -120,6 +121,8 @@ export function NotificationBell() {
                     n={n}
                     onClick={() => {
                       if (!n.readAt) markRead([n.id]);
+                      // Did the win reach its maker? (wins-reach-makers M3)
+                      if (n.payload.kind === "win") trackUsage("notifications:win-open", n.item?.brand);
                       setOpen(false);
                     }}
                   />
@@ -153,21 +156,7 @@ function NotificationRow({
   const actorName = n.actor?.name || n.actor?.email || "A teammate";
   const title = n.item?.title || "(Untitled)";
 
-  let summary: string;
-  if (n.payload.kind === "assigned") {
-    summary = `${actorName} assigned this to you`;
-  } else if (n.payload.kind === "comment") {
-    summary = `${actorName} commented`;
-  } else if (n.payload.kind === "mention") {
-    summary = `${actorName} mentioned you`;
-  } else {
-    summary = "Update";
-  }
-
-  const body =
-    n.payload.kind === "comment" || n.payload.kind === "mention"
-      ? n.payload.excerpt
-      : title;
+  const { headline: summary, excerpt: body } = notificationText(n.payload, actorName);
 
   return (
     <Link
@@ -194,7 +183,7 @@ function NotificationRow({
           </span>
           {title}
         </p>
-        {(n.payload.kind === "comment" || n.payload.kind === "mention") && (
+        {body && (
           <p className="text-[12px] text-muted-foreground line-clamp-2 mt-0.5">
             {body}
           </p>

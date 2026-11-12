@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   notifications,
@@ -64,6 +64,56 @@ export async function enqueueNotification(input: EnqueueInput): Promise<void> {
   if (!inserted) return;
 
   await enqueue("notification-send", { notificationId: inserted.id });
+}
+
+/**
+ * Tell the editor of a post that it beat its account's usual
+ * (wins-reach-makers M3). Called by the winner-notes cron right after it
+ * writes the post's "why it won" note — notes are written once per post, so
+ * this fires once per win; the existence check makes a retried run safe too.
+ *
+ * In-app only (the bell): the weekday morning My Work email already lists the
+ * wins a person edited, so no email is queued here. production_items has no
+ * producer column, so the editor is the one maker we can name.
+ */
+export async function notifyEditorOfWin(
+  contentItemId: string,
+  win: { lift: number; note: string },
+): Promise<boolean> {
+  const [item] = await db
+    .select({ editorUserId: productionItems.editorUserId, title: productionItems.title })
+    .from(productionItems)
+    .where(eq(productionItems.id, contentItemId))
+    .limit(1);
+  if (!item?.editorUserId) return false;
+
+  const [editor] = await db
+    .select({ deactivatedAt: users.deactivatedAt })
+    .from(users)
+    .where(eq(users.id, item.editorUserId))
+    .limit(1);
+  if (!editor || editor.deactivatedAt) return false;
+
+  const [already] = await db
+    .select({ id: notifications.id })
+    .from(notifications)
+    .where(
+      and(
+        eq(notifications.userId, item.editorUserId),
+        eq(notifications.contentItemId, contentItemId),
+        eq(notifications.kind, "win"),
+      ),
+    )
+    .limit(1);
+  if (already) return false;
+
+  await db.insert(notifications).values({
+    userId: item.editorUserId,
+    kind: "win",
+    contentItemId,
+    payload: { kind: "win", title: item.title, lift: win.lift, note: win.note },
+  });
+  return true;
 }
 
 /**

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { notificationText } from "@/lib/notifications/text";
 import { desc, eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
@@ -106,21 +107,7 @@ function NotificationFullRow(props: {
   const actor = props.actorName || props.actorEmail || "A teammate";
   const title = props.itemTitle || "(Untitled)";
 
-  let headline: string;
-  if (props.payload.kind === "assigned") {
-    headline = `${actor} assigned this to you`;
-  } else if (props.payload.kind === "comment") {
-    headline = `${actor} commented`;
-  } else if (props.payload.kind === "mention") {
-    headline = `${actor} mentioned you`;
-  } else {
-    headline = "Update";
-  }
-
-  const excerpt =
-    props.payload.kind === "comment" || props.payload.kind === "mention"
-      ? props.payload.excerpt
-      : null;
+  const { headline, excerpt } = notificationText(props.payload, actor);
 
   return (
     <li

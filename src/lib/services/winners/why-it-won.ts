@@ -3,6 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { brands, productionItems, type WinNote } from "@/lib/db/schema";
 import { getRecentWinners, type WinnerRow } from "@/lib/db/winners";
+import { notifyEditorOfWin } from "@/lib/services/notifications";
 import type { Winner } from "@/lib/winners/pick";
 
 /**
@@ -200,6 +201,8 @@ export interface WinNotesSummary {
   written: number;
   skipped: number;
   failed: number;
+  /** Editors told in the bell that their post won. */
+  notified: number;
 }
 
 /**
@@ -225,7 +228,7 @@ export async function refreshWinNotes(opts: {
     (await db.select({ slug: brands.slug }).from(brands).where(eq(brands.disabled, false))).map(
       (b) => b.slug,
     );
-  const summary: WinNotesSummary = { brands: slugs.length, winners: 0, written: 0, skipped: 0, failed: 0 };
+  const summary: WinNotesSummary = { brands: slugs.length, winners: 0, written: 0, skipped: 0, failed: 0, notified: 0 };
   for (const brand of slugs) {
     const winners = await getWinners(brand);
     for (const w of winners) {
@@ -266,6 +269,13 @@ export async function refreshWinNotes(opts: {
       };
       await db.update(productionItems).set({ winNote: value }).where(eq(productionItems.id, w.item.id));
       summary.written++;
+      // The person who edited it hears about it in the bell (once per post —
+      // a post with a note is skipped above on every later run).
+      try {
+        if (await notifyEditorOfWin(w.item.id, { lift: w.lift, note: result.note })) summary.notified++;
+      } catch (err) {
+        log(`winner-notes ${brand}/${w.item.id}: notify failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
   }
   return summary;

@@ -1167,6 +1167,11 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
   its median → one sentence ≤ 180 chars →
   `production_items.win_note = {note, lift, generatedAt, model}`. Written once;
   never refreshed, never on a page load.
+  **2026-11-12 (wins-reach-makers M3):** right after writing a note, `notifyEditorOfWin`
+  (`src/lib/services/notifications.ts`) inserts one `notifications` row (kind `win`) for the
+  post's editor — skipped when there is no editor, the editor is deactivated, or a win row
+  already exists for that person + post. No email is queued. The log line adds `notified=N`;
+  a notify failure is logged and doesn't stop the run (the note is already saved).
 - **Failure:** fail-soft per winner — an API error or empty answer logs a warning
   and leaves the note null, so the next run retries. The task only throws on a
   DB error (graphile retries; idempotent).

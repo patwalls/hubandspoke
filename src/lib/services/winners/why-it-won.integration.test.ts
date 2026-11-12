@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { productionItems } from "@/lib/db/schema";
+import { notifications, productionItems } from "@/lib/db/schema";
 import { createTestAccount, createTestProductionItem } from "@/test/factories";
 import { getRecentWinners } from "@/lib/db/winners";
 import { refreshWinNotes } from "./why-it-won";
@@ -43,6 +43,12 @@ async function accountWith(recent: { hook: string; views: number; winNote?: { no
   return { account, items };
 }
 
+const winBellsFor = async (itemId: string) =>
+  db
+    .select()
+    .from(notifications)
+    .where(and(eq(notifications.contentItemId, itemId), eq(notifications.kind, "win")));
+
 const noteOf = async (id: string) =>
   (await db.select({ n: productionItems.winNote }).from(productionItems).where(eq(productionItems.id, id)))[0].n;
 
@@ -73,6 +79,27 @@ describe("refreshWinNotes", () => {
     expect(await noteOf(fresh.id)).toMatchObject({ note: "Opens on a dollar figure, not the founder.", lift: 8.4 });
     expect(await noteOf(noted.id)).toEqual(kept);
     expect(await noteOf(usual.id)).toBeNull();
+
+    // wins-reach-makers M3: the editor of the fresh winner gets ONE bell
+    // notification carrying the lift + note; the already-noted winner and the
+    // usual post get none.
+    expect(summary.notified).toBe(1);
+    const bells = await winBellsFor(fresh.id);
+    expect(bells).toHaveLength(1);
+    expect(bells[0].userId).toBe(fresh.editorUserId);
+    expect(bells[0].emailedAt).toBeNull();
+    expect(bells[0].payload).toMatchObject({ kind: "win", lift: 8.4, note: "Opens on a dollar figure, not the founder." });
+    expect(await winBellsFor(noted.id)).toHaveLength(0);
+    expect(await winBellsFor(usual.id)).toHaveLength(0);
+
+    // A rerun writes nothing and rings nothing.
+    const again = await refreshWinNotes({
+      brandSlugs: ["starter-story"],
+      explain: async () => ({ ok: true, note: "x" }),
+      getWinners: winnersOf(account.handle),
+    });
+    expect(again).toMatchObject({ written: 0, notified: 0 });
+    expect(await winBellsFor(fresh.id)).toHaveLength(1);
   });
 
   it("leaves the winner without a note when the model call fails, so the next run retries", async () => {
