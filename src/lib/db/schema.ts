@@ -2329,8 +2329,8 @@ export const contentEvents = pgTable(
 
 // Per-recipient inbox of collaboration events. One row per (event, recipient)
 // so unread counts are an indexed partial scan and each user marks their copy
-// independently. Polymorphic via `kind` + `payload`; today we emit 'assigned'
-// and 'comment'. `emailed_at` is stamped fire-and-forget after we ship the
+// independently. Polymorphic via `kind` + `payload`; today we emit 'assigned',
+// 'comment', 'mention' and 'win'. `emailed_at` is stamped fire-and-forget after we ship the
 // email so we don't double-send if a row gets requeued.
 export type NotificationPayload =
   | { kind: "assigned"; title: string | null }
@@ -2345,6 +2345,15 @@ export type NotificationPayload =
       title: string | null;
       excerpt: string;
       authorName: string | null;
+    }
+  // The post this person edited beat its account's usual (wins-reach-makers
+  // M3). Written once per post, when its "why it won" note is; in-app only —
+  // the morning My Work email already lists the same wins.
+  | {
+      kind: "win";
+      title: string | null;
+      lift: number;
+      note: string;
     };
 
 export const notifications = pgTable(

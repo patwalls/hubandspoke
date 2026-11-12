@@ -622,7 +622,7 @@ export const winnerNotesTask: Task = async (_payload, helpers) => {
   helpers.logger.info("winner-notes start");
   const s = await refreshWinNotes({ log: (msg) => helpers.logger.warn(msg) });
   helpers.logger.info(
-    `winner-notes ok brands=${s.brands} winners=${s.winners} written=${s.written} skipped=${s.skipped} failed=${s.failed} (${Date.now() - start}ms)`,
+    `winner-notes ok brands=${s.brands} winners=${s.winners} written=${s.written} notified=${s.notified} skipped=${s.skipped} failed=${s.failed} (${Date.now() - start}ms)`,
   );
 };
 
