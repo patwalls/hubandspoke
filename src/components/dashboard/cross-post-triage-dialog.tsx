@@ -27,6 +27,8 @@ import {
   toPlatform,
 } from "@/lib/platforms";
 import { isNotionAuthoritative } from "@/lib/platform";
+import { usualTargetKeys, type TargetCommonalityRow } from "@/lib/cross-post-usual";
+import { trackUsage } from "@/lib/usage/track";
 import {
   PLATFORM_FIELD_SCHEMAS,
   type PlatformKey,
@@ -118,10 +120,7 @@ interface CrossPostTriagePanelProps {
   /** Per-source-format ranking of (target accountId, postType) pairs by
    *  historical cross-post count. The panel uses this to surface the most
    *  common targets first. Empty for formats with no cross-post history. */
-  targetCommonality?: Record<
-    string,
-    Array<{ accountId: string; postType: string; count: number }>
-  >;
+  targetCommonality?: Record<string, TargetCommonalityRow[]>;
   /** Default true — queue triage dismisses the candidate from the queue
    *  after a successful submit so it doesn't reappear tomorrow. Pass
    *  `false` when the panel is rendered from a non-queue surface (e.g.
@@ -639,6 +638,19 @@ export function CrossPostTriagePanel({
   const visibleSelectableKeys = visibleTargets
     .filter((t) => !t.existing)
     .map((t) => pairKey(t));
+  // "Select usual": the targets this format goes to in most of its recent
+  // cross-posts (cross-post-usual.ts). Looks past VISIBLE_LIMIT — a hidden
+  // usual target auto-expands the list via hasHiddenSelected.
+  const usualKeys = usualTargetKeys(
+    candidate.format ? targetCommonality?.[candidate.format] : undefined,
+    targets.filter((t) => !t.existing).map((t) => pairKey(t)),
+  );
+  const usualAllSelected =
+    usualKeys.length > 0 && usualKeys.every((k) => selected.has(k));
+  function selectUsual() {
+    setSelected((prev) => new Set([...prev, ...usualKeys]));
+    trackUsage("cross-post:select-usual", candidate.brand || brand);
+  }
   const allVisibleSelected =
     visibleSelectableKeys.length > 0 &&
     visibleSelectableKeys.every((k) => selected.has(k));
@@ -737,6 +749,18 @@ export function CrossPostTriagePanel({
             <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
               Cross-post to
             </h3>
+            <div className="flex items-center gap-3">
+            {usualKeys.length > 0 && !usualAllSelected && (
+              <button
+                type="button"
+                onClick={selectUsual}
+                disabled={busy}
+                className="text-[11px] font-medium text-emerald-700 hover:text-emerald-900 disabled:opacity-50"
+                title={`The accounts most of this format's recent cross-posts went to (${usualKeys.length})`}
+              >
+                Select usual ({usualKeys.length})
+              </button>
+            )}
             {visibleSelectableKeys.length > 0 && (
               <button
                 type="button"
@@ -752,6 +776,7 @@ export function CrossPostTriagePanel({
                 {allVisibleSelected ? "Deselect all" : "Select all"}
               </button>
             )}
+            </div>
           </div>
           {targets.length === 0 ? (
             <div className="text-sm text-muted-foreground rounded-md border border-border bg-muted/40 p-3">

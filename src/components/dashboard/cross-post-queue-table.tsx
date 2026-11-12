@@ -5,6 +5,7 @@ import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { AccountBadge } from "@/components/ui/account-badge";
 import { CrossPostTriageDialog } from "./cross-post-triage-dialog";
+import type { TargetCommonalityRow } from "@/lib/cross-post-usual";
 import type {
   BrandAccount,
   CrossPostCandidate,
@@ -18,10 +19,7 @@ interface CrossPostQueueTableProps {
   brandAccounts: BrandAccount[];
   brand: string;
   emptyMessage: string;
-  targetCommonality?: Record<
-    string,
-    Array<{ accountId: string; postType: string; count: number }>
-  >;
+  targetCommonality?: Record<string, TargetCommonalityRow[]>;
   onMutate: () => void;
 }
 
@@ -268,10 +266,7 @@ function CrossPostQueueRow({
   item: CrossPostCandidate;
   brandAccounts: BrandAccount[];
   brand: string;
-  targetCommonality?: Record<
-    string,
-    Array<{ accountId: string; postType: string; count: number }>
-  >;
+  targetCommonality?: Record<string, TargetCommonalityRow[]>;
   onActioned: () => void;
 }) {
   const [open, setOpen] = useState(false);

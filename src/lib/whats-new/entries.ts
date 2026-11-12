@@ -43,6 +43,16 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-11-12-cross-post-select-usual",
+    shippedAt: "2026-11-12T12:55:13Z",
+    kind: "feature",
+    title: "Cross-post: one click picks the usual accounts",
+    body: "When you open a post in the Cross-post queue, \"Select usual\" checks every account that kind of post usually goes to, based on its recent cross-posts. Then press Cross-post as before.",
+    href: "/[brand]/queue/cross-post",
+    screen: "/[brand]/queue/cross-post",
+    audience: { usersOf: ["/[brand]/queue/cross-post"] },
+  },
+  {
     id: "2026-11-09-facebook-share-link-views",
     shippedAt: "2026-11-09T15:12:46Z",
     kind: "fix",
