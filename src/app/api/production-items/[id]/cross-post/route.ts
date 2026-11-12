@@ -247,6 +247,23 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
   }
 
+  // Clean the source body BEFORE the transaction — Anthropic round-trip
+  // shouldn't hold a Postgres tx open. Strips a leading date-anchored
+  // opener (e.g. "8 years ago today:") so a cross-post of an aged repost
+  // doesn't carry the stale lead-in. Fail-soft (returns input on error).
+  // A clip's content_body is its clip-idea notes, not its caption — copy the
+  // caption the editor wrote instead (src/lib/source-caption.ts).
+  // Started here and awaited at the insert so the model call overlaps the
+  // duplicate / format / editor lookups below (cross-post p50 was ~2 s).
+  const sourceForCaption = source;
+  const seededBodyPromise = loadSourceCaption(sourceForCaption).then((caption) =>
+    CROSS_POST_SEEDED_TARGETS.has(targetPostType as PostType)
+      ? stripDateOpenerWithLLM(caption)
+      : caption,
+  );
+  // An early return (409) leaves it un-awaited; don't let a rejection go unhandled.
+  seededBodyPromise.catch(() => {});
+
   const [existing] = await db
     .select({ id: productionItems.id })
     .from(productionItems)
@@ -287,16 +304,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
   const isQueueDriven = assign || !!editorUserIdOverride;
   const status = isQueueDriven ? "Ready To Publish" : "Idea";
 
-  // Clean the source body BEFORE the transaction — Anthropic round-trip
-  // shouldn't hold a Postgres tx open. Strips a leading date-anchored
-  // opener (e.g. "8 years ago today:") so a cross-post of an aged repost
-  // doesn't carry the stale lead-in. Fail-soft (returns input on error).
-  // A clip's content_body is its clip-idea notes, not its caption — copy the
-  // caption the editor wrote instead (src/lib/source-caption.ts).
-  const sourceCaption = await loadSourceCaption(source);
-  const seededBody = CROSS_POST_SEEDED_TARGETS.has(targetPostType as PostType)
-    ? await stripDateOpenerWithLLM(sourceCaption)
-    : sourceCaption;
+  const seededBody = await seededBodyPromise;
 
   // Wrap the insert + seed in a transaction so a partial failure (e.g.
   // mid-mirror media insert) doesn't leave a half-created cross-post.

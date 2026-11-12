@@ -11,6 +11,14 @@
 //
 // Fail-soft: any error or empty output returns the original body unchanged.
 // This is optional polish — a failed cleanup should not block the repost.
+//
+// Speed (2026-11-12): the model used to echo the WHOLE body back through the
+// tool, so the call cost ~1 output token per caption token (~2 s on a long
+// caption — the p50 of POST /cross-post). It now names only the opener line
+// (a few tokens) and the code removes that line structurally; a model that
+// "returns" a line the body doesn't start with changes nothing. Answers are
+// also remembered per body (in-process LRU), because a source is cross-posted
+// to ~3 accounts in a row and the caption is the same each time.
 
 import Anthropic from "@anthropic-ai/sdk";
 
@@ -30,29 +38,27 @@ const SYSTEM_PROMPT = `You receive the body of a social-media post. If the body 
 - "5 years ago this week:"
 - "A year ago today —"
 
-…AND that opener is followed by a line break before the real content begins, then REMOVE the opener line and the blank line(s) that follow it, returning the body that starts with its real content.
+…AND that opener is followed by a line break before the real content begins, return that opener line EXACTLY as it appears (character for character) as \`opener\`.
 
-If the body does NOT have a standalone opener line of this shape — for example because the date phrase is part of a flowing sentence ("8 years ago today I learned the most important lesson of my career") — return the body UNCHANGED. The test is structural: an opener is a separate line followed by a line break, not part of a sentence.
+If the body does NOT have a standalone opener line of this shape — for example because the date phrase is part of a flowing sentence ("8 years ago today I learned the most important lesson of my career") — return an empty string as \`opener\`. The test is structural: an opener is a separate first line followed by a line break, not part of a sentence.
 
-Preserve everything else exactly as-is: no rewriting, no reflowing, no emoji or punctuation changes. The only allowed transform is removing a leading opener line (and the blank line after it).
-
-Always call return_body exactly once.`;
+Never return any other text. Always call return_opener exactly once.`;
 
 const TOOLS: Anthropic.Tool[] = [
   {
-    name: "return_body",
+    name: "return_opener",
     description:
-      "Return the cleaned body. If no opener was present, return the input unchanged.",
+      "Return the body's first line if it is a date-anchored opener, else an empty string.",
     input_schema: {
       type: "object" as const,
       properties: {
-        body: {
+        opener: {
           type: "string",
           description:
-            "The cleaned body. Same as input if no opener was found.",
+            "The opener line exactly as written, or \"\" when there is none.",
         },
       },
-      required: ["body"],
+      required: ["opener"],
     },
   },
 ];
@@ -63,12 +69,53 @@ export interface StripDateOpenerOptions {
 }
 
 /**
+ * Remove `opener` from the top of `body` when — and only when — the body's
+ * first non-blank line IS that opener (whitespace-trimmed) and real content
+ * follows it. Drops the blank line(s) after it too. Pure string surgery on a
+ * line the model already picked out; anything that doesn't line up returns
+ * the body unchanged.
+ */
+export function removeOpenerLine(body: string, opener: string): string {
+  const want = opener.trim();
+  if (want.length === 0) return body;
+  const lines = body.split(/\r?\n/);
+  let i = 0;
+  while (i < lines.length && lines[i].trim() === "") i++;
+  if (i >= lines.length || lines[i].trim() !== want) return body;
+  let j = i + 1;
+  while (j < lines.length && lines[j].trim() === "") j++;
+  // An opener must be followed by real content — never empty the body.
+  if (j >= lines.length) return body;
+  const eol = body.includes("\r\n") ? "\r\n" : "\n";
+  return lines.slice(j).join(eol);
+}
+
+// Answers per body, newest last. Small: a body is only re-asked while its
+// source is being cross-posted, minutes apart.
+const MEMO_MAX = 200;
+const memo = new Map<string, string>();
+
+function remember(body: string, opener: string) {
+  memo.delete(body);
+  memo.set(body, opener);
+  if (memo.size > MEMO_MAX) {
+    const oldest = memo.keys().next().value;
+    if (oldest !== undefined) memo.delete(oldest);
+  }
+}
+
+/** Test hook: forget remembered answers. */
+export function clearDateOpenerMemo() {
+  memo.clear();
+}
+
+/**
  * Returns the body with a leading date-anchored opener line removed (if
  * present). Fail-soft: any LLM error, empty response, or pre-check skip
- * returns the original input unchanged.
+ * returns the original input unchanged. Failures are not remembered.
  *
- * Cost: ~$0.0002 per call (Haiku 5.5, ~500-token system prompt + a
- * typical post body). Fires once per repost / cross-post creation.
+ * Cost: ~$0.0002 per call (Haiku 5.5, ~400-token system prompt + the body
+ * in, a few tokens out). Fires once per distinct body.
  */
 export async function stripDateOpenerWithLLM(
   body: string | null | undefined,
@@ -79,18 +126,23 @@ export async function stripDateOpenerWithLLM(
   if (trimmed.length === 0) return body;
   if (trimmed.length < MIN_BODY_CHARS_FOR_LLM) return body;
 
+  const known = memo.get(body);
+  if (known !== undefined) {
+    remember(body, known);
+    return removeOpenerLine(body, known);
+  }
+
   const client = opts.client ?? new Anthropic();
 
   let response: Anthropic.Message;
   try {
     response = await client.messages.create({
       model: MODEL,
-      // Generous ceiling — we never expect more output than input, but a
-      // tight cap can truncate the tool call on long bodies.
-      max_tokens: Math.max(1024, Math.ceil(body.length / 2) + 512),
+      // The answer is one line at most.
+      max_tokens: 256,
       system: SYSTEM_PROMPT,
       tools: TOOLS,
-      tool_choice: { type: "tool", name: "return_body" },
+      tool_choice: { type: "tool", name: "return_opener" },
       messages: [{ role: "user", content: body }],
     });
   } catch (err) {
@@ -102,14 +154,11 @@ export async function stripDateOpenerWithLLM(
   }
 
   for (const block of response.content) {
-    if (block.type !== "tool_use" || block.name !== "return_body") continue;
-    const input = block.input as { body?: unknown };
-    if (typeof input.body !== "string") continue;
-    if (input.body.trim().length === 0) {
-      // Model returned nothing usable — treat as fail-soft.
-      return body;
-    }
-    return input.body;
+    if (block.type !== "tool_use" || block.name !== "return_opener") continue;
+    const input = block.input as { opener?: unknown };
+    if (typeof input.opener !== "string") continue;
+    remember(body, input.opener);
+    return removeOpenerLine(body, input.opener);
   }
 
   // No tool_use block found — fail-soft.
