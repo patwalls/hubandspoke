@@ -21,6 +21,7 @@ import {
 } from "@/lib/services/format-view-bars";
 import { POST_TYPE_SHORT_LABEL } from "@/lib/platforms";
 import type { PostType } from "@/lib/platform-field-schemas";
+import type { TargetCommonalityRow } from "@/lib/cross-post-usual";
 
 // Cross-post queue v3.2 — candidate finder.
 //
@@ -133,10 +134,7 @@ export interface BrandAccount {
 export interface CrossPostCandidatesResult {
   items: CrossPostCandidate[];
   brandAccounts: BrandAccount[];
-  targetCommonality: Record<
-    string,
-    Array<{ accountId: string; postType: string; count: number }>
-  >;
+  targetCommonality: Record<string, TargetCommonalityRow[]>;
   /** Counters useful for debugging / UI explainer. */
   stats: {
     rawCandidates: number;
@@ -793,41 +791,65 @@ function countEligibleTargetPairs(
   return count;
 }
 
+/** Recent window for "usual" targets (cross-post-usual.ts): which accounts a
+ *  format's sources went to lately, not what it went to a year ago. */
+const USUAL_WINDOW_DAYS = 60;
+
 async function fetchTargetCommonalityByFormat(): Promise<
-  Record<string, Array<{ accountId: string; postType: string; count: number }>>
+  Record<string, TargetCommonalityRow[]>
 > {
+  // count = all-time cross-posts per (format, target) — the picker's ranking.
+  // recent_sources / recent_total = sources of the format cross-posted in the
+  // last USUAL_WINDOW_DAYS that went to this target / to any target — the
+  // "Select usual" share.
   const rows = await db.execute<{
     source_format: string;
     target_account_id: string;
     target_post_type: string;
     n: string;
+    recent_sources: string;
+    recent_total: string;
   }>(sql`
+    WITH cp AS (
+      SELECT
+        src.format AS source_format,
+        cp.reposted_from_item_id AS source_id,
+        cp.account_id AS target_account_id,
+        cp.post_type AS target_post_type,
+        cp.created_at >= now() - make_interval(days => ${USUAL_WINDOW_DAYS}) AS recent
+      FROM production_items cp
+      JOIN production_items src ON src.id = cp.reposted_from_item_id
+      WHERE cp.source_type = 'cross_post'
+        AND src.format IS NOT NULL
+        AND cp.account_id IS NOT NULL
+        AND cp.post_type IS NOT NULL
+        AND cp.deleted_at IS NULL
+        AND cp.status <> 'Killed'
+    ),
+    totals AS (
+      SELECT source_format, count(DISTINCT source_id) FILTER (WHERE recent) AS recent_total
+      FROM cp GROUP BY source_format
+    )
     SELECT
-      src.format AS source_format,
-      cp.account_id AS target_account_id,
-      cp.post_type AS target_post_type,
-      count(*) AS n
-    FROM production_items cp
-    JOIN production_items src ON src.id = cp.reposted_from_item_id
-    WHERE cp.source_type = 'cross_post'
-      AND src.format IS NOT NULL
-      AND cp.account_id IS NOT NULL
-      AND cp.post_type IS NOT NULL
-      AND cp.deleted_at IS NULL
-      AND cp.status <> 'Killed'
-    GROUP BY src.format, cp.account_id, cp.post_type
+      cp.source_format,
+      cp.target_account_id,
+      cp.target_post_type,
+      count(*) AS n,
+      count(DISTINCT cp.source_id) FILTER (WHERE cp.recent) AS recent_sources,
+      max(t.recent_total) AS recent_total
+    FROM cp JOIN totals t ON t.source_format = cp.source_format
+    GROUP BY cp.source_format, cp.target_account_id, cp.target_post_type
   `);
 
-  const map: Record<
-    string,
-    Array<{ accountId: string; postType: string; count: number }>
-  > = {};
+  const map: Record<string, TargetCommonalityRow[]> = {};
   for (const r of rows) {
     if (!map[r.source_format]) map[r.source_format] = [];
     map[r.source_format].push({
       accountId: r.target_account_id,
       postType: r.target_post_type,
       count: Number(r.n),
+      recentSources: Number(r.recent_sources),
+      recentTotal: Number(r.recent_total),
     });
   }
   for (const fmt of Object.keys(map)) {
