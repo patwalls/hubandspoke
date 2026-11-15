@@ -795,7 +795,17 @@ function countEligibleTargetPairs(
  *  format's sources went to lately, not what it went to a year ago. */
 const USUAL_WINDOW_DAYS = 60;
 
-async function fetchTargetCommonalityByFormat(): Promise<
+/** One format's ranking + "usual" shares — the content page's Cross-post tab
+ *  (GET /api/production-items/[id]/cross-post-usual) asks for just its item's
+ *  format instead of every format the queue loads. */
+export async function fetchTargetCommonalityForFormat(
+  format: string,
+): Promise<TargetCommonalityRow[]> {
+  const map = await fetchTargetCommonalityByFormat(format);
+  return map[format] ?? [];
+}
+
+async function fetchTargetCommonalityByFormat(onlyFormat?: string): Promise<
   Record<string, TargetCommonalityRow[]>
 > {
   // count = all-time cross-posts per (format, target) — the picker's ranking.
@@ -821,6 +831,7 @@ async function fetchTargetCommonalityByFormat(): Promise<
       JOIN production_items src ON src.id = cp.reposted_from_item_id
       WHERE cp.source_type = 'cross_post'
         AND src.format IS NOT NULL
+        ${onlyFormat ? sql`AND src.format = ${onlyFormat}` : sql``}
         AND cp.account_id IS NOT NULL
         AND cp.post_type IS NOT NULL
         AND cp.deleted_at IS NULL
