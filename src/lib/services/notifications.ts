@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, gt } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   notifications,
@@ -20,7 +20,17 @@ type EnqueueInput = {
   commentId?: string | null;
   actorUserId?: string | null;
   payload: NotificationPayload;
+  /**
+   * The comment is only an @-mention (`isMentionOnly`). If this person got an
+   * "assigned" notification on the same post in the last
+   * ASSIGNMENT_FOLD_WINDOW_MS, the row still lands in their bell but no second
+   * email goes out: the assignment email already told them. 66 of 66 bare
+   * mentions in 30 days (2026-11) came ~6 s after assigning the same person.
+   */
+  foldIntoRecentAssignment?: boolean;
 };
+
+export const ASSIGNMENT_FOLD_WINDOW_MS = 10 * 60 * 1000;
 
 function appBaseUrl(): string {
   // NEXTAUTH_URL is the single env that's already set everywhere the app runs
@@ -62,6 +72,25 @@ export async function enqueueNotification(input: EnqueueInput): Promise<void> {
 
   if (!recipient.passwordHash) return;
   if (!inserted) return;
+
+  if (input.foldIntoRecentAssignment && input.contentItemId) {
+    const [assigned] = await db
+      .select({ id: notifications.id })
+      .from(notifications)
+      .where(
+        and(
+          eq(notifications.userId, input.userId),
+          eq(notifications.contentItemId, input.contentItemId),
+          eq(notifications.kind, "assigned"),
+          gt(
+            notifications.createdAt,
+            new Date(Date.now() - ASSIGNMENT_FOLD_WINDOW_MS),
+          ),
+        ),
+      )
+      .limit(1);
+    if (assigned) return;
+  }
 
   await enqueue("notification-send", { notificationId: inserted.id });
 }

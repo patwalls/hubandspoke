@@ -205,6 +205,8 @@ export interface CreateTestUserOptions {
   brands?: string[];
   /** Create the user already deactivated. */
   deactivated?: boolean;
+  /** Any non-null value marks an invited user (notifications email them). */
+  passwordHash?: string | null;
 }
 
 /**
@@ -230,6 +232,7 @@ export async function createTestUser(
       role: opts.role ?? "creator",
       brandIds,
       deactivatedAt: opts.deactivated ? new Date() : null,
+      passwordHash: opts.passwordHash ?? null,
     })
     .returning();
   trackCleanup("users", row.id);
