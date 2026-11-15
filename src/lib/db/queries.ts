@@ -10,6 +10,8 @@ import {
 } from "@/lib/multi-filter";
 import { getPresignedGetUrl } from "@/lib/s3";
 import { RECENT_COMMENT_HOURS } from "@/lib/production/new-comments";
+import { pickDeliveryLink, type DeliveryLink, type LinkComment } from "@/lib/production/delivery-link";
+import { REVIEW } from "@/lib/handoff/pick";
 import { algorithmLabel } from "@/lib/clip-idea-agent";
 import {
   getInFlightStatusNames,
@@ -138,6 +140,8 @@ type UserExtras = {
   statusSince?: Date | null;
   /** Open comments from the last RECENT_COMMENT_HOURS (lib/production/new-comments). */
   recentComments?: RecentComment[];
+  /** Review rows: the link the work was handed back with (lib/production/delivery-link). */
+  deliveryLink?: DeliveryLink | null;
 };
 
 function mapProductionItem(
@@ -204,6 +208,7 @@ function mapProductionItem(
       ? { statusSince: (extras.statusSince ?? item.createdAt).toISOString() }
       : {}),
     ...(extras.recentComments !== undefined ? { recentComments: extras.recentComments } : {}),
+    ...(extras.deliveryLink ? { deliveryLink: extras.deliveryLink } : {}),
   };
 }
 
@@ -1272,10 +1277,47 @@ export async function getProductionPipeline(
     }
   }
 
+  // Review rows: the link the editor handed the work back with (the upload in
+  // YouTube Studio, the Canva design) — lib/production/delivery-link.
+  const deliveryLinkById = new Map<string, DeliveryLink>();
+  const reviewRows = rows.filter((r) => r.item.status === REVIEW);
+  if (reviewRows.length > 0) {
+    const linkRows = await db
+      .select({
+        contentItemId: contentComments.contentItemId,
+        at: contentComments.createdAt,
+        body: contentComments.body,
+        userName: users.name,
+        authorName: contentComments.authorName,
+      })
+      .from(contentComments)
+      .leftJoin(users, eq(users.id, contentComments.userId))
+      .where(
+        and(
+          inArray(contentComments.contentItemId, reviewRows.map((r) => r.item.id)),
+          isNull(contentComments.resolvedAt),
+          sql`${contentComments.body} ~* 'https?://'`,
+          gte(contentComments.createdAt, sql`now() - interval '60 days'`)
+        )
+      );
+    const byItem = new Map<string, LinkComment[]>();
+    for (const c of linkRows) {
+      const name = c.userName ?? c.authorName;
+      const list = byItem.get(c.contentItemId) ?? [];
+      list.push({ body: c.body, at: new Date(c.at), by: name ? name.trim().split(/\s+/)[0] : null });
+      byItem.set(c.contentItemId, list);
+    }
+    for (const r of reviewRows) {
+      const link = pickDeliveryLink(byItem.get(r.item.id) ?? [], statusSinceById.get(r.item.id) ?? r.item.createdAt);
+      if (link) deliveryLinkById.set(r.item.id, link);
+    }
+  }
+
   return rows.map((r) =>
     mapProductionItem(r.item, {
       statusSince: statusSinceById.get(r.item.id) ?? null,
       recentComments: recentCommentsById.get(r.item.id) ?? [],
+      deliveryLink: deliveryLinkById.get(r.item.id) ?? null,
       editorUserName: r.editorUserName,
       editorAvatarUrl: r.editorAvatarUrl,
       account: r.accountId

@@ -212,6 +212,9 @@ export interface ProductionItem {
   /** In Production list only: open comments left on the post in the last
    *  RECENT_COMMENT_HOURS, newest first. See lib/production/new-comments. */
   recentComments?: RecentComment[];
+  /** Review rows of the In Production list: the link the work was handed
+   *  back with (lib/production/delivery-link). Absent when there is none. */
+  deliveryLink?: import("@/lib/production/delivery-link").DeliveryLink;
 }
 
 export interface RecentComment {
