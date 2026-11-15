@@ -23,22 +23,37 @@ test("first target tick warms the source once", async ({ page }) => {
     await account("tiktok");
     await account("x");
 
+    const format = `E2E Prepare ${stamp}`;
+    const createSource = async (title: string) => {
+      const res = await page.request.post("/api/production-items", {
+        data: {
+          title,
+          platform: ["instagram_reel"],
+          postType: "instagram_reel",
+          publishedDate: new Date().toISOString().slice(0, 10),
+          brand: "starter-story",
+          editorUserId,
+        },
+      });
+      expect(res.ok(), await res.text()).toBeTruthy();
+      return (await res.json()).id as string;
+    };
+    // Quieter earlier posts on the account, so today's source reads as hot
+    // (same setup as cross-post-usual.spec.ts).
+    for (let i = 0; i < 3; i++) {
+      const id = await createSource(`E2E prepare earlier ${i} ${stamp}`);
+      await sql`
+        UPDATE production_items
+        SET status = 'Published', format = ${format}, account_id = ${ig}, views = 10,
+            published_at = now() - interval '40 days', enrichment_completed_at = now()
+        WHERE id = ${id}`;
+    }
+
     const title = `E2E prepare ${stamp}`;
-    const res = await page.request.post("/api/production-items", {
-      data: {
-        title,
-        platform: ["instagram_reel"],
-        postType: "instagram_reel",
-        publishedDate: new Date().toISOString().slice(0, 10),
-        brand: "starter-story",
-        editorUserId,
-      },
-    });
-    expect(res.ok(), await res.text()).toBeTruthy();
-    const sourceId = (await res.json()).id as string;
+    const sourceId = await createSource(title);
     await sql`
       UPDATE production_items
-      SET status = 'Published', account_id = ${ig}, views = 5000,
+      SET status = 'Published', format = ${format}, account_id = ${ig}, views = 5000,
           media_s3_key = ${`e2e/${stamp}.mp4`},
           published_at = now() - interval '2 hours', enrichment_completed_at = now()
       WHERE id = ${sourceId}`;
