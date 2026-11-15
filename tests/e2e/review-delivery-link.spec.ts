@@ -54,6 +54,11 @@ test("a Review row shows the link the work was handed back with", async ({ page 
     // after the rows above changed underneath it.
     await create(`E2E cache bust ${stamp}`, "Assigned");
 
+    const report = await page.request.get("/api/reports/production?brand=starter-story");
+    const reportText = await report.text();
+    expect(report.ok(), reportText.slice(0, 500)).toBeTruthy();
+    expect(reportText, reportText.slice(0, 800)).toContain("studio.youtube.com/video/e2eVid");
+
     await page.goto(`/starter-story/production`);
     await page.waitForLoadState("networkidle");
     const popup = page.getByRole("dialog", { name: "What's new" });
