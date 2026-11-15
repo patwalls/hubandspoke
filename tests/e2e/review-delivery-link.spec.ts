@@ -20,8 +20,8 @@ test("a Review row shows the link the work was handed back with", async ({ page 
       const res = await page.request.post("/api/production-items", {
         data: {
           title,
-          platform: ["youtube_long"],
-          postType: "youtube_long",
+          platform: ["tiktok"],
+          postType: "tiktok",
           publishedDate: new Date().toISOString().slice(0, 10),
           brand: "starter-story",
           editorUserId: me,
