@@ -5,7 +5,7 @@ import {
   type TranscriptSegment,
   type TranscriptWord,
 } from "./clip-anchor-utils";
-import { hookRewritesBlock, type HookRewrite } from "./clip-editor/hook-rewrites";
+import { cleanOnScreenTitle, hookRewritesBlock, onScreenTitleBlock, type HookRewrite } from "./clip-editor/hook-rewrites";
 import { trimHabitsBlock, type TrimSummary } from "./clip-editor/trim-habits";
 import { oddsPromptBlock, type FormatOdds } from "./clip-odds";
 
@@ -31,7 +31,11 @@ const MODEL = "claude-haiku-5-5";
 //   on this account (clip-odds M4). estimatedViews ran ~10× high anchored on
 //   the reference library's best hits; read docs/build/sql/clip-views.sql
 //   filtered to generated_by LIKE '%hook-v5'. Keeps v3/v4 blocks.
-export const HOOK_PROMPT_VERSION = 5;
+// v6 (2026-11-15): + ON-SCREEN TITLE for formats whose editors retitle most
+//   clips (hooks-learn M3) — returns `onScreenTitle`, stored on
+//   clip_ideas.on_screen_title. Prompt otherwise identical to v5, so clip-odds
+//   and clip-trim reads use generated_by ~ 'hook-v[56]'.
+export const HOOK_PROMPT_VERSION = 6;
 export const HOOK_GENERATED_BY = `${MODEL}:hook-v${HOOK_PROMPT_VERSION}`;
 
 const DEFAULT_FORMAT_BLOCK = `FORMAT — narrator-overlay hook, 30–60s vertical Reel.
@@ -90,6 +94,7 @@ Never respond with plain text. Always call the tool.`;
 
 const tools = (
   extrasSchema: Record<string, unknown> | null,
+  withTitle = false,
 ): Anthropic.Tool[] => {
   const props: Record<string, unknown> = {
     eligible: { type: "boolean" },
@@ -114,6 +119,12 @@ const tools = (
     },
     tightEndSec: { type: "number" },
   };
+  if (withTitle) {
+    props.onScreenTitle = {
+      type: "string",
+      description: "Short on-screen title (3–8 words) — see ON-SCREEN TITLE.",
+    };
+  }
   if (extrasSchema && Object.keys(extrasSchema).length > 0) {
     props.extras = {
       type: "object",
@@ -152,6 +163,8 @@ export interface HookCandidate {
   startSec: number;
   endSec: number;
   extras: Record<string, unknown> | null;
+  /** Short on-screen title (hooks-learn M3); only when asked for. */
+  onScreenTitle?: string | null;
 }
 
 export interface HookGenerationResult {
@@ -178,6 +191,9 @@ export interface HookGenerateArgs {
   /** This format's recent (AI hook → line the editor shipped) pairs, from
    *  `loadHookRewrites` (hooks-learn M1). Empty/absent = no block. */
   editorRewrites?: HookRewrite[];
+  /** This format's editors retitle most clips (`loadHookLearning`,
+   *  hooks-learn M3) → ask for a short `onScreenTitle` too. */
+  writeOnScreenTitle?: boolean;
   /** How editors trim this format's AI clip windows, from `loadTrimHabits`
    *  (clip-trim M1). Null/absent = no block. */
   editorTrims?: TrimSummary | null;
@@ -461,6 +477,9 @@ function validate(
     startSec: anchorRes.startSec,
     endSec: anchorRes.endSec,
     extras,
+    // A missing or overlong title never fails the hook — the clip just
+    // starts with the hook, as before.
+    onScreenTitle: args.writeOnScreenTitle ? cleanOnScreenTitle(r.onScreenTitle) : null,
   };
 }
 
@@ -500,6 +519,7 @@ ${DEFAULT_FORMAT_BLOCK}`;
     refLib.block,
     ...(outcomesBlock ? ["", outcomesBlock] : []),
     ...(rewritesBlock ? ["", rewritesBlock] : []),
+    ...(args.writeOnScreenTitle ? ["", onScreenTitleBlock()] : []),
     ...(trimsBlock ? ["", trimsBlock] : []),
   ].join("\n");
 
@@ -529,7 +549,7 @@ ${DEFAULT_FORMAT_BLOCK}`;
       model: MODEL,
       max_tokens: 1024,
       system: systemPrompt,
-      tools: tools(args.extrasSchema),
+      tools: tools(args.extrasSchema, args.writeOnScreenTitle === true),
       tool_choice: { type: "tool", name: "write_format_hook" },
       messages: [
         {

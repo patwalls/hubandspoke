@@ -1065,6 +1065,13 @@
       "when": 1793920149816,
       "tag": "0151_assistant_messages",
       "breakpoints": true
+    },
+    {
+      "idx": 152,
+      "version": "7",
+      "when": 1794733836620,
+      "tag": "0152_clip_ideas_on_screen_title",
+      "breakpoints": true
     }
   ]
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createDefaultDoc, createTextLayer, type ClipEditDoc, type TextLayer } from "./doc";
-import { collectHookRewrites, hookKey, hookRewrite, hookRewritesBlock, shippedHookLine, summarizeHookRewrites } from "./hook-rewrites";
+import { cleanOnScreenTitle, collectHookRewrites, hookKey, hookRewrite, hookRewritesBlock, isRetitle, shippedHookLine, startingHookText, startsWithTitle, summarizeHookRewrites } from "./hook-rewrites";
 
 const AI = "Instead of building, he spent 60 to 70 percent of his week on the sales floor watching his team";
 const clip = (hook = AI): ClipEditDoc => structuredClone(createDefaultDoc({ startSec: 0, endSec: 30, hook }));
@@ -85,11 +85,62 @@ describe("summarizeHookRewrites (the format page's line, hooks-learn M2)", () =>
 
   it("counts only clips that started from an AI hook and show words; pairs are the writer's pairs", () => {
     const rows = [shipped("Line one"), shipped("Line one"), { aiHook: AI, doc: clip() }, hidden(), { aiHook: null, doc: clip() }];
-    expect(summarizeHookRewrites(rows)).toEqual({ clips: 3, rewritten: 2, pairs: [{ ai: AI, shipped: "Line one" }] });
+    expect(summarizeHookRewrites(rows)).toEqual({ clips: 3, rewritten: 2, pairs: [{ ai: AI, shipped: "Line one" }], retitled: 0, startsWithTitle: false });
   });
 
   it("too few clips, or editors kept every AI hook → nothing to say", () => {
     expect(summarizeHookRewrites([shipped("Line one"), shipped("Line two")])).toBeNull();
     expect(summarizeHookRewrites([0, 1, 2].map(() => ({ aiHook: AI, doc: clip() })))).toBeNull();
+  });
+});
+
+describe("retitling formats (hooks-learn M3)", () => {
+  const kept = () => ({ aiHook: AI, doc: clip() });
+  const cutInPlace = () => {
+    const d = clip();
+    hookOf(d).text = "70% on the sales floor";
+    return { aiHook: AI, doc: d };
+  };
+  const retitled = (t = "From objection to booked meeting") => {
+    const d = withOwnText(clip(), t);
+    hookOf(d).visible = false;
+    return { aiHook: AI, doc: d };
+  };
+
+  it("a retitle is hook hidden + the editor's own words; a cut in place or a bare hide is not", () => {
+    expect(isRetitle(retitled().doc)).toBe(true);
+    expect(isRetitle(cutInPlace().doc)).toBe(false);
+    const bare = clip();
+    hookOf(bare).visible = false;
+    expect(isRetitle(bare)).toBe(false);
+    // Own text next to a VISIBLE hook is a sticker, not a title.
+    expect(isRetitle(withOwnText(clip(), "extra"))).toBe(false);
+  });
+
+  it("most clips retitled → new ideas start with a title; a brand that keeps the AI hook does not", () => {
+    // One brand: 4 of 4 retitled.
+    expect(startsWithTitle([retitled(), retitled(), retitled(), retitled()])).toBe(true);
+    // Another brand: 1 cut in place, 4 kept (0 of 5 retitled).
+    expect(startsWithTitle([cutInPlace(), kept(), kept(), kept(), kept()])).toBe(false);
+    // Half is enough; under half is not; too few clips says nothing.
+    expect(startsWithTitle([retitled(), retitled(), kept(), cutInPlace()])).toBe(true);
+    expect(startsWithTitle([retitled(), kept(), kept()])).toBe(false);
+    expect(startsWithTitle([retitled(), retitled()])).toBe(false);
+    const s = summarizeHookRewrites([retitled("A"), retitled("B"), kept()]);
+    expect(s).toMatchObject({ clips: 3, rewritten: 2, retitled: 2, startsWithTitle: true });
+  });
+
+  it("a new edit starts with the idea's title when it has one, else the hook", () => {
+    expect(startingHookText({ hook: AI, onScreenTitle: "  Why  cold email works " })).toBe("Why cold email works");
+    expect(startingHookText({ hook: AI, onScreenTitle: null })).toBe(AI);
+    expect(startingHookText({ hook: AI, onScreenTitle: "   " })).toBe(AI);
+    expect(startingHookText({ hook: AI })).toBe(AI);
+  });
+
+  it("the writer's title is cleaned; quotes stripped; missing or overlong → null", () => {
+    expect(cleanOnScreenTitle(' "How to book the meeting" ')).toBe("How to book the meeting");
+    expect(cleanOnScreenTitle(undefined)).toBeNull();
+    expect(cleanOnScreenTitle("")).toBeNull();
+    expect(cleanOnScreenTitle(AI)).toBeNull();
   });
 });

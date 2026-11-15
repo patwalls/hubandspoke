@@ -737,6 +737,11 @@ export const clipIdeas = pgTable(
       Array<{ startSec: number; endSec: number }>
     >(),
     hook: text("hook").notNull(),
+    // hooks-learn M3 (2026-11-15): a short on-screen title, written only for
+    // formats whose editors hide the long AI hook and type their own title.
+    // A new clip edit's hook layer starts with it; `hook` stays the full
+    // narrator line. Null = start with `hook`.
+    onScreenTitle: text("on_screen_title"),
     angle: text("angle").notNull(),
     rationale: text("rationale").notNull(),
     // V6: the verbatim hook from the brand's REFERENCE LIBRARY whose

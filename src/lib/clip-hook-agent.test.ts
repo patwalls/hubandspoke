@@ -185,6 +185,29 @@ describe("writeFormatHookForSection — wiring", () => {
     expect(systemPrompt).toMatch(/do not relabel/i);
   });
 
+  it("asks for a short on-screen title only when the format's editors retitle, and keeps it on the candidate", async () => {
+    const { client, create } = makeClient([{ ...ELIGIBLE_INPUT, onScreenTitle: "Bubble's whole tech stack" }, { ...ELIGIBLE_INPUT, onScreenTitle: "ignored" }]);
+    const titled = await writeFormatHookForSection(baseArgs({ client, writeOnScreenTitle: true }));
+    const first = create.mock.calls[0][0] as { system: string; tools: Array<{ input_schema: { properties: Record<string, unknown> } }> };
+    expect(first.system).toContain("ON-SCREEN TITLE");
+    expect(first.tools[0].input_schema.properties).toHaveProperty("onScreenTitle");
+    expect(titled.candidate.onScreenTitle).toBe("Bubble's whole tech stack");
+    expect(titled.candidate.hook).toBe(ELIGIBLE_INPUT.hook);
+
+    const plain = await writeFormatHookForSection(baseArgs({ client }));
+    const second = create.mock.calls[1][0] as { system: string; tools: Array<{ input_schema: { properties: Record<string, unknown> } }> };
+    expect(second.system).not.toContain("ON-SCREEN TITLE");
+    expect(second.tools[0].input_schema.properties).not.toHaveProperty("onScreenTitle");
+    expect(plain.candidate.onScreenTitle).toBeNull();
+  });
+
+  it("an overlong title never costs the hook", async () => {
+    const { client } = makeClient([{ ...ELIGIBLE_INPUT, onScreenTitle: "x".repeat(200) }]);
+    const { candidate } = await writeFormatHookForSection(baseArgs({ client, writeOnScreenTitle: true }));
+    expect(candidate.eligible).toBe(true);
+    expect(candidate.onScreenTitle).toBeNull();
+  });
+
   it("tells the writer how editors rewrote this format's hooks, and says nothing when there are none", async () => {
     const { client, create } = makeClient([{ eligible: false, reason: "n/a" }, { eligible: false, reason: "n/a" }]);
     await writeFormatHookForSection(
@@ -326,8 +349,8 @@ describe("writeFormatHookForSection — wiring", () => {
     expect(candidate.reason).toMatch(/agent error/i);
   });
 
-  it("is attributed to the prompt version that anchors on real outcomes (hook-v5)", () => {
-    expect(HOOK_PROMPT_VERSION).toBe(5);
-    expect(HOOK_GENERATED_BY).toMatch(/:hook-v5$/);
+  it("is attributed to the prompt version that writes on-screen titles (hook-v6; v5 added real outcomes)", () => {
+    expect(HOOK_PROMPT_VERSION).toBe(6);
+    expect(HOOK_GENERATED_BY).toMatch(/:hook-v6$/);
   });
 });
