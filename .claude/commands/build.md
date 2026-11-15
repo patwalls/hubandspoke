@@ -35,19 +35,25 @@ ScheduleWakeup or sleep; the lap just ends. Optional focus: **$ARGUMENTS**.
     <b> -- <spec>.spec.ts /tmp/hs-build/<name>.png` (the visual check, §4), `ship web hubandspoke
     --branch app-loop/<slug>` (push + PR; CI merges it when `build` is green), `ship prs
     hubandspoke`, `ship signals hubandspoke --days 21` (what Pat said about Hub & Spoke).
-- **Your own worktree.** `~/code/hubandspoke` is shared with the ops loop and must stay on `main`.
-  Build in `~/code/hubandspoke-build`:
+- **Your own clone.** `~/code/hubandspoke` is shared with the ops loop and must stay on `main`.
+  Build in `~/code/hubandspoke-build`, a `git clone` of that checkout with its own `.git` — never
+  `git worktree add` (Claude Code's sandbox keeps the checkout's `.git/worktrees` and `.git/config`
+  read-only whatever the loop's write list says; three laps of 2026-11-15 lost time to it). The
+  clone's `origin` is the checkout, so its `origin/main` is the checkout's `main`, which `ship sync`
+  keeps current:
   ```
   cd ~/code/hubandspoke && ship sync hubandspoke
-  cd ~/code/hubandspoke-build && git checkout -q --detach main   # then: git checkout -b app-loop/<slug>
+  cd ~/code/hubandspoke-build && git fetch -q origin && git checkout -q --detach origin/main
+  git checkout -b app-loop/<slug>        # build, commit here
+  git push -q origin app-loop/<slug>     # lands the branch in the checkout's refs; its branch never moves
   ```
-  The worktree was made outside the sandbox (2026-10-21) — the sandbox can write in it but cannot
-  create it; if it is ever missing, use `git worktree add --detach /tmp/hs-build/wt main` for this
-  lap and say so in `--blocked`. Lap 1 left one at `/tmp/hs-build/wt`: once its branch is shipped,
-  `git -C ~/code/hubandspoke worktree remove --force /tmp/hs-build/wt`.
-  Its `node_modules`: `npm ci --no-audit --no-fund --cache /tmp/hs-build/npm-cache` only when
-  `package-lock.json` changed (the default npm cache is read-only here). Run every command from the
-  worktree. Branches made there are refs of the same repo, so `ship … --branch` finds them.
+  `ship web` / `ship run … --branch` read the checkout's refs, so push before each of them (again
+  after every new commit). A PR that conflicts with main: `git fetch -q origin && git rebase
+  origin/main`, then `git push -qf origin app-loop/<slug>`. If the clone is ever missing:
+  `git clone -q ~/code/hubandspoke ~/code/hubandspoke-build` (it is in the write list), and say so
+  in the notebook. Its `node_modules`: `npm ci --no-audit --no-fund --cache /tmp/hs-build/npm-cache`
+  only when `package-lock.json` changed or it is missing (the default npm cache is read-only here).
+  Run every command from the clone.
 - Read `CLAUDE.md` and the three docs it names (`docs/features.md`, `docs/automation.md`,
   `docs/conventions.md`) before building — they are the rules (docs updated in the same commit,
   LLMs not regex for content meaning, tests by default, migrations via drizzle-kit).
@@ -135,7 +141,7 @@ in the same lap (S-163, 2026-10-23). So what you learn about people never rides 
 ## ⏱ Ship discipline
 
 - **Land first.** Before any reading: `ship prs hubandspoke` and `git -C ~/code/hubandspoke-build
-  branch --list 'app-loop/*'`. A branch the last lap built and didn't ship, a PR not merged, a
+  branch --list 'app-loop/*'` (a branch there that never reached the checkout was never pushed). A branch the last lap built and didn't ship, a PR not merged, a
   `--next` that starts with FIRST — finish that now. A PR red on CI: read why (`ship why hubandspoke <pr>`: the failed step + the job log's tail; a GitHub 5xx at the merge step is GitHub, not your code — say it in `--next`), fix,
   push again. A PR "left for a human" (over 600 lines not counting drizzle/meta/*.json, touches package.json / scripts/*.sh /
   .github / .claude): say so in `--blocked` with the PR link, then carry on with smaller work.
@@ -148,14 +154,14 @@ in the same lap (S-163, 2026-10-23). So what you learn about people never rides 
 - **No package changes in a loop PR** (they need a human merge). Build with what's installed.
 - **A ship refusal is not a dead broker.** `ship ping` settles it. Refusal text that ends in an
   "Approve …" line → that line, byte for byte, is your `--blocked`. Never ask Pat to run a command.
-- **Clean exit.** Worktree back on detached `main`, `git status --short` empty in BOTH checkouts.
+- **Clean exit.** The clone back on detached `origin/main`, `git status --short` empty in BOTH checkouts.
 
 ## ⏸ Guards (FIRST)
 
 `loops policy --loop hubandspoke-build --json` — if `paused`, emit "paused" and stop. If `frugal`
 or `throttle_s` is set: skip scouting; finish a FIRST from `next` if small, else emit "no-op:
 throttled". `git -C ~/code/hubandspoke status --short` not empty → someone is mid-work there;
-don't touch it (you work in the worktree anyway).
+don't touch it (you work in the clone anyway).
 
 **Ideas: build the no-brainers, file only judgment calls** (Pat, 2026-10-18). In this repo and
 fits a lap → build it, file nothing. A clear fix with one right answer → `loops idea add --build …`.
@@ -257,10 +263,10 @@ tokens, the patterns in `docs/conventions.md`). Rules:
 
 ## 4. Verify — never ship red, never ship unseen
 
-1. `npx tsc --noEmit` and `npm run test:unit` in the worktree. Both green.
+1. `npx tsc --noEmit` and `npm run test:unit` in the clone. Both green.
 2. **See it.** Write or extend a spec in `tests/e2e/<feature>.spec.ts` that drives the new surface
    and, at the moment worth looking at, `if (process.env.E2E_SHOT) await page.screenshot({ path:
-   process.env.E2E_SHOT })`. Commit it, then
+   process.env.E2E_SHOT })`. Commit it, `git push -q origin app-loop/<slug>`, then
    `ship run hubandspoke e2e --branch app-loop/<slug> -- <feature>.spec.ts /tmp/hs-build/<slug>.png`
    (MacBook Pro, throwaway Postgres built from your branch's schema, one admin login `e2e@local.test`
    and brand `starter-story`, no other data, no S3/LLM credentials). **Read the png** and look at it
@@ -283,13 +289,14 @@ tokens, the patterns in `docs/conventions.md`). Rules:
    when a milestone gives them a new place to go (§🏠); polish to an existing feature ships without one. Everyone it applies to sees it once on their next page load.
 2. Commit everything (feature + test + spec + card + docs; never the notebook — §🔒)
    on `app-loop/<slug>` with a message that says what people get, then
-   `ship web hubandspoke --branch app-loop/<slug>`.
+   `git push -q origin app-loop/<slug>` and `ship web hubandspoke --branch app-loop/<slug>`.
 3. Watch it land: `ship prs hubandspoke` until merged (CI takes ~5 min; red → fix and push again),
    then `hk builds hubandspoke` until the release is up, then
    `curl -s -o /dev/null -w '%{http_code}' https://hubandspoke.starterstory.com/login` → 200.
    If it hasn't merged by the 25-minute mark, `--next "FIRST: confirm <PR> merged and deployed"`.
-4. Clean up: `git -C ~/code/hubandspoke-build checkout -q --detach main` (after `ship sync`), both
-   checkouts clean.
+4. Clean up (after `ship sync`): `git -C ~/code/hubandspoke-build fetch -q origin && git -C
+   ~/code/hubandspoke-build checkout -q --detach origin/main`, then delete the shipped branch in the
+   clone (`git -C ~/code/hubandspoke-build branch -D app-loop/<slug>`); both checkouts clean.
 
 ## 6. Report (always, last)
 
