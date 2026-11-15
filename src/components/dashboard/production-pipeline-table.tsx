@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { EyeIcon, MessageSquareIcon } from "lucide-react";
+import { ArrowUpRightIcon, EyeIcon, MessageSquareIcon } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { AccountBadge } from "@/components/ui/account-badge";
@@ -449,6 +449,23 @@ export function ProductionPipelineTable({
                           </span>
                         );
                       })()}
+                      {item.deliveryLink && (
+                        // Review rows: the editor's handed-back link (the
+                        // upload in YouTube Studio, the Canva design), so the
+                        // reviewer opens the work without opening the post.
+                        <a
+                          href={item.deliveryLink.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          data-testid="delivery-link"
+                          onClick={() => trackUsage("production:delivery-link", brand)}
+                          title={`${item.deliveryLink.by ? `${item.deliveryLink.by}'s` : "The"} link from the comments, ${formatRelativeTime(item.deliveryLink.at)}`}
+                          className="shrink-0 inline-flex items-center gap-0.5 rounded px-1 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+                        >
+                          <ArrowUpRightIcon className="size-3" aria-hidden />
+                          {item.deliveryLink.label}
+                        </a>
+                      )}
                       {item.publishedLink && (
                         <a
                           href={item.publishedLink}
