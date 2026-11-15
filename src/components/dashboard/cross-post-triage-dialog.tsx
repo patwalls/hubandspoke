@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { ExternalLinkIcon } from "lucide-react";
 import { toast } from "sonner";
@@ -234,6 +234,22 @@ export function CrossPostTriagePanel({
     setAssigneeUserId("");
     setGateFailures([]);
   }, [candidate.id]);
+
+  // Warm the source the moment someone starts choosing targets: if it still
+  // needs enriching (or its video archived), that runs while they finish
+  // picking instead of inside the "Cross-post N" click — the parallel POSTs
+  // join the same server-side run. Once per candidate; fire-and-forget (the
+  // POST does the work itself if this failed). Not on open: dismissed
+  // candidates shouldn't pay for a media download.
+  const preparedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (selected.size === 0 || !canEdit) return;
+    if (preparedFor.current === candidate.id) return;
+    preparedFor.current = candidate.id;
+    void fetch(`/api/production-items/${candidate.id}/cross-post-prepare`, {
+      method: "POST",
+    }).catch(() => {});
+  }, [selected.size, canEdit, candidate.id]);
 
   /** Common cleanup after a successful submit / dismiss: clear in-flight
    *  selection so the panel returns to a clean state, then signal the

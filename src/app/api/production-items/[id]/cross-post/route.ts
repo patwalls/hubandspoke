@@ -7,10 +7,8 @@ import { db } from "@/lib/db";
 import { accounts, contentEvents, productionItems, users } from "@/lib/db/schema";
 import { resolveEditor } from "@/lib/services/assignees";
 import { normalizeFormatForWrite } from "@/lib/services/format-validation";
-import { enrichSingleItem } from "@/lib/services/enrichment/orchestrator";
 import { hasAnyCarouselRow } from "@/lib/services/media-introspection";
-import { resolveCleanSourceMedia } from "@/lib/services/clean-media-resolver";
-import { isVideoBearingPostType } from "@/lib/platform-media-rules";
+import { prepareCrossPostSource } from "@/lib/services/cross-post-source";
 import { seedRepostContent } from "@/lib/services/repost-seed";
 import { forkEditorStateForCrossPost } from "@/lib/services/cross-post-editor-fork";
 import { stripDateOpenerWithLLM } from "@/lib/services/repost-text-cleanup";
@@ -159,7 +157,14 @@ export async function POST(request: NextRequest, context: RouteContext) {
     );
   }
 
-  let [source] = await db
+  // Enrich the source first when it needs it (never enriched, or a video
+  // post with no archived video) — see src/lib/cross-post-source-preparer.ts.
+  // The dialog usually started this run when someone began picking targets
+  // (/cross-post-prepare), and the parallel POSTs for the other targets
+  // join it instead of each forcing their own media download.
+  const { hasCleanOriginal } = await prepareCrossPostSource(id);
+
+  const [source] = await db
     .select()
     .from(productionItems)
     .where(eq(productionItems.id, id))
@@ -167,43 +172,6 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
   if (!source) {
     return NextResponse.json({ error: "Source item not found" }, { status: 404 });
-  }
-
-  // Best-effort: enrich the source first. Two firing conditions, identical
-  // to the repost route:
-  //   1. Source has never been enriched (`enrichmentCompletedAt` null).
-  //   2. Source is enriched but a video-bearing post type with no archived
-  //      video (no carousel rows AND no legacy `mediaS3Key`). Force a
-  //      `withMedia: true` re-enrichment so the cross-post doesn't ship
-  //      with an empty media slot. See repost/route.ts for the full
-  //      cost-model rationale.
-  // Clean original resolvable up the lineage → seed that, skip the
-  // watermarked TikTok download.
-  const hasCleanOriginal =
-    (await resolveCleanSourceMedia(source.id)).kind === "archived";
-  const sourceNeedsMedia =
-    !hasCleanOriginal &&
-    isVideoBearingPostType(source.postType) &&
-    !source.mediaS3Key &&
-    !(await hasAnyCarouselRow(source.id));
-  if (sourceNeedsMedia || !source.enrichmentCompletedAt) {
-    try {
-      await enrichSingleItem(source.id, {
-        withMedia: sourceNeedsMedia ? true : undefined,
-        force: !!source.enrichmentCompletedAt && sourceNeedsMedia,
-      });
-      const [refreshed] = await db
-        .select()
-        .from(productionItems)
-        .where(eq(productionItems.id, id))
-        .limit(1);
-      if (refreshed) source = refreshed;
-    } catch (err) {
-      console.error(
-        `[cross-post] enrichment failed for source ${source.id}:`,
-        err instanceof Error ? err.message : err,
-      );
-    }
   }
 
   if (source.accountId === targetAccountId && source.postType === targetPostType) {
