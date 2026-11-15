@@ -28,7 +28,7 @@ import {
   HOOK_PROMPT_VERSION,
   writeFormatHookForSection,
 } from "@/lib/clip-hook-agent";
-import { loadHookRewrites } from "@/lib/services/clip-editor/hook-rewrites";
+import { loadHookLearning } from "@/lib/services/clip-editor/hook-rewrites";
 import { loadTrimHabits } from "@/lib/services/clip-editor/trim-habits";
 import { loadFormatOdds } from "@/lib/services/clip-odds";
 import { oddsKey } from "@/lib/clip-odds";
@@ -279,10 +279,13 @@ export async function generateClipIdeasForItem(
 
   // How editors rewrote this format's recent AI hooks (hooks-learn M1).
   // Fail-soft: a failed read means a normal run without the block.
-  const editorRewrites = await loadHookRewrites({ brand: item.brand, formatName: format.name }).catch((err) => {
+  // When most of them hid the hook and typed a short title, the writer also
+  // writes that title (hooks-learn M3).
+  const hookLearning = await loadHookLearning({ brand: item.brand, formatName: format.name }).catch((err) => {
     console.warn(`[clip-idea-generate] format=${format.name} hook rewrites read failed: ${err instanceof Error ? err.message : err}`);
-    return [];
+    return { pairs: [], startsWithTitle: false };
   });
+  const editorRewrites = hookLearning.pairs;
   // How editors trim this format's AI clip windows (clip-trim M1). Fail-soft.
   const editorTrims = await loadTrimHabits({ brand: item.brand, formatName: format.name }).catch((err) => {
     console.warn(`[clip-idea-generate] format=${format.name} trim habits read failed: ${err instanceof Error ? err.message : err}`);
@@ -309,6 +312,7 @@ export async function generateClipIdeasForItem(
         extrasSchema,
         referenceHooks,
         editorRewrites,
+        writeOnScreenTitle: hookLearning.startsWithTitle,
         editorTrims,
         formatOdds,
         section: {
@@ -445,6 +449,7 @@ export async function generateClipIdeasForItem(
         startSec: candidate.startSec.toFixed(3),
         endSec: candidate.endSec.toFixed(3),
         hook: candidate.hook ?? "",
+        onScreenTitle: candidate.onScreenTitle ?? null,
         angle: candidate.angle ?? "",
         rationale: candidate.rationale ?? "",
         blueprintAnchorHook: candidate.blueprintAnchorHook,

@@ -10,12 +10,15 @@
  *   hook on N of M clips" line. Same rows, so the page shows exactly what the
  *   writer learns from. Read on page open; one indexed join capped at
  *   RECENT_CLIPS rows, so no cache.
+ * - `loadHookLearning` — M3, the pairs plus whether the format's editors
+ *   retitle most clips (hide the AI hook, type a short title); the writer
+ *   then also returns `onScreenTitle` and new edits start with it.
  */
 import { and, desc, eq, gt } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { clipEdits, clipIdeas, productionItems } from "@/lib/db/schema";
 import { parseDoc, type ClipEditDoc } from "@/lib/clip-editor/doc";
-import { collectHookRewrites, summarizeHookRewrites, type HookRewrite, type HookRewriteSummary } from "@/lib/clip-editor/hook-rewrites";
+import { collectHookRewrites, startsWithTitle, summarizeHookRewrites, type HookRewrite, type HookRewriteSummary } from "@/lib/clip-editor/hook-rewrites";
 
 export const RECENT_CLIPS = 40;
 export const WINDOW_DAYS = 60;
@@ -44,6 +47,13 @@ async function loadRows(args: LoadArgs): Promise<Array<{ aiHook: string | null; 
 
 export async function loadHookRewrites(args: LoadArgs): Promise<HookRewrite[]> {
   return collectHookRewrites(await loadRows(args));
+}
+
+/** M1 + M3 in one read: the pairs, and whether this format's editors
+ *  retitle most clips (→ the writer also writes a short on-screen title). */
+export async function loadHookLearning(args: LoadArgs): Promise<{ pairs: HookRewrite[]; startsWithTitle: boolean }> {
+  const rows = await loadRows(args);
+  return { pairs: collectHookRewrites(rows), startsWithTitle: startsWithTitle(rows) };
 }
 
 export async function loadHookRewriteSummary(args: LoadArgs): Promise<HookRewriteSummary | null> {

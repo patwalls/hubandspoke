@@ -1,0 +1,1 @@
+ALTER TABLE "clip_ideas" ADD COLUMN "on_screen_title" text;

@@ -448,7 +448,11 @@ function HookRewritesLine({ summary, brand }: { summary: HookRewriteSummary; bra
               </li>
             ))}
           </ul>
-          <p className="mt-1 pl-2">New clip ideas for this format learn from these.</p>
+          <p className="mt-1 pl-2">
+            {summary.startsWithTitle
+              ? `Editors put their own title on ${summary.retitled} of ${summary.clips}, so new clips start with a short title like theirs. The full hook stays on the idea.`
+              : "New clip ideas for this format learn from these."}
+          </p>
         </>
       )}
     </div>

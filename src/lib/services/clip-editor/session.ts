@@ -19,6 +19,7 @@ import { getPresignedGetUrl } from "@/lib/s3";
 import { applyLook, clipLookSchema, createDefaultDoc, parseDoc, type ClipEditDoc } from "@/lib/clip-editor/doc";
 import { resolveTranscriptWords, type EditorWord } from "@/lib/clip-editor/words";
 import { MIN_TRIM_SEC, MIN_TRIM_SHARE } from "@/lib/clip-editor/trim-habits";
+import { startingHookText } from "@/lib/clip-editor/hook-rewrites";
 import { loadTrimHabits } from "./trim-habits";
 import { brandSpellingDocs, carrySiblingFixes } from "@/lib/clip-editor/carry-fixes";
 import { loadBrandSpellings } from "./brand-spellings";
@@ -136,6 +137,7 @@ export async function loadClipEditorSession(args: {
       id: clipIdeas.id,
       status: clipIdeas.status,
       hook: clipIdeas.hook,
+      onScreenTitle: clipIdeas.onScreenTitle,
       angle: clipIdeas.angle,
       rationale: clipIdeas.rationale,
       startSec: clipIdeas.startSec,
@@ -208,7 +210,9 @@ export async function loadClipEditorSession(args: {
       const doc = createDefaultDoc({
         startSec,
         endSec,
-        hook: row.hook,
+        // A format whose editors retitle starts with the idea's short
+        // on-screen title (hooks-learn M3).
+        hook: startingHookText(row),
         aspectRatio: format ? resolveClipAspectRatio(format) : "9:16",
         introRanges: row.hookSegments ?? [],
       });
