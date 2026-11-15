@@ -61,13 +61,15 @@ async function seedUsualFormat(page: Page, sql: postgres.Sql) {
     }
   }
 
-  // Today's source, doing well, in the same format.
+  // Today's source, doing well, in the same format (with media on hand —
+  // a composition id — so the post page's Cross-post tab is enabled).
   const title = `E2E usual today ${stamp}`;
   const sourceId = await createSource(page, title, editorUserId);
   await sql`
     UPDATE production_items
     SET status = 'Published', format = ${format}, account_id = ${ig}, views = 5000,
-        published_at = now() - interval '2 hours', enrichment_completed_at = now()
+        published_at = now() - interval '2 hours', enrichment_completed_at = now(),
+        descript_composition_id = ${`e2e-${stamp}`}
     WHERE id = ${sourceId}`;
   return { stamp, title, sourceId };
 }
@@ -111,8 +113,7 @@ test("the post page's Cross-post tab offers Select usual too", async ({ page }) 
   try {
     const { stamp, sourceId } = await seedUsualFormat(page, sql);
     await dismissWhatsNew(page);
-    await page.goto(`/starter-story/content/${sourceId}`);
-    await page.getByRole("tab", { name: "Cross-post" }).click();
+    await page.goto(`/starter-story/content/${sourceId}?tab=cross-post`);
 
     const usual = page.getByRole("button", { name: "Select usual (2)" });
     await expect(usual).toBeVisible({ timeout: 15_000 });
