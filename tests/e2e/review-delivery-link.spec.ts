@@ -50,6 +50,10 @@ test("a Review row shows the link the work was handed back with", async ({ page 
       INSERT INTO content_comments (content_item_id, user_id, body)
       VALUES (${assignedId}, ${editor.id}, ${'<p><a href="https://canva.link/e2e">draft</a></p>'})`;
 
+    // One more write through the app so the 60 s report cache is dropped
+    // after the rows above changed underneath it.
+    await create(`E2E cache bust ${stamp}`, "Assigned");
+
     await page.goto(`/starter-story/production`);
     await page.waitForLoadState("networkidle");
     const popup = page.getByRole("dialog", { name: "What's new" });
@@ -58,17 +62,18 @@ test("a Review row shows the link the work was handed back with", async ({ page 
       await expect(popup).toBeHidden();
     }
 
-    const reviewRow = page.locator("tr", { hasText: `E2E delivered ${stamp}` });
+    const reviewRow = page.locator(`[data-production-row="${reviewId}"]`);
     const chip = reviewRow.getByTestId("delivery-link");
     await expect(chip).toBeVisible();
     await expect(chip).toHaveText("YouTube Studio");
     await expect(chip).toHaveAttribute("href", "https://studio.youtube.com/video/e2eVid/edit");
     await expect(chip).toHaveAttribute("target", "_blank");
 
-    const assignedRow = page.locator("tr", { hasText: `E2E assigned ${stamp}` });
+    const assignedRow = page.locator(`[data-production-row="${assignedId}"]`);
     await expect(assignedRow).toBeVisible();
     await expect(assignedRow.getByTestId("delivery-link")).toHaveCount(0);
 
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
     if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT, fullPage: true });
   } finally {
     await sql.end();
