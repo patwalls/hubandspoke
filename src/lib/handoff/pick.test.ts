@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { firstName, pickHandoff } from "./pick";
+import { composerHandoffLabel, firstName, isHandoffNoteRecipient, pickHandoff } from "./pick";
 
 const ME = "me";
 const andrew = { id: "andrew", name: "Andrew Gibbs" };
@@ -71,5 +71,33 @@ describe("firstName", () => {
   it("takes the first word", () => {
     expect(firstName("John Henry Parr")).toBe("John");
     expect(firstName("Nuriel")).toBe("Nuriel");
+  });
+});
+
+describe("composerHandoffLabel", () => {
+  it("names the reviewer for send-to-review and name-reviewer", () => {
+    expect(composerHandoffLabel({ kind: "send-to-review", to: "Review", person: andrew, others: [] })).toBe(
+      "Comment & send to review → Andrew",
+    );
+    expect(composerHandoffLabel({ kind: "name-reviewer", to: "Review", person: andrew, others: [] })).toBe(
+      "Comment & hand to Andrew",
+    );
+  });
+
+  it("offers nothing for approve (that stays on the status chip) or no handoff", () => {
+    expect(composerHandoffLabel({ kind: "approve", to: "Ready To Publish", person: john, others: [] })).toBeNull();
+    expect(composerHandoffLabel(null)).toBeNull();
+  });
+});
+
+describe("isHandoffNoteRecipient", () => {
+  it("mutes only the person the post was just handed to", () => {
+    expect(isHandoffNoteRecipient("andrew", "andrew", "andrew")).toBe(true);
+    expect(isHandoffNoteRecipient("andrew", "andrew", "saj")).toBe(false);
+  });
+
+  it("ignores a handoffTo that isn't the post's editor (the handoff didn't save)", () => {
+    expect(isHandoffNoteRecipient("andrew", ME, "andrew")).toBe(false);
+    expect(isHandoffNoteRecipient(null, "andrew", "andrew")).toBe(false);
   });
 });

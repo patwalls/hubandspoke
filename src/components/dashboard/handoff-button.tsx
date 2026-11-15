@@ -10,7 +10,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { firstName, pickHandoff, type HandoffPerson } from "@/lib/handoff/pick";
+import { firstName, pickHandoff, type Handoff, type HandoffPerson } from "@/lib/handoff/pick";
 import { trackUsage } from "@/lib/usage/track";
 import { cn } from "@/lib/utils";
 import { useCanEditBrand } from "@/components/brand-access";
@@ -34,13 +34,16 @@ const BTN =
  * save has landed, so "who sent it to review" is read after the save, not
  * racing it.
  */
-export function HandoffButton({
+/**
+ * The handoff on offer for this item and me (null = none). One fetch shared by
+ * the status-chip button and the comment box's "Comment & send to review".
+ */
+export function useHandoff({
   itemId,
   brand,
   status,
   editorUserId,
   brandStatuses,
-  onHandoff,
   refreshKey,
 }: {
   itemId: string;
@@ -48,11 +51,9 @@ export function HandoffButton({
   status: string;
   editorUserId: string;
   brandStatuses: ReadonlySet<string>;
-  onHandoff: (patch: { status: string; editorUserId: string }) => Promise<boolean>;
   refreshKey?: string | number;
-}) {
+}): Handoff | null {
   const [data, setData] = useState<HandoffData | null>(null);
-  const [busy, setBusy] = useState(false);
   // View-only users can't hand off (it's a status + editor change).
   const canEdit = useCanEditBrand(brand);
   const relevant = canEdit && (status === "Assigned" || status === "Review");
@@ -73,7 +74,7 @@ export function HandoffButton({
   }, [itemId, status, relevant, refreshKey]);
 
   if (!relevant || !data?.me) return null;
-  const handoff = pickHandoff({
+  return pickHandoff({
     me: data.me,
     status,
     editorUserId: editorUserId || null,
@@ -81,6 +82,20 @@ export function HandoffButton({
     reviewers: data.reviewers,
     sentToReviewBy: data.sentToReviewBy,
   });
+}
+
+export function HandoffButton({
+  brand,
+  editorUserId,
+  handoff,
+  onHandoff,
+}: {
+  brand: string;
+  editorUserId: string;
+  handoff: Handoff | null;
+  onHandoff: (patch: { status: string; editorUserId: string }) => Promise<boolean>;
+}) {
+  const [busy, setBusy] = useState(false);
   if (!handoff) return null;
 
   async function go(person: HandoffPerson) {
