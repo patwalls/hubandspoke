@@ -5,7 +5,10 @@ import { and, asc, eq, isNotNull, sql } from "drizzle-orm";
 import { requireSession } from "@/lib/auth-guards";
 import { enqueueNotification } from "@/lib/services/notifications";
 import { htmlToPlainText, sanitizeCommentHtml } from "@/lib/comments/sanitize";
-import { extractMentionUserIds } from "@/lib/comments/extract-mentions";
+import {
+  extractMentionUserIds,
+  isMentionOnly,
+} from "@/lib/comments/extract-mentions";
 import { formatTimecode, parseAtSeconds } from "@/lib/comments/timecode";
 
 interface RouteContext {
@@ -145,6 +148,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     ).slice(0, 240);
     const authorName = user?.name || user?.email || null;
     const mentionIds = new Set(extractMentionUserIds(sanitized));
+    const mentionOnly = isMentionOnly(sanitized);
     for (const mentionedId of mentionIds) {
       void enqueueNotification({
         userId: mentionedId,
@@ -152,6 +156,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
         contentItemId: id,
         commentId: inserted.id,
         actorUserId: session.user.id,
+        foldIntoRecentAssignment: mentionOnly,
         payload: {
           kind: "mention",
           title: item.title,

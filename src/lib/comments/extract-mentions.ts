@@ -14,3 +14,25 @@ export function extractMentionUserIds(html: string): string[] {
   }
   return [...ids];
 }
+
+const MENTION_SPAN_BLOCK_RE =
+  /<span(?=[^>]*\bdata-type="mention")[^>]*>[\s\S]*?<\/span>/gi;
+
+/**
+ * True when a comment is nothing but @-mentions: no words, no image, no link.
+ * The curator's "assign, then @ them" habit posts exactly this a few seconds
+ * after the assignment email went out; such a ping carries nothing the
+ * assignment email didn't, so its email is folded into it (see
+ * `enqueueNotification`'s `foldIntoRecentAssignment`). Structural HTML check
+ * only — it never reads what the words say.
+ */
+export function isMentionOnly(html: string): boolean {
+  if (extractMentionUserIds(html).length === 0) return false;
+  const rest = html.replace(MENTION_SPAN_BLOCK_RE, "");
+  if (/<(img|a|video|iframe)\b/i.test(rest)) return false;
+  const text = rest
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;|&#160;| /gi, " ")
+    .trim();
+  return text === "";
+}

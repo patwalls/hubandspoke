@@ -2035,6 +2035,14 @@ Regression guard: `src/lib/services/underlord-auto-fire.regression.test.ts` grep
     work to a deactivated user; a stale format/brand default falls back to
     unassigned
   - Idempotent on `emailedAt`
+  - **One email per assignment (2026-11-15, build loop):** a comment that is only
+    @-mentions (`isMentionOnly`, `src/lib/comments/extract-mentions.ts`) posted
+    within 10 min of an `assigned` notification to the same person on the same
+    post still writes its `mention` row (the bell shows it) but enqueues no
+    email — the assignment email already went out. In 30 days every bare
+    mention (66) came ~6 s after assigning that same person, so editors got two
+    emails per handoff. A mention with any words, link or image always emails.
+    `enqueueNotification({ foldIntoRecentAssignment })`
 
 ### `typefully-create-draft` — auto-create Typefully draft for new X/LinkedIn items
 - **Trigger:** enqueued from `POST /api/production-items` after insert when `postType` is `x` or `linkedin` AND `publishedLink` is null. Also enqueueable on demand via `POST /api/production-items/[id]/typefully-redrive`.
