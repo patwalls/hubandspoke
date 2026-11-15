@@ -111,7 +111,8 @@ test("the post page's Cross-post tab offers Select usual too", async ({ page }) 
   try {
     const { stamp, sourceId } = await seedUsualFormat(page, sql);
     await dismissWhatsNew(page);
-    await page.goto(`/starter-story/content/${sourceId}?tab=cross-post`);
+    await page.goto(`/starter-story/content/${sourceId}`);
+    await page.getByRole("tab", { name: "Cross-post" }).click();
 
     const usual = page.getByRole("button", { name: "Select usual (2)" });
     await expect(usual).toBeVisible({ timeout: 15_000 });
