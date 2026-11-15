@@ -4,6 +4,7 @@ import { contentComments, productionItems, users } from "@/lib/db/schema";
 import { and, asc, eq, isNotNull, sql } from "drizzle-orm";
 import { requireSession } from "@/lib/auth-guards";
 import { enqueueNotification } from "@/lib/services/notifications";
+import { isHandoffNoteRecipient } from "@/lib/handoff/pick";
 import { htmlToPlainText, sanitizeCommentHtml } from "@/lib/comments/sanitize";
 import {
   extractMentionUserIds,
@@ -96,6 +97,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
         { status: 400 },
       );
     }
+    // Posted by the comment box's "Comment & send to review": the handoff
+    // (status + editor) saved first; this person's copy is bell-only.
+    const handoffTo = typeof body?.handoffTo === "string" ? body.handoffTo : null;
     const atSeconds = parseAtSeconds(body?.atSeconds);
     if (atSeconds === undefined) {
       return NextResponse.json(
@@ -157,6 +161,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
         commentId: inserted.id,
         actorUserId: session.user.id,
         foldIntoRecentAssignment: mentionOnly,
+        inAppOnly: isHandoffNoteRecipient(handoffTo, item.editorUserId, mentionedId),
         payload: {
           kind: "mention",
           title: item.title,
@@ -192,6 +197,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
         contentItemId: id,
         commentId: inserted.id,
         actorUserId: session.user.id,
+        inAppOnly: isHandoffNoteRecipient(handoffTo, item.editorUserId, recipientId),
         payload: {
           kind: "comment",
           title: item.title,

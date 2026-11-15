@@ -43,6 +43,15 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-11-15-comment-and-send-to-review",
+    shippedAt: "2026-11-15T17:44:27Z",
+    kind: "feature",
+    title: "Send your post to review from the comment box",
+    body: "Finished a post you're editing? Write your note in the comment box and press \"Comment & send to review\": it posts the note, moves the post to Review and hands it to the reviewer, all at once. The reviewer gets one email, not two.",
+    screen: "handoff:send-with-note",
+    audience: { usersOf: ["/[brand]/content/[id]"] },
+  },
+  {
     id: "2026-11-12-cross-post-select-usual",
     shippedAt: "2026-11-12T12:55:13Z",
     kind: "feature",

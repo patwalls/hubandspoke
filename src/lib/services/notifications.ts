@@ -28,6 +28,12 @@ type EnqueueInput = {
    * mentions in 30 days (2026-11) came ~6 s after assigning the same person.
    */
   foldIntoRecentAssignment?: boolean;
+  /**
+   * Bell row only, no email: the comment was posted with a handoff to this
+   * person (`isHandoffNoteRecipient`), whose own "assigned" email is already
+   * on its way (editor-handoffs M1).
+   */
+  inAppOnly?: boolean;
 };
 
 export const ASSIGNMENT_FOLD_WINDOW_MS = 10 * 60 * 1000;
@@ -72,6 +78,7 @@ export async function enqueueNotification(input: EnqueueInput): Promise<void> {
 
   if (!recipient.passwordHash) return;
   if (!inserted) return;
+  if (input.inAppOnly) return;
 
   if (input.foldIntoRecentAssignment && input.contentItemId) {
     const [assigned] = await db

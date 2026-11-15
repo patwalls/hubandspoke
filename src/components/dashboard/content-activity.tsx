@@ -42,6 +42,7 @@ import { isEditorEmpty } from "@/lib/comments/editor-empty";
 import { trackUsage } from "@/lib/usage/track";
 import { TimecodeChip, TimecodePin } from "./comment-timecode";
 import { isOpenNote, openNotesLabel } from "@/lib/comments/notes";
+import { composerHandoffLabel, type Handoff } from "@/lib/handoff/pick";
 
 // Dynamic: the editor drags the whole TipTap/ProseMirror bundle (~900 KB
 // chunk) — loading it lazily takes it off the detail page's critical path.
@@ -487,6 +488,11 @@ interface ContentActivityProps {
   /** Map<status name, color token> for the brand. Threaded from the parent
    *  so status_change chips render with the same colors as elsewhere. */
   statusPalette?: ReadonlyMap<string, string>;
+  /** The handoff on offer to me on this post (editor-handoffs M1): the box
+   *  then also offers "Comment & send to review → <reviewer>", which saves
+   *  the handoff first and posts the note with it. */
+  handoff?: Handoff | null;
+  onHandoff?: (patch: { status: string; editorUserId: string }) => Promise<boolean>;
 }
 
 function timeAgo(iso: string): string {
@@ -740,7 +746,7 @@ function CommentFileLink({
   );
 }
 
-export function ContentActivity({ contentId, brand, refreshKey = 0, statusPalette }: ContentActivityProps) {
+export function ContentActivity({ contentId, brand, refreshKey = 0, statusPalette, handoff = null, onHandoff }: ContentActivityProps) {
   const [items, setItems] = useState<ActivityItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [hasLoaded, setHasLoaded] = useState(false);
@@ -781,10 +787,28 @@ export function ContentActivity({ contentId, brand, refreshKey = 0, statusPalett
     };
   }, [contentId, refreshKey]);
 
-  const submit = useCallback(async () => {
+  const handoffLabel = onHandoff ? composerHandoffLabel(handoff) : null;
+
+  const post = useCallback(async (withHandoff: boolean) => {
     const body = draft;
     const atSeconds = draftAt;
     if (isEditorEmpty(body) || posting) return;
+    // Handoff first: if the status/editor save fails, nothing is posted and
+    // the note stays in the box. The note then goes out bell-only to the
+    // reviewer, whose "assigned" email is already on its way.
+    let handoffTo: string | null = null;
+    if (withHandoff) {
+      if (!handoff || !onHandoff) return;
+      setPosting(true);
+      trackUsage("handoff:send-with-note", brand);
+      const ok = await onHandoff({ status: handoff.to, editorUserId: handoff.person.id });
+      if (!ok) {
+        setPosting(false);
+        setError("Couldn't hand it off. Your note is still here.");
+        return;
+      }
+      handoffTo = handoff.person.id;
+    }
     const tempId = `temp-${++tempCounter.current}`;
     const optimistic: CommentItem = {
       kind: "comment",
@@ -806,7 +830,7 @@ export function ContentActivity({ contentId, brand, refreshKey = 0, statusPalett
       const res = await fetch(`/api/production-items/${contentId}/comments`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ body, atSeconds }),
+        body: JSON.stringify({ body, atSeconds, handoffTo }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = (await res.json()) as {
@@ -823,7 +847,8 @@ export function ContentActivity({ contentId, brand, refreshKey = 0, statusPalett
     } finally {
       setPosting(false);
     }
-  }, [draft, draftAt, posting, contentId, brand]);
+  }, [draft, draftAt, posting, contentId, brand, handoff, onHandoff]);
+  const submit = useCallback(() => post(false), [post]);
 
   const startEdit = (c: CommentItem) => {
     setEditingId(c.id);
@@ -1094,14 +1119,28 @@ export function ContentActivity({ contentId, brand, refreshKey = 0, statusPalett
               <kbd className="font-mono">Enter</kbd> to post
             </p>
           </div>
-          <Button
-            type="button"
-            onClick={submit}
-            disabled={posting || isEditorEmpty(draft)}
-            size="sm"
-          >
-            {posting ? "Posting…" : "Post comment"}
-          </Button>
+          <div className="flex items-center gap-2">
+            {handoffLabel && !isEditorEmpty(draft) && (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => void post(true)}
+                disabled={posting}
+                size="sm"
+                title={`Posts your comment and makes ${handoff?.person.name} the editor${handoff?.kind === "send-to-review" ? `, moving it to ${handoff.to}` : ""}`}
+              >
+                {handoffLabel}
+              </Button>
+            )}
+            <Button
+              type="button"
+              onClick={submit}
+              disabled={posting || isEditorEmpty(draft)}
+              size="sm"
+            >
+              {posting ? "Posting…" : "Post comment"}
+            </Button>
+          </div>
         </div>
       </div>
     </div>

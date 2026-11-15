@@ -82,3 +82,33 @@ export function pickHandoff(input: {
 export function firstName(name: string): string {
   return name.trim().split(/\s+/)[0] || name;
 }
+
+/**
+ * The comment box's "Comment & send to review → Andrew" (editor-handoffs M1).
+ * Outside editors never used the status-chip button: every one of their moves
+ * to Review came with a comment within 10 minutes (a "review & publish" note,
+ * a design link), because their handoff IS a note. So the comment box offers
+ * the same handoff, and the note rides it. Only the editor-side handoffs; the
+ * reviewer's approve stays on the chip.
+ */
+export function composerHandoffLabel(handoff: Handoff | null): string | null {
+  if (!handoff) return null;
+  const who = firstName(handoff.person.name);
+  if (handoff.kind === "send-to-review") return `Comment & send to review → ${who}`;
+  if (handoff.kind === "name-reviewer") return `Comment & hand to ${who}`;
+  return null;
+}
+
+/**
+ * A comment posted with a handoff (`handoffTo`) lands right after the
+ * handoff's own "assigned" email to that person, so their copy of the comment
+ * is bell-only. Only honoured when they really are the post's editor now (the
+ * handoff saved first), so a stray `handoffTo` can't mute anyone else.
+ */
+export function isHandoffNoteRecipient(
+  handoffTo: string | null,
+  editorUserId: string | null,
+  recipientId: string,
+): boolean {
+  return !!handoffTo && handoffTo === editorUserId && recipientId === handoffTo;
+}

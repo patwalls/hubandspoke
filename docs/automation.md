@@ -2043,6 +2043,16 @@ Regression guard: `src/lib/services/underlord-auto-fire.regression.test.ts` grep
     mention (66) came ~6 s after assigning that same person, so editors got two
     emails per handoff. A mention with any words, link or image always emails.
     `enqueueNotification({ foldIntoRecentAssignment })`
+  - **A note sent with a handoff is bell-only for the reviewer (2026-11-15, build
+    loop, editor-handoffs M1):** the content page's comment box offers
+    **Comment & send to review → <reviewer>**; it saves the handoff first
+    (status + editor, the usual PUT, which sends the `assigned` email), then
+    posts the comment with `handoffTo`. That person's `mention` / `comment`
+    row for this comment gets `inAppOnly` (row, no email) — only when they are
+    the post's editor by then (`isHandoffNoteRecipient` in
+    `src/lib/handoff/pick.ts`, unit-tested), so a stray `handoffTo` can't mute
+    anyone. Everyone else is notified as before.
+    `enqueueNotification({ inAppOnly })`
 
 ### `typefully-create-draft` — auto-create Typefully draft for new X/LinkedIn items
 - **Trigger:** enqueued from `POST /api/production-items` after insert when `postType` is `x` or `linkedin` AND `publishedLink` is null. Also enqueueable on demand via `POST /api/production-items/[id]/typefully-redrive`.

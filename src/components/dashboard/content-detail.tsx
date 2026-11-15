@@ -135,7 +135,7 @@ import { trackUsage } from "@/lib/usage/track";
 import { ViewsAgainstUsual, WhyItWon } from "@/components/dashboard/views-against-usual";
 import type { AgainstUsual } from "@/lib/winners/pick";
 import { acceptsPastedLink, isPagePaste, pastedPostLink } from "@/lib/paste-to-publish";
-import { HandoffButton } from "./handoff-button";
+import { HandoffButton, useHandoff } from "./handoff-button";
 import { LearnedEditsChip } from "./learned-edits-chip";
 import { leavePublishedConfirm } from "@/lib/status/leave-published";
 import { CrossPostPasteLinks } from "./cross-post-paste-links";
@@ -1928,6 +1928,38 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     [contentId, load]
   );
 
+  // The handoff on offer (status chip button + the comment box's "Comment &
+  // send to review"), read once. Status + editor go through the page's own
+  // PUT, so events and the new editor's "assigned" notification are unchanged.
+  const handoff = useHandoff({
+    itemId: contentId,
+    brand,
+    status,
+    editorUserId,
+    brandStatuses: statusNameSet,
+    refreshKey: handoffKey,
+  });
+  const runHandoff = useCallback(
+    async (patch: { status: string; editorUserId: string }): Promise<boolean> => {
+      const prev = { status, editorUserId };
+      setStatus(patch.status);
+      setEditorUserId(patch.editorUserId);
+      // Naming the reviewer keeps the status: send only the editor,
+      // so no Review → Review status event is written.
+      const ok = await persistField(
+        patch.status === prev.status ? { editorUserId: patch.editorUserId } : patch,
+      );
+      if (!ok) {
+        setStatus(prev.status);
+        setEditorUserId(prev.editorUserId);
+      } else {
+        setHandoffKey((k) => k + 1);
+      }
+      return ok;
+    },
+    [status, editorUserId, persistField],
+  );
+
   const createFormatFromQuery = useCallback(
     async (name: string) => {
       try {
@@ -2607,29 +2639,10 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
              *  team passes work along (Assigned → reviewer, Review → back
              *  to the sender). Hidden when there's nobody to hand to. */}
             <HandoffButton
-              itemId={contentId}
               brand={brand}
-              status={status}
               editorUserId={editorUserId}
-              brandStatuses={statusNameSet}
-              refreshKey={handoffKey}
-              onHandoff={async (patch) => {
-                const prev = { status, editorUserId };
-                setStatus(patch.status);
-                setEditorUserId(patch.editorUserId);
-                // Naming the reviewer keeps the status: send only the editor,
-                // so no Review → Review status event is written.
-                const ok = await persistField(
-                  patch.status === prev.status ? { editorUserId: patch.editorUserId } : patch,
-                );
-                if (!ok) {
-                  setStatus(prev.status);
-                  setEditorUserId(prev.editorUserId);
-                } else {
-                  setHandoffKey((k) => k + 1);
-                }
-                return ok;
-              }}
+              handoff={handoff}
+              onHandoff={runHandoff}
             />
 
             {/* Reconciler gave up auto-detecting this Scheduled post going
@@ -3789,6 +3802,8 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
           brand={brand}
           refreshKey={activityRefreshKey}
           statusPalette={statusPalette}
+          handoff={handoff}
+          onHandoff={runHandoff}
         />
       )}
       {deleteError && (
@@ -3906,6 +3921,8 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
           brand={brand}
           refreshKey={activityRefreshKey}
           statusPalette={statusPalette}
+          handoff={handoff}
+          onHandoff={runHandoff}
         />
       )}
         </TabsContent>
