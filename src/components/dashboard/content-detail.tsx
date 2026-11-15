@@ -74,7 +74,7 @@ const ForkFormatDialog = dynamic(() => import("./fork-format-dialog").then((m) =
 const MergeModal = dynamic(() => import("./merge-modal").then((m) => m.MergeModal), { ssr: false });
 const ClipIdeasPanel = dynamic(() => import("./clip-ideas-panel").then((m) => m.ClipIdeasPanel), { ssr: false });
 const RepostTriagePanel = dynamic(() => import("./repost-triage-dialog").then((m) => m.RepostTriagePanel), { ssr: false });
-const CrossPostTriagePanel = dynamic(() => import("./cross-post-triage-dialog").then((m) => m.CrossPostTriagePanel), { ssr: false });
+const CrossPostTabPanel = dynamic(() => import("./cross-post-tab-panel").then((m) => m.CrossPostTabPanel), { ssr: false });
 import type { BrandAccount } from "@/lib/services/cross-post-candidates";
 import { REBRANDLY_DM_BASE_URL, commentKeywordFor, isBrandDmSlashtag, usesCtaOffer, usesRebrandlyDm } from "@/lib/cta-offer-brands";
 import { TranscriptButton } from "./transcript-dialog";
@@ -4292,7 +4292,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
               />
             )}
             <div className="rounded-lg border border-border bg-card p-5">
-              <CrossPostTriagePanel
+              <CrossPostTabPanel
                 candidate={{
                   id: item.id,
                   brand,
