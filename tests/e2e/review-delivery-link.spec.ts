@@ -3,8 +3,9 @@ import postgres from "postgres";
 
 // Editors hand work back with a link in a comment (the upload in YouTube
 // Studio, the Canva design). A Review row on the In Production list shows
-// that link, so the reviewer opens the work straight from the list.
-test("a Review row shows the link the work was handed back with", async ({ page }) => {
+// that link, so the reviewer opens the work straight from the list — and the
+// post page shows it beside the status.
+test("a Review row and its post page show the link the work was handed back with", async ({ page }) => {
   const sql = postgres(process.env.DATABASE_URL!, { max: 1 });
   try {
     const stamp = Date.now();
@@ -78,8 +79,27 @@ test("a Review row shows the link the work was handed back with", async ({ page 
     await expect(assignedRow).toBeVisible();
     await expect(assignedRow.getByTestId("delivery-link")).toHaveCount(0);
 
+    // The post page shows the same link beside the status while it's in
+    // Review; an Assigned post shows none.
+    const apiRes = await page.request.get(`/api/production-items/${reviewId}/delivery-link`);
+    expect(apiRes.ok(), await apiRes.text()).toBeTruthy();
+    expect((await apiRes.json()).link?.label).toBe("YouTube Studio");
+
+    await page.goto(`/starter-story/content/${assignedId}`);
+    await page.waitForLoadState("networkidle");
+    await expect(page.getByRole("combobox", { name: "Status" })).toBeVisible();
+    await expect(page.getByTestId("post-delivery-link")).toHaveCount(0);
+
+    await page.goto(`/starter-story/content/${reviewId}`);
+    await page.waitForLoadState("networkidle");
+    const postChip = page.getByTestId("post-delivery-link");
+    await expect(postChip).toBeVisible();
+    await expect(postChip).toHaveText("YouTube Studio");
+    await expect(postChip).toHaveAttribute("href", "https://studio.youtube.com/video/e2eVid/edit");
+    await expect(postChip).toHaveAttribute("title", "Noa's link from the comments");
+
     await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-    if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT, fullPage: true });
+    if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT, fullPage: false });
   } finally {
     await sql.end();
   }
