@@ -348,6 +348,6 @@ export async function POST(request: Request, context: RouteContext) {
   // explicitly from the new row's detail page if they want a fresh Descript
   // composition.
 
-  invalidateReportCaches();
+  invalidateReportCaches({ brands: [source.brand] });
   return NextResponse.json({ id: created.id }, { status: 201 });
 }

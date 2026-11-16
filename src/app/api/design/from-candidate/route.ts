@@ -13,14 +13,15 @@ export async function POST(request: NextRequest) {
   if (!body || typeof body.pillarId !== "string" || typeof body.targetFormatId !== "string") {
     return NextResponse.json({ error: "pillarId and targetFormatId are required" }, { status: 400 });
   }
-  for (const brand of new Set([await brandOfProductionItem(body.pillarId), await brandOfFormat(body.targetFormatId)])) {
+  const brands = [...new Set([await brandOfProductionItem(body.pillarId), await brandOfFormat(body.targetFormatId)])];
+  for (const brand of brands) {
     const brandGuard = await requireBrandEdit(brand);
     if (brandGuard.response) return brandGuard.response;
   }
   try {
     const created = await findOrCreateDesignItem({ pillarId: body.pillarId, targetFormatId: body.targetFormatId, actorUserId: guard.session.user.id as string });
     // The new item puts its (pillar, format) pair in flight — off the Repurposed queue.
-    invalidateReportCaches();
+    invalidateReportCaches({ brands });
     return NextResponse.json(created);
   } catch (err) {
     if (err instanceof DesignItemCreateError) return NextResponse.json({ error: err.message }, { status: err.status });

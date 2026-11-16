@@ -444,6 +444,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
   // legacy `descript-derivative-create` task still exists for in-queue
   // jobs predating commit `e61a6d9`; no live route enqueues it.
 
-  invalidateReportCaches();
+  // The new row lives on the source's brand (it only publishes to the target account).
+  invalidateReportCaches({ brands: [source.brand] });
   return NextResponse.json({ id: created.id }, { status: 201 });
 }
