@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { composerHandoffLabel, firstName, isHandoffNoteRecipient, pickHandoff } from "./pick";
+import { composerHandoffLabel, firstName, isHandoffNoteRecipient, nextCardHandoff, pickHandoff } from "./pick";
 
 const ME = "me";
 const andrew = { id: "andrew", name: "Andrew Gibbs" };
@@ -99,5 +99,18 @@ describe("isHandoffNoteRecipient", () => {
   it("ignores a handoffTo that isn't the post's editor (the handoff didn't save)", () => {
     expect(isHandoffNoteRecipient("andrew", ME, "andrew")).toBe(false);
     expect(isHandoffNoteRecipient(null, "andrew", "andrew")).toBe(false);
+  });
+});
+
+describe("nextCardHandoff", () => {
+  const rita = { id: "r", name: "Rita Reviewer" };
+  const base = { to: "Review", person: rita, others: [] };
+  it("offers the reviewer only when the post is in Review but still yours", () => {
+    expect(nextCardHandoff({ ...base, kind: "name-reviewer" })).toEqual(rita);
+  });
+  it("offers nothing for a send-to-review, an approve, or no handoff", () => {
+    expect(nextCardHandoff({ ...base, kind: "send-to-review" })).toBeNull();
+    expect(nextCardHandoff({ ...base, kind: "approve", to: "Ready To Publish" })).toBeNull();
+    expect(nextCardHandoff(null)).toBeNull();
   });
 });

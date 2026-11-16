@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import { trackUsage } from "@/lib/usage/track";
 import { rememberNextRows } from "@/lib/my-work/next-rows";
 import { sentOnLine } from "@/lib/my-work/sent-on";
+import { firstName, nextCardHandoff, type Handoff, type HandoffPerson } from "@/lib/handoff/pick";
 
 interface NextPost {
   id: string;
@@ -46,12 +47,18 @@ interface UpNextData {
  * share its title, so the card names each by platform and lists every one
  * still waiting — the curator went back to the production list to pick the
  * next platform even with the card up, because it only showed the title.
+ *
+ * Moved to Review from the status menu and still yours: the card also offers
+ * "Hand to <reviewer>" (`nextCardHandoff`), so the reviewer is told before
+ * you open the next one.
  */
 export function UpNext({
   itemId,
   status,
   editorUserId,
   onCard,
+  handoff = null,
+  onHandoff,
 }: {
   itemId: string;
   status: string;
@@ -59,6 +66,9 @@ export function UpNext({
   /** Told whether the next card is up, so the production run's card
    *  (RunNextCard) stays out of its way. */
   onCard?: (shown: boolean) => void;
+  /** The content page's handoff on offer (useHandoff) and its save. */
+  handoff?: Handoff | null;
+  onHandoff?: (patch: { status: string; editorUserId: string }) => Promise<boolean>;
 }) {
   const [data, setData] = useState<UpNextData | null>(null);
   // The post you just sent on (keyed, so the card never follows you to the next page).
@@ -66,6 +76,10 @@ export function UpNext({
   // What happened to it, in the card's first words ("Killed.", "Sent to review.").
   const [doneLine, setDoneLine] = useState("Off your plate.");
   const sentOn = sentOnId === itemId;
+  // Handed to a reviewer from the card (keyed like sentOnId).
+  const [handed, setHanded] = useState<{ itemId: string; name: string } | null>(null);
+  const handedHere = handed?.itemId === itemId ? handed : null;
+  const offer = sentOn && !handedHere && onHandoff ? nextCardHandoff(handoff) : null;
   // Was this post waiting on you at the last fetch? Only a true → false flip
   // shows the card, so opening a post that was never yours shows nothing.
   // Status and editor at that fetch say what changed when it flips.
@@ -117,16 +131,30 @@ export function UpNext({
 
   // Nothing else waiting: the card just says so, then gets out of the way.
   useEffect(() => {
-    if (!sentOn || data?.next) return;
+    if (!sentOn || data?.next || offer) return;
     const t = setTimeout(() => setSentOnId(null), 6000);
     return () => clearTimeout(t);
-  }, [sentOn, data?.next]);
+  }, [sentOn, data?.next, offer]);
+
+  async function handTo(person: HandoffPerson) {
+    if (!onHandoff) return;
+    trackUsage("handoff:name-reviewer-card");
+    if (await onHandoff({ status, editorUserId: person.id })) {
+      setHanded({ itemId, name: firstName(person.name) });
+    }
+  }
 
   return (
     <>
       <UpNextLink data={data} />
       {sentOn && data && (
-        <NextCard data={data} done={doneLine} onClose={() => setSentOnId(null)} />
+        <NextCard
+          data={data}
+          done={handedHere ? `Handed to ${handedHere.name} for review.` : doneLine}
+          handTo={offer}
+          onHandTo={handTo}
+          onClose={() => setSentOnId(null)}
+        />
       )}
     </>
   );
@@ -135,13 +163,34 @@ export function UpNext({
 function NextCard({
   data,
   done,
+  handTo,
+  onHandTo,
   onClose,
 }: {
   data: UpNextData;
   /** What just happened to the post you're on (sentOnLine). */
   done: string;
+  /** In Review but still yours: the reviewer to hand it to. */
+  handTo: HandoffPerson | null;
+  onHandTo: (person: HandoffPerson) => Promise<void>;
   onClose: () => void;
 }) {
+  const [busy, setBusy] = useState(false);
+  const handButton = handTo ? (
+    <button
+      type="button"
+      disabled={busy}
+      title={`It's in Review but still yours: makes ${handTo.name} the editor so they know it's waiting`}
+      onClick={async () => {
+        setBusy(true);
+        await onHandTo(handTo);
+        setBusy(false);
+      }}
+      className={buttonVariants({ size: "sm", variant: "outline" })}
+    >
+      Hand to {firstName(handTo.name)} for review
+    </button>
+  ) : null;
   const { next, remaining, sameSource } = data;
   const siblings = sameSource ? (data.siblings ?? []) : [];
   // Two or more siblings with a platform each: list them all, so you pick
@@ -211,8 +260,11 @@ function NextCard({
           ))}
         </div>
       )}
+      {!next && handButton && <div className="mt-2 flex justify-end">{handButton}</div>}
+      {next && byPlatform && handButton && <div className="mt-2 flex justify-end">{handButton}</div>}
       {next && !byPlatform && (
-        <div className="mt-2 flex justify-end">
+        <div className="mt-2 flex justify-end gap-1.5">
+          {handButton}
           <Link
             href={`/${next.brand}/content/${next.id}`}
             onClick={() => trackUsage("my-work:next-card:open", next.brand)}
