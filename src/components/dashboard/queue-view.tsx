@@ -657,7 +657,7 @@ export function QueueView({
                 : isRepostTab
                   ? "Elite evergreen — past hits that beat their format on this channel by ≥1.5× the top quartile."
                   : isSpokeTab
-                    ? "SPOKE algorithm — top (pillar × format) pairs scored by performance, freshness, and pair history."
+                    ? "Posts we recommend making from your best-performing videos. Nothing is created until you open one."
                     : "Triage new ideas — assign an editor or kill."}
           </p>
         </div>
