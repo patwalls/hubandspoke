@@ -16,6 +16,11 @@
  * Load is bounded: a burst of edits coalesces into one warm (debounce), only
  * one warm runs at a time, and warms start at least `minGapMs` apart — an
  * edit during a warm schedules exactly one more after it.
+ *
+ * Since 2026-11-16 an edit that names its brand expires only that brand's
+ * report (src/lib/production-report-tags.ts), so the warm rebuilds only the
+ * brands edited since the last warm — not all ~10 one after another, which
+ * left most brands cold for most of a minute after every edit.
  */
 
 export interface RewarmerOptions {
@@ -23,7 +28,8 @@ export interface RewarmerOptions {
   delayMs: number;
   /** Never start two warms closer together than this. */
   minGapMs: number;
-  run: () => Promise<void>;
+  /** Warm these brands' reports; `null` = every brand. */
+  run: (brands: string[] | null) => Promise<void>;
   now?: () => number;
 }
 
@@ -33,6 +39,18 @@ export function createRewarmer(opts: RewarmerOptions) {
   let running = false;
   let pending = false;
   let lastStart = -Infinity;
+  // Brands edited since the last warm started: a set, "all", or none.
+  let dirty: Set<string> | "all" | null = null;
+
+  const markDirty = (brands: string[] | null) => {
+    if (dirty === "all") return;
+    if (!brands) {
+      dirty = "all";
+      return;
+    }
+    dirty ??= new Set();
+    for (const b of brands) dirty.add(b);
+  };
 
   const arm = (ms: number) => {
     if (timer) clearTimeout(timer);
@@ -54,8 +72,10 @@ export function createRewarmer(opts: RewarmerOptions) {
     }
     running = true;
     lastStart = now();
+    const brands = dirty === "all" || dirty === null ? null : [...dirty];
+    dirty = null;
     try {
-      await opts.run();
+      await opts.run(brands);
     } catch {
       // A failed warm just means the next reader computes it, as before.
     } finally {
@@ -68,7 +88,9 @@ export function createRewarmer(opts: RewarmerOptions) {
   }
 
   return {
-    schedule() {
+    /** An edit touched `brands` (`null` / omitted = every brand). */
+    schedule(brands: string[] | null = null) {
+      markDirty(brands);
       if (running) {
         pending = true;
         return;
@@ -78,11 +100,17 @@ export function createRewarmer(opts: RewarmerOptions) {
   };
 }
 
-async function warmProductionOverHttp(): Promise<void> {
+/** The self-request URL path for a warm of `brands` (null = every brand). */
+export function warmPath(brands: string[] | null): string {
+  const base = "/api/warm?only=production";
+  return brands ? `${base}&brands=${brands.map(encodeURIComponent).join(",")}` : base;
+}
+
+async function warmProductionOverHttp(brands: string[] | null): Promise<void> {
   const secret = process.env.CRON_SECRET;
   if (!secret) return;
   const port = process.env.PORT || "3000";
-  const res = await fetch(`http://127.0.0.1:${port}/api/warm?only=production`, {
+  const res = await fetch(`http://127.0.0.1:${port}${warmPath(brands)}`, {
     headers: { authorization: `Bearer ${secret}` },
     signal: AbortSignal.timeout(120_000),
   });
@@ -96,8 +124,8 @@ const rewarmer = createRewarmer({
 });
 
 /** Called by invalidateReportCaches(). Noop in tests and without a secret. */
-export function scheduleProductionRewarm(): void {
+export function scheduleProductionRewarm(brands: string[] | null = null): void {
   if (process.env.NODE_ENV === "test" || process.env.VITEST) return;
   if (!process.env.CRON_SECRET) return;
-  rewarmer.schedule();
+  rewarmer.schedule(brands);
 }
