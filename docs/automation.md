@@ -2048,6 +2048,15 @@ Regression guard: `src/lib/services/underlord-auto-fire.regression.test.ts` grep
     mention (66) came ~6 s after assigning that same person, so editors got two
     emails per handoff. A mention with any words, link or image always emails.
     `enqueueNotification({ foldIntoRecentAssignment })`
+  - **The assigner sees how they were told (2026-11-17, build loop):**
+    `enqueueNotification` returns `"none" | "bell" | "email"`. `PUT
+    /api/production-items` awaits the `assigned` notification (an insert + a
+    queued job, not the send) and returns `assignedNotice: { name, delivery }`;
+    the post page toasts "<first name> was notified by email and in their bell"
+    (or warns when the person has no login, so no email went out) —
+    `src/lib/assigned-notice.ts`. Why: the curator followed 68 of 75
+    assignments in 30 days with a bare @-mention ~6 s later, after the
+    assignment email had already gone.
   - **A note sent with a handoff is bell-only for the reviewer (2026-11-15, build
     loop, editor-handoffs M1):** the content page's comment box offers
     **Comment & send to review → <reviewer>**; it saves the handoff first

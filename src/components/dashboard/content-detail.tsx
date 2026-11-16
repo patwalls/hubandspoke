@@ -132,6 +132,7 @@ import { recordVisit } from "@/lib/hooks/use-recent-items";
 import { startVisibleInterval } from "@/lib/visible-interval";
 import { validatePublishedLinkPlatform } from "@/lib/published-link-validation";
 import { trackUsage } from "@/lib/usage/track";
+import { assignedNoticeText } from "@/lib/assigned-notice";
 import { ViewsAgainstUsual, WhyItWon } from "@/components/dashboard/views-against-usual";
 import type { AgainstUsual } from "@/lib/winners/pick";
 import { acceptsPastedLink, isPagePaste, pastedPostLink } from "@/lib/paste-to-publish";
@@ -1911,6 +1912,13 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
         // "Reposted from" source card. That card reads from data.repostedFrom
         // which only the GET endpoint computes — refetch to surface it.
         if ("sourceType" in patch || "repostedFromItemId" in patch) void load();
+        // Assigned someone else: say they were told, so nobody has to
+        // follow up with a bare @-mention (assigned-notice.ts).
+        const notice = assignedNoticeText(payload.assignedNotice);
+        if (notice) {
+          if (payload.assignedNotice.delivery === "email") toast.success(notice);
+          else toast.warning(notice);
+        }
         if (payload.notionSyncWarning) {
           const message = `Saved. Notion: ${payload.notionSyncWarning}`;
           setSaveState({ kind: "error", message });

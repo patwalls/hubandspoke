@@ -50,11 +50,18 @@ function itemUrl(brand: string, contentItemId: string): string {
   return `${appBaseUrl()}/${brand}/content/${contentItemId}`;
 }
 
+/** How a notification reached its recipient: nothing (self, deactivated),
+ *  the bell only, or the bell plus a queued email. The post page reads it back
+ *  on an assignment so the assigner sees the editor was told. */
+export type NotificationDelivery = "none" | "bell" | "email";
+
 // Inserts a notification row and enqueues the matching email send on the
 // background job queue. Skips self-notifications and users without a
 // passwordHash (uninvited contractors synced from Notion).
-export async function enqueueNotification(input: EnqueueInput): Promise<void> {
-  if (input.actorUserId && input.actorUserId === input.userId) return;
+export async function enqueueNotification(
+  input: EnqueueInput,
+): Promise<NotificationDelivery> {
+  if (input.actorUserId && input.actorUserId === input.userId) return "none";
 
   const [recipient] = await db
     .select({ passwordHash: users.passwordHash, deactivatedAt: users.deactivatedAt })
@@ -62,7 +69,7 @@ export async function enqueueNotification(input: EnqueueInput): Promise<void> {
     .where(eq(users.id, input.userId))
     .limit(1);
   // Deactivated accounts get no notifications (in-app or email).
-  if (!recipient || recipient.deactivatedAt) return;
+  if (!recipient || recipient.deactivatedAt) return "none";
 
   const [inserted] = await db
     .insert(notifications)
@@ -76,9 +83,9 @@ export async function enqueueNotification(input: EnqueueInput): Promise<void> {
     })
     .returning({ id: notifications.id });
 
-  if (!recipient.passwordHash) return;
-  if (!inserted) return;
-  if (input.inAppOnly) return;
+  if (!inserted) return "none";
+  if (!recipient.passwordHash) return "bell";
+  if (input.inAppOnly) return "bell";
 
   if (input.foldIntoRecentAssignment && input.contentItemId) {
     const [assigned] = await db
@@ -96,10 +103,11 @@ export async function enqueueNotification(input: EnqueueInput): Promise<void> {
         ),
       )
       .limit(1);
-    if (assigned) return;
+    if (assigned) return "bell";
   }
 
   await enqueue("notification-send", { notificationId: inserted.id });
+  return "email";
 }
 
 /**

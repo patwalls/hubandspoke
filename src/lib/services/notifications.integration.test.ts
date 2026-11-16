@@ -90,3 +90,33 @@ describe("enqueueNotification — one email per assignment", () => {
     expect(enqueueMock).toHaveBeenCalledTimes(2);
   });
 });
+
+// The post page tells the assigner how the new editor heard (assigned-notice.ts),
+// so the return value has to match what actually happened.
+describe("enqueueNotification — reports how the person was told", () => {
+  beforeEach(() => enqueueMock.mockClear());
+
+  it("email when the person can sign in", async () => {
+    const { editor, curator, item } = await setup();
+    expect(await assign(editor.id, item.id, curator.id)).toBe("email");
+    expect(enqueueMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("bell only when the person has no login yet", async () => {
+    const { curator, item } = await setup();
+    const contractor = await createTestUser({});
+    expect(await assign(contractor.id, item.id, curator.id)).toBe("bell");
+    expect(enqueueMock).not.toHaveBeenCalled();
+  });
+
+  it("none when you assign yourself", async () => {
+    const { curator, item } = await setup();
+    expect(await assign(curator.id, item.id, curator.id)).toBe("none");
+  });
+
+  it("bell for a bare @mention folded into a fresh assignment", async () => {
+    const { editor, curator, item } = await setup();
+    await assign(editor.id, item.id, curator.id);
+    expect(await mention(editor.id, item.id, curator.id, true)).toBe("bell");
+  });
+});

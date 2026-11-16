@@ -16,7 +16,10 @@ import {
   buildViewPredictorContext,
   predictViews,
 } from "@/lib/services/view-predictor";
-import { enqueueNotification } from "@/lib/services/notifications";
+import {
+  enqueueNotification,
+  type NotificationDelivery,
+} from "@/lib/services/notifications";
 import { resolveEditor } from "@/lib/services/assignees";
 import { normalizeFormatForWrite } from "@/lib/services/format-validation";
 import { findCrossAccountDuplicate } from "@/lib/services/production-items-dedup";
@@ -1052,22 +1055,29 @@ export async function PUT(request: NextRequest) {
       }
     }
 
-    // Fire assignment notification after the write commits. Fire-and-forget —
-    // email send is handled inside enqueueNotification and must not block the
-    // save response.
+    // Notify the new editor after the write commits. Awaited (a row insert +
+    // a queued email job, milliseconds — the email itself sends on the worker)
+    // so the response can say who was told and how: the post page shows
+    // "<name> notified by email" instead of leaving the assigner to ping them
+    // with a bare @-mention. A failure never fails the save.
+    let assignedNotice: { name: string | null; delivery: NotificationDelivery } | null =
+      null;
     if (
       assignmentDiff?.editorChanged &&
       assignmentDiff.nextEditorUserId
     ) {
-      void enqueueNotification({
-        userId: assignmentDiff.nextEditorUserId,
-        kind: "assigned",
-        contentItemId: id,
-        actorUserId: actorUserId,
-        payload: { kind: "assigned", title: updated.title },
-      }).catch((err) =>
-        console.error("[assignment] editor notify failed", err)
-      );
+      try {
+        const delivery = await enqueueNotification({
+          userId: assignmentDiff.nextEditorUserId,
+          kind: "assigned",
+          contentItemId: id,
+          actorUserId: actorUserId,
+          payload: { kind: "assigned", title: updated.title },
+        });
+        assignedNotice = { name: editorChangeNames?.to ?? null, delivery };
+      } catch (err) {
+        console.error("[assignment] editor notify failed", err);
+      }
     }
 
     // Kick off a platform-API metrics fetch when the row has just become
@@ -1116,6 +1126,7 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({
       ...updated,
       notionSyncWarning: warnings.length ? warnings.join("; ") : null,
+      assignedNotice,
     });
   } catch (error) {
     console.error("Error updating production item:", error);
