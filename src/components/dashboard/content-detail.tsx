@@ -136,6 +136,7 @@ import { ViewsAgainstUsual, WhyItWon } from "@/components/dashboard/views-agains
 import type { AgainstUsual } from "@/lib/winners/pick";
 import { acceptsPastedLink, isPagePaste, pastedPostLink } from "@/lib/paste-to-publish";
 import { HandoffButton, useHandoff } from "./handoff-button";
+import { ReviewDeliveryLink } from "./review-delivery-link";
 import { LearnedEditsChip } from "./learned-edits-chip";
 import { leavePublishedConfirm } from "@/lib/status/leave-published";
 import { CrossPostPasteLinks } from "./cross-post-paste-links";
@@ -2644,6 +2645,8 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
               handoff={handoff}
               onHandoff={runHandoff}
             />
+            {/* In Review: the link the editor handed the work back with. */}
+            <ReviewDeliveryLink brand={brand} itemId={contentId} status={status} refreshKey={activityRefreshKey} />
 
             {/* Reconciler gave up auto-detecting this Scheduled post going
              *  live (aged past its window). Prompts a manual check/publish. */}
