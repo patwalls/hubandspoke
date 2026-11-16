@@ -198,7 +198,7 @@ export function DashboardNav({
                 <path d="M16 3.549L7.12 20.600" />
               </svg>
             </span>
-            <div className="flex items-center gap-1 min-w-0 overflow-x-auto">
+            <div className="flex items-center gap-1 min-w-0 overflow-x-auto thin-scrollbar">
               {brands.filter((b) => !b.parent).map((brand) => {
                 const isActive = currentBrand === brand.slug;
                 const hrefFor = (slug: string) =>

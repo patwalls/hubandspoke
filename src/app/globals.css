@@ -300,3 +300,29 @@
 .no-scrollbar::-webkit-scrollbar {
   display: none; /* WebKit */
 }
+/* Slim horizontal scrollbar that sits BELOW the content instead of on top
+   of it (brand row in the top nav). Styling ::-webkit-scrollbar turns
+   macOS's overlay scrollbar into a classic one that reserves its own strip.
+   Don't set scrollbar-width/scrollbar-color for Chrome — those make it
+   ignore the ::-webkit-scrollbar rules. */
+.thin-scrollbar::-webkit-scrollbar {
+  height: 6px;
+}
+.thin-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.thin-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 9999px;
+}
+.thin-scrollbar:hover::-webkit-scrollbar-thumb {
+  background: color-mix(in oklab, var(--muted-foreground) 50%, transparent);
+}
+/* Firefox only: its macOS scrollbar always overlays, so pad the row so the
+   bar lands under the pills. */
+@supports (-moz-appearance: none) {
+  .thin-scrollbar {
+    scrollbar-width: thin;
+    padding-bottom: 6px;
+  }
+}
