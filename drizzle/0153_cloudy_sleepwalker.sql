@@ -1,0 +1,1 @@
+ALTER TABLE "formats" ADD COLUMN "clip_post_skill_check" jsonb;

@@ -399,6 +399,7 @@ export interface CreateTestFormatOptions {
   designTemplate?: (typeof formats.$inferInsert)["designTemplate"];
   /** Stored "what editors keep changing" rules (format-editor-rules job). */
   editorRules?: (typeof formats.$inferInsert)["editorRules"];
+  clipPostSkillCheck?: (typeof formats.$inferInsert)["clipPostSkillCheck"];
   createdAt?: Date;
 }
 
@@ -426,6 +427,7 @@ export async function createTestFormat(
       ctaFixedUrl: opts.ctaFixedUrl ?? null,
       designTemplate: opts.designTemplate ?? null,
       editorRules: opts.editorRules ?? null,
+      clipPostSkillCheck: opts.clipPostSkillCheck ?? null,
       ...(opts.createdAt ? { createdAt: opts.createdAt } : {}),
     })
     .returning();

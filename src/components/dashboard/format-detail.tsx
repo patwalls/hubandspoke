@@ -61,6 +61,7 @@ import { SkillGuideEditor } from "./skill-guide-editor";
 import { recordVisit } from "@/lib/hooks/use-recent-items";
 import { useCanEditBrand } from "@/components/brand-access";
 import { FormatTemplatesSection } from "@/components/design-editor/format-templates-section";
+import { ClipPostRouteRow } from "@/components/clip-editor/clip-post-route-row";
 import { NewsletterTemplateSection } from "@/components/dashboard/newsletter-template-section";
 import { FormatEditorRulesSection } from "@/components/dashboard/format-editor-rules";
 import type { FormatEditorRules } from "@/lib/db/schema";
@@ -319,6 +320,8 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
 
   const [editorPopoverOpen, setEditorPopoverOpen] = useState(false);
   const [channelsPopoverOpen, setChannelsPopoverOpen] = useState(false);
+  // Bumped after the Skill or accounts save, so "Opens in" re-reads.
+  const [routeRefresh, setRouteRefresh] = useState(0);
   const [parentPopoverOpen, setParentPopoverOpen] = useState(false);
   const [saveState, setSaveState] = useState<
     | { kind: "idle" }
@@ -845,6 +848,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
           return false;
         }
         setSaveState({ kind: "saved" });
+        if ("instructions" in patch || "accountChannels" in patch) setRouteRefresh((n) => n + 1);
         // Name rename cascades to productionItems.format on the server, so
         // a rename invalidates the items list. Reload to reflect the
         // changed strings. Other patches don't affect joined data.
@@ -1536,6 +1540,7 @@ export function FormatDetail({ brand, formatId, statusPalette }: FormatDetailPro
               </PopoverContent>
             </Popover>
             </PropertyRow>
+            <ClipPostRouteRow formatId={formatId} refreshKey={routeRefresh} />
           </PropertyRowGroup>
           <PropertyRowGroup>
             <PropertyRow label="View threshold" tooltip="When a post in this format hits this many views, Hub & Spoke automatically creates a repurposed production item and kicks off the draft algorithm. Checked every hour. Leave blank to disable.">

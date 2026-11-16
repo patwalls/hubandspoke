@@ -18,6 +18,11 @@ import {
 import type { pickPostClip } from "./clip-editor/pick-post-clip";
 
 const enqueue = vi.fn();
+// The Skill check is a Haiku call: tests only read verdicts they seed.
+vi.mock("@/lib/services/clip-editor/skill-clip-check", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/services/clip-editor/skill-clip-check")>();
+  return { ...actual, skillChecksFor: (rows: Parameters<typeof actual.skillChecksFor>[0]) => actual.skillChecksFor(rows, { classify: async () => null }) };
+});
 vi.mock("@/jobs/enqueue", () => ({ enqueue: (...args: unknown[]) => enqueue(...args) }));
 const { createNewPost, listNewPostFormats, listNewPostPillars, NewPostError } = await import("./new-post");
 

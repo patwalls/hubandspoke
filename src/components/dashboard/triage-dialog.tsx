@@ -4,7 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useFeatureFlags } from "@/components/clip-editor/use-feature-flags";
 import { useDesignTemplates } from "@/components/design-editor/use-design-templates";
-import { useDialogUrl } from "./use-dialog-url";
+import { useClipPostFormats } from "@/components/clip-editor/use-clip-post-formats";
+import { CLIP_PARAM } from "@/components/clip-editor/drafts";
+import { replaceUrlParam, useDialogUrl } from "./use-dialog-url";
 
 // Lazy: only a browser whose user has the `designEditor` flag AND opens a
 // designable item ever downloads the editor.
@@ -12,8 +14,13 @@ const DesignEditorDialog = dynamic(
   () => import("@/components/design-editor/design-editor-dialog").then((m) => m.DesignEditorDialog),
   { ssr: false },
 );
+// Same for the clip editor and video posts on X.
+const ClipEditorDialog = dynamic(
+  () => import("@/components/clip-editor/clip-editor-dialog").then((m) => m.ClipEditorDialog),
+  { ssr: false },
+);
 import Link from "next/link";
-import { ExternalLinkIcon } from "lucide-react";
+import { ExternalLinkIcon, Loader2Icon } from "lucide-react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -129,21 +136,42 @@ function showTriageToast(
 }
 
 /**
- * Entry point for the queue's item modal. For users with the `designEditor`
- * flag, on formats that have a design template, it opens the in-app design
- * editor (AI-drafted carousel); for everyone else — and whenever the editor
- * can't handle the item — it is exactly the classic dialog below, unchanged.
+ * Entry point for the queue's item modal (All / Triggered tabs). A
+ * repurposed Idea whose format opens in the clip editor (Share The BIG IDEA
+ * w/ video intro, … — `formatsForClipPosts`) opens it the way a Repurposed
+ * candidate does: the Skill's stretch (the intro) is picked and linked to
+ * this item, then the editor opens on the Post tab. With the `designEditor`
+ * flag, formats that have a design template open the in-app design editor.
+ * Everyone else — and whenever an editor can't handle the item — gets the
+ * classic dialog below, unchanged.
  */
 export function TriageDialog(props: TriageDialogProps) {
   const flags = useFeatureFlags();
   // `?item=<id>` — a link for the open post; Back / close returns to the queue.
   useDialogUrl({ param: "item", id: props.item.id, open: props.open, onOpenChange: props.onOpenChange });
   const templates = useDesignTemplates(!!flags?.designEditor, props.item.brand || props.brand);
+  const clipPostFormats = useClipPostFormats(!!flags?.clipEditor, props.item.brand || props.brand);
   const [unsupported, setUnsupported] = useState<Set<string>>(() => new Set());
   const { item } = props;
   // The design editor drafts (and saves) the moment it opens — view-only
   // users get the classic dialog, whose actions render disabled.
   const canEdit = useCanEditBrand(item.brand || (props.brand === "all" ? null : props.brand));
+  const onUnsupported = (message?: string) => {
+    if (message) toast.message("Opening the classic view", { description: message });
+    setUnsupported((prev) => new Set(prev).add(item.id));
+  };
+  const useClipEditor =
+    canEdit &&
+    !!flags?.clipEditor &&
+    item.sourceType === "repurposed" &&
+    item.status === "Idea" &&
+    !item.sourceClipIdeaId &&
+    !!item.format &&
+    !!clipPostFormats?.has(item.format) &&
+    !unsupported.has(item.id);
+  if (useClipEditor) {
+    return <ClipPostFromItem {...props} onUnsupported={onUnsupported} />;
+  }
   const useDesigner =
     canEdit &&
     !!flags?.designEditor &&
@@ -160,14 +188,74 @@ export function TriageDialog(props: TriageDialogProps) {
         productionItemId={item.id}
         brand={props.brand}
         onDone={props.onDone}
-        onUnsupported={(message) => {
-          if (message) toast.message("Opening the classic view", { description: message });
-          setUnsupported((prev) => new Set(prev).add(item.id));
-        }}
+        onUnsupported={onUnsupported}
       />
     );
   }
   return <ClassicTriageDialog {...props} />;
+}
+
+/** Links the item to a clip idea (AI picks the stretch the format uses — a
+ *  few seconds on first open), then hands off to the clip editor. Twin of
+ *  spoke-triage-dialog.tsx's ClipPostFromCandidate. */
+function ClipPostFromItem({
+  open,
+  onOpenChange,
+  item,
+  brand,
+  onDone,
+  onUnsupported,
+}: TriageDialogProps & { onUnsupported: (message?: string) => void }) {
+  // Kept across close/re-open: the item's link to its clip idea is permanent.
+  const [clipIdeaId, setClipIdeaId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!open || clipIdeaId) return;
+    let cancelled = false;
+    // Fetch the editor's code while the clip is being picked.
+    void import("@/components/clip-editor/clip-editor-dialog");
+    void (async () => {
+      try {
+        const res = await fetch("/api/clip-editor/from-item", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ productionItemId: item.id }),
+        });
+        const json = (await res.json().catch(() => ({}))) as { clipIdeaId?: string; error?: string };
+        if (cancelled) return;
+        if (!res.ok || !json.clipIdeaId) return onUnsupported(json.error);
+        setClipIdeaId(json.clipIdeaId);
+        replaceUrlParam(CLIP_PARAM, json.clipIdeaId);
+      } catch {
+        if (!cancelled) onUnsupported();
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, item.id, clipIdeaId]);
+
+  if (!clipIdeaId) {
+    return (
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="flex h-[94vh] w-[97vw] max-w-[97vw] flex-col items-center justify-center gap-3 p-0 sm:max-w-[min(1560px,97vw)]">
+          <DialogTitle className="sr-only">The Post</DialogTitle>
+          <Loader2Icon className="size-5 animate-spin text-muted-foreground" />
+          <span className="text-sm text-muted-foreground">Picking the clip for {item.format}…</span>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+  return (
+    <ClipEditorDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      clipIdeaId={clipIdeaId}
+      brand={item.brand || brand}
+      onDone={onDone}
+      onUnsupported={() => onUnsupported("The clip editor couldn't open this video.")}
+    />
+  );
 }
 
 function ClassicTriageDialog({

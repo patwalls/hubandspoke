@@ -557,21 +557,16 @@ export function QueueView({
       if (item.postType === "newsletter") counts.newsletters += 1;
       const source = item.sourceType ?? "original";
       if (source === "cross_post" || source === "repost") continue;
-      // Repurposed rows fork on whether a clip-idea is attached:
-      //   - With sourceClipIdeaId → belongs in the row's format-specific
-      //     clip tab (matched by format name). Falls into nothing visible
-      //     if the row's format isn't currently clippable (rare — drift
-      //     between clip generation time and the current flag).
-      //   - Without → "Triggered" tab.
+      // Repurposed rows fork on whether a clip-idea is attached AND its
+      // format has a clip tab (is clippable):
+      //   - Yes → the row's format-specific clip tab (matched by name).
+      //   - No → "Triggered" — incl. a triggered row the clip editor has
+      //     linked a clip to (Share The BIG IDEA, not clippable), so
+      //     opening it doesn't make it vanish from the tab.
       if (source === "repurposed") {
-        if (item.sourceClipIdeaId) {
-          const key = item.format
-            ? formatNameToSource.get(item.format)
-            : undefined;
-          if (key) counts[key] = (counts[key] ?? 0) + 1;
-        } else {
-          counts.repurposed += 1;
-        }
+        const key = item.sourceClipIdeaId && item.format ? formatNameToSource.get(item.format) : undefined;
+        if (key) counts[key] = (counts[key] ?? 0) + 1;
+        else counts.repurposed += 1;
       }
     }
     counts.cross_post = crossPostFiltered.length;
@@ -588,13 +583,14 @@ export function QueueView({
     clippableFormats,
   ]);
 
+  const clipFormatNames = new Set(clippableFormats.map((f) => f.name));
   const filtered = baseFiltered.filter((item) => {
     if (selectedSource === "all") return true;
     if (selectedSource === "newsletters") return item.postType === "newsletter";
     const source = item.sourceType ?? "original";
-    // Triggered tab: repurposed rows without a clip-idea attached.
+    // Triggered tab: repurposed rows that don't belong to a clip tab.
     if (selectedSource === "repurposed") {
-      return source === "repurposed" && !item.sourceClipIdeaId;
+      return source === "repurposed" && !(item.sourceClipIdeaId && item.format && clipFormatNames.has(item.format));
     }
     // Per-format clip tabs: filter by clip-idea presence AND format name.
     const formatNameForTab = currentClipFormatName(selectedSource);

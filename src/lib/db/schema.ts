@@ -24,6 +24,17 @@ import type { DiarizationState, TranscriptSpeaker } from "@/lib/diarization/type
 import type { NewsletterSection, NewsletterTemplate } from "@/lib/newsletter-template";
 import type { SupportingMoment } from "@/lib/clip-stitch";
 
+/** formats.clip_post_skill_check — see skill-clip-check.ts. */
+export interface ClipPostSkillCheck {
+  /** Hash of the Skill (+ the check's version) this verdict was read from. */
+  skillHash: string;
+  /** clip = cuts part of the video; whole_video = posts all of it; none = no video. */
+  verdict: "clip" | "whole_video" | "none";
+  /** One plain sentence, shown on the format page ("Opens in …, because …"). */
+  reason: string;
+  checkedAt: string;
+}
+
 export const productionItems = pgTable(
   "production_items",
   {
@@ -1403,6 +1414,13 @@ export const formats = pgTable(
     // format's template"); never holds cuts or a specific source.
     clipTemplate: jsonb("clip_template").$type<ClipLook>(),
     clipTemplateUpdatedAt: timestamp("clip_template_updated_at", { withTimezone: true }),
+    // Haiku's read of the Skill: does this format post a clip CUT from the
+    // source video (→ the in-app clip editor), the whole video, or no video?
+    // One of the two signals `formatsForClipPosts` uses (the other is the
+    // format's published video history). Keyed by a hash of the Skill, so
+    // it is re-read only after the Skill changes. Written lazily by
+    // src/lib/services/clip-editor/skill-clip-check.ts; never set by hand.
+    clipPostSkillCheck: jsonb("clip_post_skill_check").$type<ClipPostSkillCheck>(),
     // What editors keep changing in this format's drafts, as 3–5 writing
     // rules (drafts-learn M4). Written weekly by the `format-editor-rules`
     // cron (src/lib/services/draft-algorithm/editor-rules.ts) from recent
