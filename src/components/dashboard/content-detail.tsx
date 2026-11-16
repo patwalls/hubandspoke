@@ -2668,7 +2668,14 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
 
             {/* The next post waiting on you, after the status: work through
              *  My Work without going back to a list. */}
-            <UpNext itemId={contentId} status={status} editorUserId={editorUserId} onCard={setUpNextCard} />
+            <UpNext
+              itemId={contentId}
+              status={status}
+              editorUserId={editorUserId}
+              onCard={setUpNextCard}
+              handoff={handoff}
+              onHandoff={runHandoff}
+            />
             {/* Opened from In Production: after a status change, the next
              *  post in that status group (production-run M3). */}
             <RunNextCard brand={brand} itemId={contentId} status={status} suppressed={upNextCard} />

@@ -112,3 +112,16 @@ export function isHandoffNoteRecipient(
 ): boolean {
   return !!handoffTo && handoffTo === editorUserId && recipientId === handoffTo;
 }
+
+/**
+ * Who My Work's next card (UpNext) offers to hand the post to, the moment it
+ * leaves your plate (editor-handoffs M3). Only after a move to Review from the
+ * status menu that left you holding it (`name-reviewer`): a designer moved 7
+ * posts to Review in a minute that way, clicking the card's "Open next" each
+ * time, and never the "Hand to …" button beside the status — the card is where
+ * their eyes are. Never a send-to-review or an approve: by the time the card
+ * is up the status has already moved.
+ */
+export function nextCardHandoff(handoff: Handoff | null): HandoffPerson | null {
+  return handoff?.kind === "name-reviewer" ? handoff.person : null;
+}
