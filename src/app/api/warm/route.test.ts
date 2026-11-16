@@ -54,6 +54,18 @@ describe("GET /api/warm", () => {
     expect(calls).toEqual(["my-first-million:true", "starter-story:true"]);
   });
 
+  it("?only=production&brands= rebuilds just the brands an edit expired", async () => {
+    const { GET } = await import("./route");
+    const res = await GET(
+      new NextRequest("http://localhost/api/warm?only=production&brands=my-first-million,not-a-brand", {
+        headers: { authorization: "Bearer s3cret" },
+      }),
+    );
+    expect(res.status).toBe(200);
+    const calls = productionReport.mock.calls.map(([b, x]) => `${b}:${x}`);
+    expect(calls).toEqual(["my-first-million:true"]);
+  });
+
   it("?only=production without the secret is a 401 noop", async () => {
     const { GET } = await import("./route");
     const res = await GET(new NextRequest("http://localhost/api/warm?only=production"));

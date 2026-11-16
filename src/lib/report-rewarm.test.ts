@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createRewarmer } from "./report-rewarm";
+import { createRewarmer, warmPath } from "./report-rewarm";
 
 // Every edit expires the production report for every brand; the re-warm
 // rebuilds it so the next reader doesn't wait. It must coalesce bursts and
@@ -72,5 +72,36 @@ describe("createRewarmer", () => {
     w.schedule();
     await vi.advanceTimersByTimeAsync(10);
     expect(run).toHaveBeenCalledTimes(2);
+  });
+
+  it("warms only the brands edited since the last warm", async () => {
+    const { w, run, finish } = setup();
+    w.schedule(["starter-story"]);
+    w.schedule(["matg", "starter-story"]);
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(run).toHaveBeenCalledWith(["starter-story", "matg"]);
+    // An edit during the warm is warmed next, alone.
+    w.schedule(["skill-leap"]);
+    await finish();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(run).toHaveBeenLastCalledWith(["skill-leap"]);
+  });
+
+  it("an edit that can't name its brand makes the next warm cover every brand", async () => {
+    const { w, run } = setup();
+    w.schedule(["starter-story"]);
+    w.schedule();
+    w.schedule(["matg"]);
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(run).toHaveBeenCalledWith(null);
+  });
+});
+
+describe("warmPath", () => {
+  it("names the brands, or none for every brand", () => {
+    expect(warmPath(null)).toBe("/api/warm?only=production");
+    expect(warmPath(["starter-story", "matg"])).toBe(
+      "/api/warm?only=production&brands=starter-story,matg",
+    );
   });
 });

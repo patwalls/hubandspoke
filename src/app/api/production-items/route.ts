@@ -443,7 +443,8 @@ export async function PUT(request: NextRequest) {
       );
     }
 
-    const guard = await requireBrandEdit(await brandOfProductionItem(id));
+    const brandBefore = await brandOfProductionItem(id);
+    const guard = await requireBrandEdit(brandBefore);
     if (guard.response) return guard.response;
     // Re-pointing the item at another account needs edit on that account's
     // brand too (it may be a sibling brand's channel).
@@ -1110,7 +1111,8 @@ export async function PUT(request: NextRequest) {
       }
     }
 
-    invalidateReportCaches();
+    // Only this post's brand (before and after a move) goes cold.
+    invalidateReportCaches({ brands: [brandBefore, updated?.brand] });
     return NextResponse.json({
       ...updated,
       notionSyncWarning: warnings.length ? warnings.join("; ") : null,
@@ -1141,14 +1143,15 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    const guard = await requireBrandEdit(await brandOfProductionItem(id));
+    const brand = await brandOfProductionItem(id);
+    const guard = await requireBrandEdit(brand);
     if (guard.response) return guard.response;
 
     await db
       .delete(productionItems)
       .where(eq(productionItems.id, id));
 
-    invalidateReportCaches();
+    invalidateReportCaches({ brands: [brand] });
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("Error deleting production item:", error);

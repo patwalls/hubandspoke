@@ -6,6 +6,7 @@ import {
 } from "@/lib/services/view-predictor";
 import { loadFormatOdds } from "@/lib/services/clip-odds";
 import { oddsKey } from "@/lib/clip-odds";
+import { PRODUCTION_REPORT_TAG, productionReportTag } from "@/lib/production-report-tags";
 
 /**
  * Production-pipeline report (the queue page's primary payload), 60s-cached.
@@ -60,9 +61,34 @@ export async function computeProductionReport(brand: string, excludeIdea: boolea
     return { items: withPredictions };
 }
 
-export const getProductionReportCached = compressedCache(
-  async (brand: string, excludeIdea: boolean) =>
-    computeProductionReport(brand, excludeIdea),
-  ["production-report"],
-  { revalidate: 60, tags: ["production-report"] },
-);
+type ProductionReport = Awaited<ReturnType<typeof computeProductionReport>>;
+
+// One cache per brand so an edit can expire just its own brand (plus /all):
+// unstable_cache tags are fixed when the cache is made, not per call. Until
+// 2026-11-16 every edit anywhere expired every brand's report at once, and
+// the after-edit re-warm rebuilt them one by one, so most brands sat cold
+// for most of a minute after any edit (sentry-tx p95 6 s, p50 59 ms).
+const perBrand = new Map<string, (excludeIdea: boolean) => Promise<ProductionReport>>();
+// `brand` comes from the URL; don't let junk values grow the map forever.
+const MAX_BRAND_CACHES = 200;
+
+function brandCache(brand: string) {
+  const hit = perBrand.get(brand);
+  if (hit) return hit;
+  const fn = compressedCache(
+    async (excludeIdea: boolean) => computeProductionReport(brand, excludeIdea),
+    ["production-report", brand],
+    // The shared tag still expires every brand at once (writes that don't
+    // say which brands they touched) — src/lib/production-report-tags.ts.
+    { revalidate: 60, tags: [PRODUCTION_REPORT_TAG, productionReportTag(brand)] },
+  );
+  if (perBrand.size < MAX_BRAND_CACHES) perBrand.set(brand, fn);
+  return fn;
+}
+
+export function getProductionReportCached(
+  brand: string,
+  excludeIdea: boolean,
+): Promise<ProductionReport> {
+  return brandCache(brand)(excludeIdea);
+}

@@ -672,7 +672,7 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
 
 ### Production report — queue / In Production Est. Views (on demand, 60 s cache)
 
-- **What:** `computeProductionReport` in `src/lib/services/production-report.ts` — the pipeline rows plus a views prediction per unpublished row from `predictViews` (`src/lib/services/view-predictor.ts`: log-median blend of same pillar / format + platform / format / platform / brand cohorts, p25–p75 range). Read through `getProductionReportCached` (60 s `compressedCache`, i.e. gzipped `unstable_cache`, tag `production-report`) by the queue SSR, `/api/reports/production` and `/api/warm`. Gzipped since 2026-11-08: Starter Story's report reached 2.4 MB on 2026-11-07, over Next's 2 MB entry limit, so nothing was cached and each request recomputed it (25–83 s under R14, H12/H15 on the queue page, React #412 in the browser). No LLM, no writes.
+- **What:** `computeProductionReport` in `src/lib/services/production-report.ts` — the pipeline rows plus a views prediction per unpublished row from `predictViews` (`src/lib/services/view-predictor.ts`: log-median blend of same pillar / format + platform / format / platform / brand cohorts, p25–p75 range). Read through `getProductionReportCached` (60 s `compressedCache`, i.e. gzipped `unstable_cache`, tags `production-report` + `production-report:<brand>`, one cache per brand since 2026-11-16) by the queue SSR, `/api/reports/production` and `/api/warm`. Gzipped since 2026-11-08: Starter Story's report reached 2.4 MB on 2026-11-07, over Next's 2 MB entry limit, so nothing was cached and each request recomputed it (25–83 s under R14, H12/H15 on the queue page, React #412 in the browser). No LLM, no writes.
 - **Clip-idea rows (changed 2026-11-07):** they get the same history-based prediction. Before, they showed `clip_ideas.estimated_views` (the clip writer's own guess) as "high confidence"; against 473 published idea clips it was ~10× high at the median, >3× high on 86%, and uncorrelated with which clips did better inside an account (corr 0.05), while the brand + format + platform 90-day median was ~1.5× off. Re-run `docs/build/sql/clip-views.sql` before changing which number wins; `production-report.test.ts` pins it. The writer still stores `estimated_views` (anchored on real outcomes since hook-v5) but nothing orders by it any more — see Clip odds below.
 - **Clip odds on clip-idea rows (2026-11-07, clip-odds M2–M3):** `loadFormatOdds(brand)` (`src/lib/services/clip-odds.ts`, one read of published posts with views in the last 455 days, brand or "all") feeds `computeFormatOdds` (pure, `src/lib/clip-odds.ts`): per brand + format, of its last ≤20 clips in 365 days, how many got more views than the account's usual post on their platform (median of every post on that brand + platform in the 90 days before the clip, ≥5 posts); also the format's median / p25–p75 and today's usual. <5 scorable clips → no record. Clip rows carry it as `clipOdds` (~150 bytes each); the Queue's default sort keeps a video's rows together and puts the format with the best odds first; the Format cell shows "11/20 beat usual" (green ≥60%, amber ≤40%, tooltip = the sentence). Fail-soft (no chip). Why not order by anything about the idea itself: on the 315 published idea clips with a baseline, within one video neither the writer's guess (corr −0.06 with lift over the format's usual), clip length (−0.08), hook length (0.09) nor a spoken intro (0.03) told the winners apart; position in the video weakly (−0.17). Format on the account differs a lot (MATG Podcast Clip With Hook ~0.6× its Instagram usual, X Quotables at par). `docs/build/sql/clip-odds.sql` re-runs that check.
 
@@ -2663,6 +2663,24 @@ has a row in `docs/features.md`'s cleanup backlog.
   is applied. Noop without `CRON_SECRET` and under Vitest. Unit:
   `src/lib/report-rewarm.test.ts`, `src/app/api/warm/route.test.ts`; e2e
   `tests/e2e/production-rewarm.spec.ts`.
+  **One brand at a time (2026-11-16, build loop, project production-instant
+  M1):** the re-warm didn't move the p95 (still 6.0 s on 95 samples, p50
+  59 ms): one shared tag meant any edit anywhere expired ~10 brands at once
+  and the sequential warm left most of them cold for most of a minute. Each
+  brand's report is now its own `unstable_cache` with tags
+  `production-report` + `production-report:<brand>`
+  (`src/lib/production-report-tags.ts`). `invalidateReportCaches({ brands })`
+  expires only those brands plus `production-report:all` (the `/all` sum);
+  called without brands (or when the brand lookup is empty) it expires the
+  shared tag as before. PUT / DELETE `/api/production-items` (the curator's
+  hot path) pass the post's brand before and after the write; the other
+  write routes still expire everything (M2). The re-warm remembers which
+  brands were expired since the last warm and requests
+  `/api/warm?only=production&brands=a,b` (an unscoped expiry makes it warm
+  every brand). Unit: `production-report-tags.test.ts`,
+  `services/production-report-cache.test.ts`, `report-rewarm.test.ts`,
+  `warm/route.test.ts`; e2e `production-rewarm.spec.ts` (an edit shows on
+  its brand's and /all's next read).
   Why: the first user after every deploy paid ~2.3s of lazy route-module
   init PLUS cold caches on every dashboard route ("everything feels slow
   right after a deploy" — 2026-08-09). Re-callable any time; safe noop

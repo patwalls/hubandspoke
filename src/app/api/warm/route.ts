@@ -36,13 +36,17 @@ export async function GET(request: NextRequest) {
   const brands = await getEnabledBrands();
 
   // `?only=production` — the after-edit re-warm (src/lib/report-rewarm.ts):
-  // an edit expired the production report for every brand, so rebuild just
-  // In Production's key (excludeIdea=true). Sequential, one connection.
+  // rebuild just In Production's key (excludeIdea=true) for the brands the
+  // edits expired (`&brands=a,b`; without it, every brand). Sequential, one
+  // connection.
   if (request.nextUrl.searchParams.get("only") === "production") {
     const { getProductionReportCached } = await import(
       "@/lib/services/production-report"
     );
-    for (const b of brands.map((x) => x.slug)) {
+    const only = request.nextUrl.searchParams.get("brands");
+    const wanted = only ? new Set(only.split(",")) : null;
+    const slugs = brands.map((x) => x.slug).filter((b) => !wanted || wanted.has(b));
+    for (const b of slugs) {
       const t = Date.now();
       try {
         await getProductionReportCached(b, true);
