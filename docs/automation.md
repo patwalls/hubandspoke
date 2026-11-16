@@ -2673,8 +2673,14 @@ has a row in `docs/features.md`'s cleanup backlog.
   expires only those brands plus `production-report:all` (the `/all` sum);
   called without brands (or when the brand lookup is empty) it expires the
   shared tag as before. PUT / DELETE `/api/production-items` (the curator's
-  hot path) pass the post's brand before and after the write; the other
-  write routes still expire everything (M2). The re-warm remembers which
+  hot path) pass the post's brand before and after the write. **M2
+  (2026-11-16):** every other API write names its brands too — POST
+  `/api/production-items`, cross-post / repost / repurpose / duplicate /
+  outcome (the new or changed row's brand; a cross-post's row lives on the
+  source's brand), `/api/new-post`, and the clip/design `from-candidate`
+  routes (the pillar's and the target format's brand).
+  `src/app/api/report-invalidation-brands.test.ts` fails any API file that
+  calls the bare `invalidateReportCaches()`. The re-warm remembers which
   brands were expired since the last warm and requests
   `/api/warm?only=production&brands=a,b` (an unscoped expiry makes it warm
   every brand). Unit: `production-report-tags.test.ts`,

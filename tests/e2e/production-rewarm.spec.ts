@@ -49,7 +49,7 @@ test("In Production shows a post right after it was created, with the re-warm in
     await popup.getByRole("button", { name: "Got it" }).click({ timeout: 5_000 }).catch(() => {});
     await expect(page.locator(`[data-production-row="${id}"]`)).toBeVisible({ timeout: 20_000 });
     await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-    if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT, fullPage: true });
+    // (the shot is taken by the last test)
   } finally {
     if (ids.length) await sql`DELETE FROM production_items WHERE id IN ${sql(ids)}`;
     await sql.end();
@@ -110,6 +110,60 @@ test("an edit shows on its brand's report and /all's on the next read, even with
     await popup.getByRole("button", { name: "Got it" }).click({ timeout: 15_000 }).catch(() => {});
     await expect(page.locator(`[data-production-row="${id}"]`)).toBeVisible({ timeout: 20_000 });
     await expect(page.getByText("Ready To Publish").first()).toBeVisible();
+  } finally {
+    if (ids.length) await sql`DELETE FROM production_items WHERE id IN ${sql(ids)}`;
+    await sql.end();
+  }
+});
+
+// M2: the other write routes (duplicate, cross-post, repost, new post, …)
+// also expire only their brand (src/app/api/report-invalidation-brands.test.ts).
+// A post they create must still show on its brand's and /all's next read.
+test("a duplicated post shows on its brand's report and /all's on the next read", async ({ page }) => {
+  test.setTimeout(90_000);
+  const sql = postgres(process.env.DATABASE_URL!, { max: 1 });
+  const tag = `E2E Dup Expiry ${Date.now()}`;
+  const ids: string[] = [];
+  type Report = { items: { id: string; status: string | null }[] };
+  const has = async (brand: string, id: string) => {
+    const res = await page.request.get(`/api/reports/production?brand=${brand}`);
+    expect(res.ok(), await res.text()).toBeTruthy();
+    return ((await res.json()) as Report).items.some((i) => i.id === id);
+  };
+  try {
+    const res = await page.request.post("/api/production-items", {
+      data: {
+        title: `${tag} post`,
+        platform: ["linkedin"],
+        postType: "linkedin",
+        publishedDate: new Date().toISOString().slice(0, 10),
+        brand: "starter-story",
+      },
+    });
+    expect(res.ok(), await res.text()).toBeTruthy();
+    const id = (await res.json()).id as string;
+    ids.push(id);
+    await sql`UPDATE production_items SET status = 'Review' WHERE id = ${id}`;
+    const touch = await page.request.put("/api/production-items", { data: { id, title: `${tag} post` } });
+    expect(touch.ok(), await touch.text()).toBeTruthy();
+    // Cache both reports with the source in them.
+    expect(await has("starter-story", id)).toBe(true);
+    expect(await has("all", id)).toBe(true);
+
+    const dup = await page.request.post(`/api/production-items/${id}/duplicate`);
+    expect(dup.ok(), await dup.text()).toBeTruthy();
+    const dupId = (await dup.json()).id as string;
+    ids.push(dupId);
+    // Straight away — before the 4 s re-warm.
+    expect(await has("starter-story", dupId)).toBe(true);
+    expect(await has("all", dupId)).toBe(true);
+
+    await page.goto(`/starter-story/production`);
+    const popup = page.getByRole("dialog", { name: "What's new" });
+    await popup.getByRole("button", { name: "Got it" }).click({ timeout: 15_000 }).catch(() => {});
+    await expect(page.locator(`[data-production-row="${id}"]`)).toBeVisible({ timeout: 20_000 });
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT, fullPage: true });
   } finally {
     if (ids.length) await sql`DELETE FROM production_items WHERE id IN ${sql(ids)}`;
     await sql.end();

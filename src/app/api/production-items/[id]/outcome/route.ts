@@ -115,7 +115,7 @@ export async function POST(
       return row;
     });
 
-    invalidateReportCaches();
+    invalidateReportCaches({ brands: [updated?.brand] });
     return NextResponse.json({ item: updated });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

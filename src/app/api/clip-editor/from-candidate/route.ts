@@ -15,14 +15,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "pillarId and targetFormatId are required" }, { status: 400 });
   }
   // The clip idea belongs to the pillar's brand; its post lands in the target format's brand.
-  for (const brand of new Set([await brandOfProductionItem(body.pillarId), await brandOfFormat(body.targetFormatId)])) {
+  const brands = [...new Set([await brandOfProductionItem(body.pillarId), await brandOfFormat(body.targetFormatId)])];
+  for (const brand of brands) {
     const brandGuard = await requireBrandEdit(brand);
     if (brandGuard.response) return brandGuard.response;
   }
   try {
     const created = await findOrCreateClipPost({ pillarId: body.pillarId, targetFormatId: body.targetFormatId, actorUserId: guard.session.user.id as string });
     // The new item puts its (pillar, format) pair in flight — off the Repurposed queue.
-    if (created.created) invalidateReportCaches();
+    if (created.created) invalidateReportCaches({ brands });
     return NextResponse.json(created);
   } catch (err) {
     if (err instanceof ClipPostCreateError) return NextResponse.json({ error: err.message, reason: err.reason }, { status: err.status });

@@ -89,6 +89,6 @@ export async function POST(_request: Request, context: RouteContext) {
     console.error("[api:duplicate] recordItemCreated failed", err);
   }
 
-  invalidateReportCaches();
+  invalidateReportCaches({ brands: [source.brand] });
   return NextResponse.json({ id: created.id }, { status: 201 });
 }

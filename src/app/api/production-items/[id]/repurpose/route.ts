@@ -251,7 +251,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       await db.delete(productionItems).where(eq(productionItems.id, created.id));
       return NextResponse.json({ error: `There's already a newsletter edition for ${newsletterPlan.sendDate}. Try again.` }, { status: 409 });
     }
-    invalidateReportCaches();
+    invalidateReportCaches({ brands: [source.brand] });
     return NextResponse.json({ id: created.id, newsletterSendDate: newsletterPlan.sendDate }, { status: 201 });
   }
 
@@ -268,6 +268,6 @@ export async function POST(request: NextRequest, context: RouteContext) {
     console.error("draft-algorithm-run enqueue (repurpose) failed:", err);
   }
 
-  invalidateReportCaches();
+  invalidateReportCaches({ brands: [source.brand] });
   return NextResponse.json({ id: created.id }, { status: 201 });
 }

@@ -375,7 +375,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    invalidateReportCaches();
+    invalidateReportCaches({ brands: [created.brand] });
     return NextResponse.json({ ...created, autoFetched }, { status: 201 });
   } catch (error) {
     // 23505 = unique_violation. Catches the race where two concurrent POSTs

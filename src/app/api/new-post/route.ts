@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
       actorUserId: guard.session.user.id as string,
       flags,
     });
-    invalidateReportCaches();
+    invalidateReportCaches({ brands: [body.brand] });
     return NextResponse.json(made);
   } catch (err) {
     if (err instanceof NewPostError) return NextResponse.json({ error: err.message }, { status: err.status });
