@@ -26,7 +26,7 @@ const SLUG_TO_SOURCE: Record<string, QueueSource> = {
 const SOURCE_LABEL: Record<string, string> = {
   all: "All",
   repurposed: "Triggered",
-  spoke: "Repurposed",
+  spoke: "Suggested",
   cross_post: "Cross-post",
   repost: "Repost",
   history: "History",

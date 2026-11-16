@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { Input } from "@/components/ui/input";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { isNotionAuthoritative } from "@/lib/platform";
 import { ActionPill, SelectPill } from "./filter-pills";
@@ -78,18 +79,38 @@ interface QueueViewProps {
   isAdmin?: boolean;
 }
 
+// `hint` = the one-sentence hover explanation of what the tab holds.
 const STATIC_SOURCE_TABS = [
-  { value: "all" as const, label: "All", slug: "" },
-  { value: "spoke" as const, label: "Repurposed", slug: "repurposed" },
-  { value: "repurposed" as const, label: "Triggered", slug: "triggered" },
+  { value: "all" as const, label: "All", slug: "", hint: "Everything waiting in the queue." },
+  // SPOKE suggestions — labeled "Suggested" since 2026-11-16 (was
+  // "Repurposed"); the slug stays `repurposed` so links keep working.
+  {
+    value: "spoke" as const,
+    label: "Suggested",
+    slug: "repurposed",
+    hint: "Posts we recommend making from your best-performing videos. Nothing is created until you open one.",
+  },
+  {
+    value: "repurposed" as const,
+    label: "Triggered",
+    slug: "triggered",
+    hint: "Posts made automatically when a video passed its format's view goal: designs, carousels, video posts like Share The BIG IDEA, and written posts (clips have their own tabs).",
+  },
   // Per-clippable-format tabs get spliced in here at render time.
   // Every newsletter idea (post_type newsletter) — not a clippable format;
   // only on brands with a newsletter format (`showNewsletters`).
-  { value: "newsletters" as const, label: "Newsletters", slug: "newsletters" },
-  { value: "cross_post" as const, label: "Cross-post", slug: "cross-post" },
-  { value: "repost" as const, label: "Repost", slug: "repost" },
-  { value: "history" as const, label: "History", slug: "history" },
+  { value: "newsletters" as const, label: "Newsletters", slug: "newsletters", hint: "Newsletter issues waiting to be drafted." },
+  {
+    value: "cross_post" as const,
+    label: "Cross-post",
+    slug: "cross-post",
+    hint: "Recent posts doing better than usual, ready to post on other channels.",
+  },
+  { value: "repost" as const, label: "Repost", slug: "repost", hint: "Past hits that still hold up, ready to post again." },
+  { value: "history" as const, label: "History", slug: "history", hint: "What left the queue in the last 30 days." },
 ];
+
+const CLIP_FORMAT_TAB_HINT = "Clip ideas the AI found in your videos for this format.";
 
 export function QueueView({
   brand,
@@ -109,6 +130,7 @@ export function QueueView({
       value: `clip:${f.id}` as QueueSource,
       label: f.name,
       slug: f.slug,
+      hint: CLIP_FORMAT_TAB_HINT,
     }));
     // Splice after "Triggered" (index 2) and before "Cross-post".
     return [
@@ -648,6 +670,7 @@ export function QueueView({
         />
       </div>
 
+      <TooltipProvider>
       <div className="flex flex-wrap items-center gap-1 border-b border-border">
         {sourceTabs.map((tab) => {
           const active = selectedSource === tab.value;
@@ -660,8 +683,8 @@ export function QueueView({
           // baseline color so it reads as a side trip, not a queue source.
           const isHistory = tab.value === "history";
           return (
-            <button
-              key={tab.value}
+            <Tooltip key={tab.value}>
+            <TooltipTrigger
               type="button"
               onClick={() => {
                 setSelectedSource(tab.value);
@@ -690,7 +713,11 @@ export function QueueView({
                   {count}
                 </span>
               )}
-            </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="max-w-xs text-xs leading-relaxed">
+              {tab.hint}
+            </TooltipContent>
+            </Tooltip>
           );
         })}
         {/* Newsletters (flag `newsletterDrafter`): the upcoming-issues board lives here, not in the nav — on the Newsletters tab only. */}
@@ -702,6 +729,7 @@ export function QueueView({
           />
         )}
       </div>
+      </TooltipProvider>
 
       {!isHistoryTab && (
         <div className="flex flex-wrap items-center gap-2">
