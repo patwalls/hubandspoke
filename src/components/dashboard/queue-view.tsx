@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { Input } from "@/components/ui/input";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { QueueTabKey } from "./queue-tab-key";
 import { cn } from "@/lib/utils";
 import { isNotionAuthoritative } from "@/lib/platform";
 import { ActionPill, SelectPill } from "./filter-pills";
@@ -79,38 +79,39 @@ interface QueueViewProps {
   isAdmin?: boolean;
 }
 
-// `hint` = the one-sentence hover explanation of what the tab holds.
+// `hint` = one sentence on what the tab holds, shown in the "?" key beside
+// the Queue heading (QueueTabKey).
 const STATIC_SOURCE_TABS = [
-  { value: "all" as const, label: "All", slug: "", hint: "Everything waiting in the queue." },
+  { value: "all" as const, label: "All", slug: "", hint: "Everything in the queue" },
   // SPOKE suggestions — labeled "Suggested" since 2026-11-16 (was
   // "Repurposed"); the slug stays `repurposed` so links keep working.
   {
     value: "spoke" as const,
     label: "Suggested",
     slug: "repurposed",
-    hint: "Posts we recommend making from your best-performing videos. Nothing is created until you open one.",
+    hint: "Recommended posts, not made yet",
   },
   {
     value: "repurposed" as const,
     label: "Triggered",
     slug: "triggered",
-    hint: "Posts made automatically when a video passed its format's view goal: designs, carousels, video posts like Share The BIG IDEA, and written posts (clips have their own tabs).",
+    hint: "Auto-made at a view goal: designs, videos, text",
   },
   // Per-clippable-format tabs get spliced in here at render time.
   // Every newsletter idea (post_type newsletter) — not a clippable format;
   // only on brands with a newsletter format (`showNewsletters`).
-  { value: "newsletters" as const, label: "Newsletters", slug: "newsletters", hint: "Newsletter issues waiting to be drafted." },
+  { value: "newsletters" as const, label: "Newsletters", slug: "newsletters", hint: "Issues to draft" },
   {
     value: "cross_post" as const,
     label: "Cross-post",
     slug: "cross-post",
-    hint: "Recent posts doing better than usual, ready to post on other channels.",
+    hint: "Hot posts to share elsewhere",
   },
-  { value: "repost" as const, label: "Repost", slug: "repost", hint: "Past hits that still hold up, ready to post again." },
-  { value: "history" as const, label: "History", slug: "history", hint: "What left the queue in the last 30 days." },
+  { value: "repost" as const, label: "Repost", slug: "repost", hint: "Past hits to post again" },
+  { value: "history" as const, label: "History", slug: "history", hint: "What left in the last 30 days" },
 ];
 
-const CLIP_FORMAT_TAB_HINT = "Clip ideas the AI found in your videos for this format.";
+const CLIP_FORMAT_TAB_HINT = "AI-found clips, one tab per format";
 
 export function QueueView({
   brand,
@@ -143,6 +144,21 @@ export function QueueView({
   // Lookup table: source value → the production_items.format string that
   // rows must match to belong in that tab. Only populated for clip-format
   // tabs; null for static tabs.
+  const tabKeyEntries = useMemo(() => {
+    const entries: { label: string; hint: string }[] = [];
+    let clipEntryAdded = false;
+    for (const tab of sourceTabs) {
+      if (tab.hint === CLIP_FORMAT_TAB_HINT) {
+        if (clipEntryAdded) continue;
+        clipEntryAdded = true;
+        entries.push({ label: "Clip tabs", hint: CLIP_FORMAT_TAB_HINT });
+        continue;
+      }
+      entries.push({ label: tab.label, hint: tab.hint });
+    }
+    return entries;
+  }, [sourceTabs, clippableFormats]);
+
   const clipFormatNameBySource = useMemo(() => {
     const map = new Map<QueueSource, string>();
     for (const f of clippableFormats) {
@@ -648,6 +664,7 @@ export function QueueView({
                       ? spokeFiltered.length
                       : filtered.length}
             </span>
+            <QueueTabKey entries={tabKeyEntries} />
           </h1>
           <p className="text-xs sm:text-sm text-muted-foreground mt-1">
             {isHistoryTab
@@ -670,7 +687,6 @@ export function QueueView({
         />
       </div>
 
-      <TooltipProvider>
       <div className="flex flex-wrap items-center gap-1 border-b border-border">
         {sourceTabs.map((tab) => {
           const active = selectedSource === tab.value;
@@ -683,8 +699,8 @@ export function QueueView({
           // baseline color so it reads as a side trip, not a queue source.
           const isHistory = tab.value === "history";
           return (
-            <Tooltip key={tab.value}>
-            <TooltipTrigger
+            <button
+              key={tab.value}
               type="button"
               onClick={() => {
                 setSelectedSource(tab.value);
@@ -713,11 +729,7 @@ export function QueueView({
                   {count}
                 </span>
               )}
-            </TooltipTrigger>
-            <TooltipContent side="bottom" className="max-w-xs text-xs leading-relaxed">
-              {tab.hint}
-            </TooltipContent>
-            </Tooltip>
+            </button>
           );
         })}
         {/* Newsletters (flag `newsletterDrafter`): the upcoming-issues board lives here, not in the nav — on the Newsletters tab only. */}
@@ -729,7 +741,6 @@ export function QueueView({
           />
         )}
       </div>
-      </TooltipProvider>
 
       {!isHistoryTab && (
         <div className="flex flex-wrap items-center gap-2">
