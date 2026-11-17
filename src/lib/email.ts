@@ -3,6 +3,7 @@ import {
   renderDailyScorecardEmail,
 } from "@/lib/email-templates/daily-scorecard";
 import type { ScorecardData } from "@/lib/services/scorecard";
+import type { AiSpendSpike } from "@/lib/services/ai-spend";
 
 const from = process.env.EMAIL_FROM || "Hub & Spoke <pat@starterstory.com>";
 
@@ -254,8 +255,10 @@ export async function sendInviteEmail(opts: {
 export async function sendDailyScorecardEmail(opts: {
   to: string;
   data: ScorecardData;
+  /** Admin recipients only (AI spend is admin data). */
+  aiSpikes?: AiSpendSpike[];
 }) {
-  const { subject, text, html } = renderDailyScorecardEmail(opts.data);
+  const { subject, text, html } = renderDailyScorecardEmail(opts.data, { aiSpikes: opts.aiSpikes });
   return sendMail({
     to: opts.to,
     subject: subject,

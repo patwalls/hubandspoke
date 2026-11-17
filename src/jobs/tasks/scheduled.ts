@@ -24,6 +24,7 @@ import { refreshEditorRules } from "@/lib/services/draft-algorithm/editor-rules"
 import { refreshWinNotes } from "@/lib/services/winners/why-it-won";
 import { platformSupportsLatest } from "@/lib/services/account-content-sync";
 import { getScorecardData } from "@/lib/services/scorecard";
+import { getAiSpendSpikes, type AiSpendSpike } from "@/lib/services/ai-spend";
 import { sendDailyScorecardEmail, sendMyWorkDigestEmail, sendWinnersEmail } from "@/lib/email";
 import { buildWinnersEmail } from "@/lib/winners/email";
 import { firstNameOf, loadWinnersEmailBrands } from "@/lib/services/winners/weekly-email";
@@ -371,7 +372,7 @@ export const dailyScorecardEmailTask: Task = async (_payload, helpers) => {
   const start = Date.now();
   helpers.logger.info("daily-scorecard-email start");
   const recipients = await db
-    .select({ id: users.id, email: users.email })
+    .select({ id: users.id, email: users.email, role: users.role })
     .from(users)
     .where(and(eq(users.dailyScorecardEmailEnabled, true), isNull(users.deactivatedAt)));
   if (recipients.length === 0) {
@@ -381,11 +382,23 @@ export const dailyScorecardEmailTask: Task = async (_payload, helpers) => {
     return;
   }
   const data = await getScorecardData();
+  // AI-spend spike line (ai-spend M4) — admins only. Fail-soft: a read error
+  // drops the line, never the scorecard.
+  let aiSpikes: AiSpendSpike[] = [];
+  if (recipients.some((r) => r.role === "admin")) {
+    try {
+      aiSpikes = await getAiSpendSpikes();
+    } catch (err) {
+      helpers.logger.error(
+        `daily-scorecard-email ai-spend spikes failed: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
   let sent = 0;
   let failed = 0;
   for (const r of recipients) {
     try {
-      await sendDailyScorecardEmail({ to: r.email, data });
+      await sendDailyScorecardEmail({ to: r.email, data, aiSpikes: r.role === "admin" ? aiSpikes : [] });
       sent++;
     } catch (err) {
       failed++;
@@ -397,7 +410,7 @@ export const dailyScorecardEmailTask: Task = async (_payload, helpers) => {
     }
   }
   helpers.logger.info(
-    `daily-scorecard-email sent=${sent} failed=${failed} of ${recipients.length} (${Date.now() - start}ms)`
+    `daily-scorecard-email sent=${sent} failed=${failed} of ${recipients.length} aiSpikes=${aiSpikes.length} (${Date.now() - start}ms)`
   );
 };
 

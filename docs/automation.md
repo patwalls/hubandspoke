@@ -1003,7 +1003,10 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
 - **Inputs:** rolling 7-day publish counts (`publishedDate` in [today−7, today)
   vs [today−14, today−7)). Recipients = users with
   `daily_scorecard_email_enabled = true`.
-- **Outputs:** one HubSpot SMTP send per recipient. No DB writes.
+- **Outputs:** one HubSpot SMTP send per recipient. No DB writes. Admin
+  recipients also get the AI-spend spike line when a feature spiked yesterday
+  (`getAiSpendSpikes`, `src/lib/services/ai-spend.ts`, 2026-11-17; see AI
+  call metering below). Non-admins never see AI spend.
 - **Downstream:** none.
 - **Preview / dogfood:** admin-only `GET /api/admin/scorecard-email/preview`
   renders the HTML in-browser; append `?send=me` to send the rendered
@@ -2280,6 +2283,14 @@ feature × model and prices each group at read time from
 A model with no price row stays **unpriced**: its calls count, its cost is
 not guessed, and the summary lists it under `unpricedModels` so someone adds
 the row. Read-only, no task or cron; the admin AI-spend page (next) renders it.
+
+Spikes (2026-11-17, ai-spend M4): `getAiSpendSpikes()` reads the last 16 UTC
+days and `findAiSpendSpikes` flags a feature whose cost **yesterday** was
+≥ 3× its median day over the 14 days before (zero-filled from the first
+metered day) and ≥ $2. Nothing is flagged until metering has 7 full days of
+history. The `daily-scorecard-email` task adds one line ("AI spend spiked
+yesterday: <feature> $X (usually $Y/day)", top 3) for **admin** recipients
+only; a read error drops the line, never the email.
 
 ## External systems
 

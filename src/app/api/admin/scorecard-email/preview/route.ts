@@ -15,6 +15,7 @@ import { requireAdmin } from "@/lib/auth-guards";
 import { getScorecardData } from "@/lib/services/scorecard";
 import { renderDailyScorecardEmail } from "@/lib/email-templates/daily-scorecard";
 import { sendDailyScorecardEmail } from "@/lib/email";
+import { getAiSpendSpikes } from "@/lib/services/ai-spend";
 
 export async function GET(req: NextRequest) {
   const guard = await requireAdmin();
@@ -24,8 +25,9 @@ export async function GET(req: NextRequest) {
   const format = searchParams.get("format");
   const send = searchParams.get("send");
 
-  const data = await getScorecardData();
-  const rendered = renderDailyScorecardEmail(data);
+  // Admins get the AI-spend spike line in the real send, so the preview shows it too.
+  const [data, aiSpikes] = await Promise.all([getScorecardData(), getAiSpendSpikes().catch(() => [])]);
+  const rendered = renderDailyScorecardEmail(data, { aiSpikes });
 
   if (send === "me") {
     const to = guard.session.user?.email;
@@ -35,7 +37,7 @@ export async function GET(req: NextRequest) {
         { status: 400 }
       );
     }
-    await sendDailyScorecardEmail({ to, data });
+    await sendDailyScorecardEmail({ to, data, aiSpikes });
     return NextResponse.json({
       sent: true,
       to,
