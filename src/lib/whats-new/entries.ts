@@ -43,6 +43,16 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-11-17-ai-spend-page",
+    shippedAt: "2026-11-17T18:25:18Z",
+    kind: "feature",
+    title: "See what AI costs, by feature",
+    body: "Settings → AI spend shows the last 30 days of Claude and OpenAI spend: a total per provider, a bar per day, and which features (clip ideas, transcripts, newsletter drafts…) the money went to.",
+    href: "/settings/ai-spend",
+    screen: "/settings/ai-spend",
+    audience: { adminOnly: true },
+  },
+  {
     id: "2026-11-15-comment-and-send-to-review",
     shippedAt: "2026-11-15T17:44:27Z",
     kind: "feature",
