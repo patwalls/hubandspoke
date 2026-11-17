@@ -2734,6 +2734,25 @@ has a row in `docs/features.md`'s cleanup backlog.
   `services/production-report-cache.test.ts`, `report-rewarm.test.ts`,
   `warm/route.test.ts`; e2e `production-rewarm.spec.ts` (an edit shows on
   its brand's and /all's next read).
+  **M3 (2026-11-17):** 24 h after M2 the p95s held (`/api/reports/production`
+  6.0 s, `/[brand]/queue` 4.8 s, `/api/warm` 14.4 s). Two causes fixed: (1) the
+  re-warm rebuilt only In Production's `excludeIdea=true` key, while the queue
+  page SSRs and fetches `excludeIdea=false`, so every queue open after an
+  edit computed it cold — `?only=production` now rebuilds both keys (In
+  Production's first); (2) every cold report re-read all of the brand's
+  published rows for the view-prediction history
+  (`buildViewPredictorContext`) and the format odds (`loadFormatOdds`),
+  which only move when views sync. Both are now memoized per dyno in
+  `services/production-report.ts` via `createSwrMemo` (`src/lib/swr-memo.ts`):
+  fresh 10 min, then served while one refresh runs behind it (a failed
+  refresh keeps the old value; past 6 h a caller waits), and simultaneous
+  callers share one load. Predictions can lag a views sync by ≤10 min; the
+  pipeline rows themselves are never memoized, so an edit always shows on
+  the next read. Sentry spans `production-report` (compute / pipeline /
+  view-predictor / clip-odds) time the parts in sampled traces. Unit:
+  `swr-memo.test.ts`, `production-report-cache.test.ts`,
+  `warm/route.test.ts`; e2e `production-rewarm.spec.ts` (both keys show an
+  edit after the re-warm).
   Why: the first user after every deploy paid ~2.3s of lazy route-module
   init PLUS cold caches on every dashboard route ("everything feels slow
   right after a deploy" — 2026-08-09). Re-callable any time; safe noop

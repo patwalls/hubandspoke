@@ -7,6 +7,33 @@ import {
 import { loadFormatOdds } from "@/lib/services/clip-odds";
 import { oddsKey } from "@/lib/clip-odds";
 import { PRODUCTION_REPORT_TAG, productionReportTag } from "@/lib/production-report-tags";
+import { createSwrMemo } from "@/lib/swr-memo";
+import * as Sentry from "@sentry/nextjs";
+import type { ViewPredictorContext } from "@/lib/services/view-predictor";
+import type { FormatOdds } from "@/lib/clip-odds";
+
+/**
+ * The prediction history and format odds only move when views sync (hourly
+ * or slower) and are the same for both report keys, yet every cold report —
+ * one after every edit — rebuilt them from all of the brand's published
+ * rows. Kept per dyno: fresh for 10 min, then served while a refresh runs
+ * behind it (lib/swr-memo.ts), so a cold report is the pipeline query only.
+ */
+const HISTORY_FRESH_MS = 10 * 60_000;
+const HISTORY_MAX_STALE_MS = 6 * 60 * 60_000;
+const predictorMemo = createSwrMemo<ViewPredictorContext>({
+  freshMs: HISTORY_FRESH_MS,
+  maxStaleMs: HISTORY_MAX_STALE_MS,
+});
+const oddsMemo = createSwrMemo<Map<string, FormatOdds>>({
+  freshMs: HISTORY_FRESH_MS,
+  maxStaleMs: HISTORY_MAX_STALE_MS,
+});
+
+/** Time a part of the cold report in the sampled trace (sentry-tx events). */
+function timed<T>(name: string, fn: () => Promise<T>): Promise<T> {
+  return Sentry.startSpan({ name, op: "production-report" }, fn);
+}
 
 /**
  * Production-pipeline report (the queue page's primary payload), 60s-cached.
@@ -20,13 +47,15 @@ import { PRODUCTION_REPORT_TAG, productionReportTag } from "@/lib/production-rep
  */
 export async function computeProductionReport(brand: string, excludeIdea: boolean) {
     const [items, ctx, odds] = await Promise.all([
-      getProductionPipeline(brand, { excludeIdea }),
-      buildViewPredictorContext(brand),
+      timed("pipeline", () => getProductionPipeline(brand, { excludeIdea })),
+      predictorMemo.get(brand, () => timed("view-predictor", () => buildViewPredictorContext(brand))),
       // Fail-soft: the queue still renders without the odds chip.
-      loadFormatOdds(brand).catch((err) => {
-        console.warn(`[production-report] clip odds failed: ${err instanceof Error ? err.message : err}`);
-        return new Map();
-      }),
+      oddsMemo
+        .get(brand, () => timed("clip-odds", () => loadFormatOdds(brand)))
+        .catch((err) => {
+          console.warn(`[production-report] clip odds failed: ${err instanceof Error ? err.message : err}`);
+          return new Map<string, FormatOdds>();
+        }),
     ]);
     // Every unpublished row shows the history-based prediction (medians of
     // real views: same pillar, same format + platform, … with a p25–p75
@@ -76,7 +105,8 @@ function brandCache(brand: string) {
   const hit = perBrand.get(brand);
   if (hit) return hit;
   const fn = compressedCache(
-    async (excludeIdea: boolean) => computeProductionReport(brand, excludeIdea),
+    async (excludeIdea: boolean) =>
+      timed("compute", () => computeProductionReport(brand, excludeIdea)),
     ["production-report", brand],
     // The shared tag still expires every brand at once (writes that don't
     // say which brands they touched) — src/lib/production-report-tags.ts.
