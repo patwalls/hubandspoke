@@ -2273,6 +2273,14 @@ OpenAI calls (2026-11-17, ai-spend M2) go through `meteredOpenAI(feature)`
 tokens). The model comes from the request's multipart `model` field because
 those responses don't name it.
 
+Reading it (2026-11-17, ai-spend M3 step 1): `getAiSpendSummary(days)` in
+`src/lib/services/ai-spend.ts` groups `llm_calls` by UTC day × provider ×
+feature × model and prices each group at read time from
+`src/lib/llm/prices.ts` (list prices; dated snapshots bill like their alias).
+A model with no price row stays **unpriced**: its calls count, its cost is
+not guessed, and the summary lists it under `unpricedModels` so someone adds
+the row. Read-only, no task or cron; the admin AI-spend page (next) renders it.
+
 ## External systems
 
 | System | Used by | Cost notes |
