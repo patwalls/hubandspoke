@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { meteredAnthropic } from "@/lib/llm/metered";
 import {
   findAnchorInWords,
   resolveAnchorForRange,
@@ -367,7 +368,7 @@ function formatBenchLine(
 export async function generateClipSections(
   args: SectionGenerateArgs,
 ): Promise<SectionGenerationResult> {
-  const client = new Anthropic();
+  const client = meteredAnthropic("clip-section-agent");
 
   const benchBlock =
     args.benchHooks.length > 0

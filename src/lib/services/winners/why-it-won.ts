@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { meteredAnthropic } from "@/lib/llm/metered";
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { brands, productionItems, type WinNote } from "@/lib/db/schema";
@@ -119,7 +120,7 @@ export type ExplainResult = { ok: true; note: string } | { ok: false; failure: s
 export async function explainWinner(prompt: string): Promise<ExplainResult> {
   let response: Anthropic.Message;
   try {
-    response = await new Anthropic().messages.create({
+    response = await meteredAnthropic("winners/why-it-won").messages.create({
       model: MODEL,
       max_tokens: 200,
       system: SYSTEM_PROMPT,

@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { meteredAnthropic } from "@/lib/llm/metered";
 import { MAX_SUPPORTING_MOMENTS, SUPPORTING_ROLES } from "./clip-stitch";
 
 /**
@@ -98,7 +99,7 @@ export async function suggestSupportingQuotes(args: {
   transcriptMarkdown: string;
   client?: Anthropic;
 }): Promise<StitchSuggestResult> {
-  const client = args.client ?? new Anthropic();
+  const client = args.client ?? meteredAnthropic("clip-stitch-agent");
   let response: Anthropic.Message;
   try {
     response = await client.messages.create({

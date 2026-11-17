@@ -21,6 +21,7 @@
 // to ~3 accounts in a row and the caption is the same each time.
 
 import Anthropic from "@anthropic-ai/sdk";
+import { meteredAnthropic } from "@/lib/llm/metered";
 
 const MODEL = "claude-haiku-5-5";
 
@@ -132,7 +133,7 @@ export async function stripDateOpenerWithLLM(
     return removeOpenerLine(body, known);
   }
 
-  const client = opts.client ?? new Anthropic();
+  const client = opts.client ?? meteredAnthropic("repost-text-cleanup");
 
   let response: Anthropic.Message;
   try {

@@ -8,6 +8,7 @@
 //
 // Mirrors derivative-hook.ts: one pinned tool, fail-soft `{ ok: false }`.
 import Anthropic from "@anthropic-ai/sdk";
+import { meteredAnthropic } from "@/lib/llm/metered";
 import type { FormatFamily } from "@/lib/format-kinds";
 import { FONT_IDS } from "@/lib/clip-editor/doc";
 import { lookSuggestionSchema, type LookSuggestion } from "@/lib/clip-editor/look-from-example";
@@ -182,7 +183,7 @@ export async function buildFormatSkill(args: BuildFormatSkillArgs): Promise<Buil
   if (!hasAnswers && images.length === 0 && !args.existing?.trim()) {
     return { ok: false, failure: { reason: "nothing-to-go-on" } };
   }
-  const client = args.client ?? new Anthropic();
+  const client = args.client ?? meteredAnthropic("build-format-skill");
   // Examples for a clip format: also read the clips' look (shape, hook and
   // caption styling) so the clip editor can start from it.
   const withLook = !!args.fromExamples && args.family === "clip" && images.length > 0;

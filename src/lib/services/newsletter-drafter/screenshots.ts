@@ -15,6 +15,7 @@
 // hubspot-newsletter-create-draft.ts).
 
 import Anthropic from "@anthropic-ai/sdk";
+import { meteredAnthropic } from "@/lib/llm/metered";
 import { eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { designFrames, newsletterDrafts, productionItems } from "@/lib/db/schema";
@@ -346,7 +347,7 @@ const MOMENT_TOOL: Anthropic.Tool = {
 export type StepMoment = { ok: true; sec: number; label: string } | { ok: false; failure: "no-video" | "no-transcript" | "llm-error" | "llm-empty" };
 
 /** When `step` (its Markdown) happens in the section's video. Fail-soft: the editor adds a placeholder without a moment instead. */
-export async function suggestStepMoment(draftId: string, sectionKey: string, step: string, client: Anthropic = new Anthropic()): Promise<StepMoment> {
+export async function suggestStepMoment(draftId: string, sectionKey: string, step: string, client: Anthropic = meteredAnthropic("newsletter-drafter/screenshots")): Promise<StepMoment> {
   const d = await loadDraft(draftId);
   const videoId = d ? sectionVideoId(d, d.sections.find((x) => x.key === sectionKey)) : null;
   if (!videoId) return { ok: false, failure: "no-video" };

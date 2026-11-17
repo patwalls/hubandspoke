@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { meteredAnthropic } from "@/lib/llm/metered";
 import { eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { formats, type FormatEditorRules } from "@/lib/db/schema";
@@ -105,7 +106,7 @@ export async function summarizeEditorRules(
   if (!block) return { ok: false, failure: "no pairs" };
   let response: Anthropic.Message;
   try {
-    response = await new Anthropic().messages.create({
+    response = await meteredAnthropic("draft-algorithm/editor-rules").messages.create({
       model: MODEL,
       max_tokens: 600,
       system: SYSTEM_PROMPT,

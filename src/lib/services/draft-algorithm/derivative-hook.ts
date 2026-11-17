@@ -24,6 +24,7 @@
 //   once on failure.
 
 import Anthropic from "@anthropic-ai/sdk";
+import { meteredAnthropic } from "@/lib/llm/metered";
 import { and, desc, eq, isNotNull, ne, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { productionItems, transcripts } from "@/lib/db/schema";
@@ -310,7 +311,7 @@ export async function generateDerivativeHook(
     return { ok: false, failure: { reason: "no-pillar-transcript" } };
   }
 
-  const client = args.client ?? new Anthropic();
+  const client = args.client ?? meteredAnthropic("draft-algorithm/derivative-hook");
   const isStarterStory = args.brand === STARTER_STORY_BRAND;
 
   // ── Starter Story path (unchanged) ────────────────────────────────────

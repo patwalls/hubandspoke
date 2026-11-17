@@ -3,7 +3,7 @@ import { requireSession } from "@/lib/auth-guards";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { productionItems, formats } from "@/lib/db/schema";
-import Anthropic from "@anthropic-ai/sdk";
+import { meteredAnthropic } from "@/lib/llm/metered";
 
 const MODEL = "claude-haiku-5-5";
 
@@ -68,7 +68,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     .join("\n");
 
   try {
-    const response = await new Anthropic().messages.create({
+    const response = await meteredAnthropic("api/production-items/[id]/summary").messages.create({
       model: MODEL,
       max_tokens: 1024,
       system: [

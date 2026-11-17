@@ -17,6 +17,7 @@
  *      the cutout in the browser when the style has one.
  */
 import Anthropic from "@anthropic-ai/sdk";
+import { meteredAnthropic } from "@/lib/llm/metered";
 import { imageSize } from "image-size";
 import { and, desc, eq, inArray, like, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
@@ -285,7 +286,7 @@ export async function extractCoverStyle(styleId: string, opts: { client?: Anthro
     `## THE POST\nFormat: ${post.format ?? "unknown"}\nBrand: ${post.brand ?? ""}`,
     post.hook?.trim() ? `Its headline as published (the cover's main text should match this): ${post.hook.trim()}` : post.title ? `Title: ${post.title}` : "",
   ].filter(Boolean).join("\n");
-  const client = opts.client ?? new Anthropic();
+  const client = opts.client ?? meteredAnthropic("design-editor/cover-styles");
 
   let lastError: string | null = null;
   for (let attempt = 1; attempt <= 2; attempt++) {

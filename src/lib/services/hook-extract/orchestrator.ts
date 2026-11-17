@@ -20,6 +20,7 @@ import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { productionItems, transcripts } from "@/lib/db/schema";
 import Anthropic from "@anthropic-ai/sdk";
+import { meteredAnthropic } from "@/lib/llm/metered";
 import { recordContentChanges } from "@/lib/services/content-revisions";
 
 const MODEL = "claude-haiku-5-5";
@@ -165,7 +166,7 @@ export interface ExtractHookResult {
 }
 
 async function callHookLLM(cues: string): Promise<ExtractHookResult> {
-  const response = await new Anthropic().messages.create({
+  const response = await meteredAnthropic("hook-extract/orchestrator").messages.create({
     model: MODEL,
     max_tokens: 256,
     system: SYSTEM_PROMPT,

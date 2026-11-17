@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { meteredAnthropic } from "@/lib/llm/metered";
 
 const MODEL = "claude-haiku-5-5";
 
@@ -110,7 +111,7 @@ export async function dispatchRepurpose(params: {
     `Decide what to do. Call exactly one tool.`,
   ].join("\n");
 
-  const response = await new Anthropic().messages.create({
+  const response = await meteredAnthropic("repurpose-agent").messages.create({
     model: MODEL,
     max_tokens: 1024,
     system: SYSTEM_PROMPT,

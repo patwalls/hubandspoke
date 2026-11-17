@@ -13,6 +13,7 @@
  * are kept at any confidence.
  */
 import Anthropic from "@anthropic-ai/sdk";
+import { meteredAnthropic } from "@/lib/llm/metered";
 import type { SpeakerRole } from "@/lib/diarization/types";
 
 const MODEL = "claude-haiku-5-5";
@@ -120,7 +121,7 @@ export function buildNamingEvidence(input: NameSpeakersInput): string {
 }
 
 export async function nameSpeakers(input: NameSpeakersInput): Promise<NameSpeakersResult> {
-  const client = input.client ?? new Anthropic();
+  const client = input.client ?? meteredAnthropic("diarization/name-speakers");
   let response: Anthropic.Message;
   try {
     response = await client.messages.create({

@@ -8,6 +8,7 @@
 // stays internal; this one is the editor's second opinion, on demand.
 
 import Anthropic from "@anthropic-ai/sdk";
+import { meteredAnthropic } from "@/lib/llm/metered";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db";
@@ -133,7 +134,7 @@ export async function reviewDraft(draftId: string, opts: { signal?: AbortSignal;
       pastIssues,
       notes: row.notes,
     });
-    const client = opts.client ?? new Anthropic();
+    const client = opts.client ?? meteredAnthropic("newsletter-drafter/review");
     const message = await client.beta.messages.create(
       {
         model: newsletterModel(),

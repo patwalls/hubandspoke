@@ -9,6 +9,7 @@
  * their first edit saves it.
  */
 import Anthropic from "@anthropic-ai/sdk";
+import { meteredAnthropic } from "@/lib/llm/metered";
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { designTemplateImports, formats } from "@/lib/db/schema";
@@ -110,7 +111,7 @@ export async function runTemplateImport(importId: string, opts: { client?: Anthr
 
   const exemplars = await loadExemplars(format.brand ?? "", format.name, null);
   const context = contextBlock({ name: format.name, brand: format.brand ?? "", skill: format.skill }, exemplars);
-  const client = opts.client ?? new Anthropic();
+  const client = opts.client ?? meteredAnthropic("design-editor/pdf-import");
 
   let lastError: string | null = null;
   for (let attempt = 1; attempt <= 2; attempt++) {

@@ -6,6 +6,7 @@
 // subject options (never replacing the chosen subject).
 
 import Anthropic from "@anthropic-ai/sdk";
+import { meteredAnthropic } from "@/lib/llm/metered";
 import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db";
@@ -92,7 +93,7 @@ export function buildSubjectsPrompt(args: { formatName: string; subject: string;
     .join("\n\n");
 }
 
-export async function suggestSubjectLines(draftId: string, client: Anthropic = new Anthropic()): Promise<SubjectIdeasResult> {
+export async function suggestSubjectLines(draftId: string, client: Anthropic = meteredAnthropic("newsletter-drafter/subjects")): Promise<SubjectIdeasResult> {
   const [row] = await db
     .select({
       id: newsletterDrafts.id,

@@ -16,6 +16,7 @@
 // Mirrors the template at draft-algorithm/derivative-hook.ts.
 
 import Anthropic from "@anthropic-ai/sdk";
+import { meteredAnthropic } from "@/lib/llm/metered";
 import { and, eq, gte, isNotNull, lte, ne, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { productionItems, scheduledMatchSuggestions } from "@/lib/db/schema";
@@ -243,7 +244,7 @@ export async function findBestScheduledMatch(
     return { ok: true, value: null };
   }
 
-  const client = opts.client ?? new Anthropic();
+  const client = opts.client ?? meteredAnthropic("schedule-reconcile/matcher");
 
   const userBlocks: Anthropic.TextBlockParam[] = [
     { type: "text", text: renderPlan(item) },

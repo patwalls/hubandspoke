@@ -13,6 +13,7 @@
 // their section jobs. A section the editor cancels mid-plan stays cancelled.
 
 import Anthropic from "@anthropic-ai/sdk";
+import { meteredAnthropic } from "@/lib/llm/metered";
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db";
@@ -80,7 +81,7 @@ export type RevisionPlan = { ok: true; edits: SectionRevision[] } | { ok: false;
 
 export async function planRevision(
   args: { formatName: string; note: string; angle: string | null; template: NewsletterTemplate; sections: NewsletterSection[] },
-  client: Anthropic = new Anthropic(),
+  client: Anthropic = meteredAnthropic("newsletter-drafter/revise"),
 ): Promise<RevisionPlan> {
   const keys = revisableKeys(args.template);
   const names = new Map(args.template.sections.map((s) => [s.key, s.heading ?? s.key]));

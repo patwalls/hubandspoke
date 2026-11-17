@@ -3107,3 +3107,31 @@ export const assistantMessages = pgTable(
   },
   (table) => [index("idx_assistant_messages_user_created").on(table.userId, table.createdAt)],
 );
+
+// ---------------------------------------------------------------------------
+// LLM calls — one row per model call (Anthropic today), written by
+// `meteredAnthropic(feature)` in src/lib/llm/metered.ts. Feeds the AI-spend
+// read ("what did AI cost, and which feature"). Tokens only; dollars are
+// computed at read time from a price table so a price change never rewrites
+// history. See docs/features.md.
+// ---------------------------------------------------------------------------
+
+export const llmCalls = pgTable(
+  "llm_calls",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    provider: text("provider").notNull(),
+    /** Where the call came from, e.g. `clip-idea-agent`, `newsletter-drafter/agent`. */
+    feature: text("feature").notNull(),
+    model: text("model").notNull(),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    cacheReadTokens: integer("cache_read_tokens").notNull().default(0),
+    cacheWriteTokens: integer("cache_write_tokens").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("idx_llm_calls_created").on(table.createdAt),
+    index("idx_llm_calls_feature_created").on(table.feature, table.createdAt),
+  ],
+);
