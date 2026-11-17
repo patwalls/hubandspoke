@@ -27,21 +27,21 @@ import type { TargetCommonalityRow } from "@/lib/cross-post-usual";
 //
 // "Hot" is the max of multiple ratios per candidate:
 //   - velocity ratio at each available capture-velocity-snapshot checkpoint
-//     (15m / 30m / 1h / 2h / 4h / 8h / 24h / 48h) vs the same-checkpoint P60
+//     (15m / 30m / 1h / 2h / 4h / 8h / 24h / 48h) vs the same-checkpoint P50
 //     across the format's 90-day cohort
-//   - lifetime ratio: cumulative views vs the format's lifetime P60
+//   - lifetime ratio: cumulative views vs the format's lifetime P50
 //
 // We take the strongest signal so a 6-hour-old rocket isn't penalized
 // against a cohort that's had days to mature, while older posts that didn't
 // pop early but accumulated views still surface via the lifetime path.
 //
-// Admit when max(ratio) >= 1.0. New formats with no cohort at all are
+// Admit when max(ratio) >= 0.8. New formats with no cohort at all are
 // auto-admitted — the operator wanted to be able to surface posts in
 // a brand-new format immediately. Sort by max-ratio desc.
 
 const CANDIDATE_WINDOW_DAYS = 21;
 const DISMISSAL_TTL_DAYS = 30;
-const HOTNESS_THRESHOLD = 1.0;
+const HOTNESS_THRESHOLD = 0.8; // within 20% of the format median (was 1.0 until 2026-11-17)
 const PERCENTILE = 0.5; // P50 — surface ideas that beat the median, not just P60.
 const COHORT_WINDOW_DAYS = 90;
 
