@@ -153,6 +153,15 @@ guard (`requestSeq` in `content-report.tsx`). Event handlers can still
 call `new Date()`. `tests/e2e/dashboard-hydration.spec.ts` catches a
 regression (run the dev server with `TZ=UTC`).
 
+**The server's date travels with the page; the hydration pass never reads
+the clock.** Hydration can run hours after the server render (a background
+tab Chrome froze before React hydrated woke up the next day — GlitchTip
+issue 78, 2026-11-17), so `useToday()`'s server snapshot is the date the
+dashboard layout passes to `<ServerTodayProvider>`, not `new Date()` at
+hydration time. A page outside `(dashboard)` that renders `useToday()`
+needs the provider in its own layout. Any other `useSyncExternalStore`
+server snapshot must likewise be a constant or come from the server.
+
 **The same goes for timestamps a client component renders from server
 props** (page props, `initialData`): use `useLocalDate()` or, for "5m ago"
 labels, `useHydrated()` from `src/lib/hooks/use-local-date.ts`, never a bare

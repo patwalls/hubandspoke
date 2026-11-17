@@ -15,6 +15,7 @@ import { users } from "@/lib/db/schema";
 import { getBrands, getDefaultBrandSlug } from "@/lib/db/brands";
 import { editableBrandSlugs } from "@/lib/brand-access";
 import { BrandAccessProvider } from "@/components/brand-access";
+import { ServerTodayProvider } from "@/lib/hooks/use-today";
 import { hrefFor, needsOpenedScreens, popupFor, visibleTo, type WhatsNewEntry, type WhatsNewViewer } from "@/lib/whats-new";
 import { getOpenedScreens } from "@/lib/whats-new/opened";
 
@@ -110,7 +111,13 @@ export default async function DashboardLayout({
     })),
   ];
 
+  // The date this response is rendered on. useToday() hydrates from it, not
+  // from the browser's clock at hydration time, which can be a day later
+  // (GlitchTip issue 78) — see use-today.ts.
+  const serverToday = new Date().toISOString().slice(0, 10);
+
   return (
+    <ServerTodayProvider utcDate={serverToday}>
     <BrandAccessProvider editable={editable}>
     <div className="min-h-screen bg-background">
       <DashboardNav
@@ -137,5 +144,6 @@ export default async function DashboardLayout({
       <Toaster position="bottom-right" richColors closeButton />
     </div>
     </BrandAccessProvider>
+    </ServerTodayProvider>
   );
 }
