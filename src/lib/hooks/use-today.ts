@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useSyncExternalStore } from "react";
+import { createContext, createElement, useContext, useMemo, useSyncExternalStore, type ReactNode } from "react";
 import { parse } from "date-fns";
 import { todayInclusiveOfUtc } from "@/lib/dates";
 
@@ -18,6 +18,14 @@ import { todayInclusiveOfUtc } from "@/lib/dates";
  * hydration pass compute identically. React then re-renders with the real
  * local date straight after hydration. Event handlers can still call
  * `new Date()` freely; only render output needs this.
+ *
+ * The server snapshot is the SERVER's date, sent down by <ServerTodayProvider>
+ * in the dashboard layout — not the UTC date read off the browser's clock at
+ * hydration time. Hydration can run long after the server rendered: a tab
+ * opened in the background and frozen by Chrome hydrated ~20 hours later,
+ * after UTC midnight, so the hydration pass's "today" was a day ahead of the
+ * HTML's and the Date range label differed (GlitchTip issue 78,
+ * /:brand/content, 2026-11-17). A slow stream across 00:00 UTC does the same.
  */
 
 export interface Today {
@@ -47,11 +55,30 @@ export function serverTodaySnapshot(): string {
   return `${utc}|${utc}`;
 }
 
+/** The server's UTC `yyyy-MM-dd` at render time; null outside a provider. */
+const ServerTodayContext = createContext<string | null>(null);
+
+/**
+ * Wraps every page that renders `useToday()`. Pass the date the server is
+ * rendering on (`new Date().toISOString().slice(0, 10)`); it travels to the
+ * browser in the RSC payload, so hydration reads the same value.
+ */
+export function ServerTodayProvider({
+  utcDate,
+  children,
+}: {
+  utcDate: string;
+  children?: ReactNode;
+}) {
+  return createElement(ServerTodayContext, { value: utcDate }, children);
+}
+
 export function useToday(): Today {
+  const serverDate = useContext(ServerTodayContext);
   const snapshot = useSyncExternalStore(
     noopSubscribe,
     clientTodaySnapshot,
-    serverTodaySnapshot,
+    serverDate ? () => `${serverDate}|${serverDate}` : serverTodaySnapshot,
   );
   return useMemo(() => {
     const [key, inclusiveOfUtc] = snapshot.split("|");

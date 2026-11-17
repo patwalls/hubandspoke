@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { renderToString } from "react-dom/server";
-import { clientTodaySnapshot, useToday } from "./use-today";
+import { ServerTodayProvider, clientTodaySnapshot, useToday } from "./use-today";
 
 // HUBANDSPOKE-5: "today" in render must be the same on the server (UTC) and
 // on the browser's hydration pass, whatever the browser's timezone.
@@ -35,5 +35,17 @@ describe("useToday", () => {
     process.env.TZ = "America/Vancouver";
     // Local Nov 5; the report upper bound still reaches UTC's Nov 6.
     expect(clientTodaySnapshot()).toBe("2026-11-05|2026-11-06");
+  });
+
+  // GlitchTip issue 78: hydration ran the day after the server render.
+  it("hydrates from the server's date under a provider, whatever the clock says", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-17T16:12:48Z"));
+    process.env.TZ = "America/Chicago";
+    expect(
+      renderToString(
+        createElement(ServerTodayProvider, { utcDate: "2026-11-16" }, createElement(Probe)),
+      ),
+    ).toBe("<span>2026-11-16/2026-11-16</span>");
   });
 });
