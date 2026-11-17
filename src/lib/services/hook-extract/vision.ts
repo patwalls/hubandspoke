@@ -19,6 +19,7 @@ import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
 import { getPresignedGetUrl } from "@/lib/s3";
 import Anthropic from "@anthropic-ai/sdk";
+import { meteredAnthropic } from "@/lib/llm/metered";
 import {
   recordContentChanges,
   type ContentChange,
@@ -219,7 +220,7 @@ async function callVisionLLM(
 ): Promise<VisionResult> {
   let response;
   try {
-    response = await new Anthropic().messages.create({
+    response = await meteredAnthropic("hook-extract/vision").messages.create({
       model: MODEL,
       max_tokens: 512,
       system: SYSTEM_PROMPT,

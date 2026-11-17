@@ -12,6 +12,7 @@ import path from "path";
 import type { Task } from "graphile-worker";
 import { and, eq } from "drizzle-orm";
 import Anthropic from "@anthropic-ai/sdk";
+import { meteredAnthropic } from "@/lib/llm/metered";
 import { imageSize } from "image-size";
 import { db } from "@/lib/db";
 import { designPhotos, productionItems } from "@/lib/db/schema";
@@ -129,7 +130,7 @@ export function dedupe(picks: Pick[]): Pick[] {
  */
 async function flagScreens(files: string[]): Promise<Array<{ index: number; label: string; score: number }>> {
   try {
-    const client = new Anthropic();
+    const client = meteredAnthropic("jobs/design-screens");
     const content: Anthropic.ContentBlockParam[] = [];
     for (const [i, file] of files.entries()) {
       content.push({ type: "text", text: `Frame ${i}:` });

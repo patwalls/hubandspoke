@@ -5,6 +5,7 @@
 // section, so a fix can never land somewhere else. Fail-soft.
 
 import Anthropic from "@anthropic-ai/sdk";
+import { meteredAnthropic } from "@/lib/llm/metered";
 import { z } from "zod";
 import type { NewsletterSection } from "@/lib/newsletter-template";
 
@@ -69,7 +70,7 @@ export type ProofreadResult = { ok: true; fixes: ProofreadFix[] } | { ok: false;
 
 export async function proofreadSections(
   args: { sections: NewsletterSection[]; sectionNames: Record<string, string>; subject: string | null; styleNotes?: string | null },
-  client: Anthropic = new Anthropic(),
+  client: Anthropic = meteredAnthropic("newsletter-drafter/proofread"),
 ): Promise<ProofreadResult> {
   const body = args.sections
     .filter((s) => s.markdown.trim())

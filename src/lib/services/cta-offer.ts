@@ -24,6 +24,7 @@
 // brand (OFFER_UTM_RULE in src/lib/cta-offer-brands.ts).
 
 import Anthropic from "@anthropic-ai/sdk";
+import { meteredAnthropic } from "@/lib/llm/metered";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { brands, formats, productionItems } from "@/lib/db/schema";
@@ -193,7 +194,7 @@ export function parseOfferToolInput(
 
 export async function extractOfferFromDescription(
   description: string,
-  client: Anthropic = new Anthropic(),
+  client: Anthropic = meteredAnthropic("cta-offer"),
 ): Promise<ExtractOfferResult> {
   const text = description.slice(0, DESCRIPTION_CHAR_BUDGET);
   try {

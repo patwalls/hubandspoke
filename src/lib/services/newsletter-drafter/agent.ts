@@ -19,6 +19,7 @@
 // stop on refusal / max_tokens instead of looping.
 
 import Anthropic from "@anthropic-ai/sdk";
+import { meteredAnthropic } from "@/lib/llm/metered";
 import { z } from "zod";
 import { fillVariables, variableNames, type NewsletterSection, type NewsletterTemplate, type NewsletterVariables } from "@/lib/newsletter-template";
 import { layoutFor, layoutText } from "@/lib/newsletter-layout";
@@ -707,7 +708,7 @@ interface LoopSpec<T> {
 
 async function runLoop<T>(spec: LoopSpec<T>): Promise<{ value: T; model: string; turns: number }> {
   const { args } = spec;
-  const client = args.client ?? new Anthropic();
+  const client = args.client ?? meteredAnthropic("newsletter-drafter/agent");
   const system = buildSystem(args);
   const messages: Anthropic.Beta.BetaMessageParam[] = [{ role: "user", content: spec.firstUserTurn }];
   let reviewing = false;

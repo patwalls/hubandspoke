@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { meteredAnthropic } from "@/lib/llm/metered";
 
 const MODEL = "claude-haiku-5-5";
 
@@ -144,7 +145,7 @@ export async function classifyCrossPostFit(params: {
   ].join("\n");
 
   try {
-    const response = await new Anthropic().messages.create({
+    const response = await meteredAnthropic("cross-post-fit-classifier").messages.create({
       model: MODEL,
       max_tokens: 512,
       system: buildSystemPrompt(params.pastKillReasons),

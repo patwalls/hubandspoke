@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { meteredAnthropic } from "@/lib/llm/metered";
 
 const MODEL = "claude-haiku-5-5";
 
@@ -119,7 +120,7 @@ export async function classifyEvergreen(params: {
     `Classify this as evergreen or not. Call exactly one tool.`,
   ].join("\n");
 
-  const response = await new Anthropic().messages.create({
+  const response = await meteredAnthropic("evergreen-agent").messages.create({
     model: MODEL,
     max_tokens: 512,
     system: buildSystemPrompt(params.pastKillReasons),
@@ -283,7 +284,7 @@ export async function judgeRepostFit(params: {
     `Decide. Call exactly one tool.`,
   ].join("\n");
 
-  const response = await new Anthropic().messages.create({
+  const response = await meteredAnthropic("evergreen-agent").messages.create({
     model: MODEL,
     max_tokens: 512,
     system: FIT_SYSTEM_PROMPT,

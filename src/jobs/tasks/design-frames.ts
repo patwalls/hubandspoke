@@ -14,6 +14,7 @@ import path from "path";
 import type { Task } from "graphile-worker";
 import { and, eq } from "drizzle-orm";
 import Anthropic from "@anthropic-ai/sdk";
+import { meteredAnthropic } from "@/lib/llm/metered";
 import { imageSize } from "image-size";
 import { db } from "@/lib/db";
 import { designFrames, productionItems, transcripts } from "@/lib/db/schema";
@@ -154,7 +155,7 @@ async function rankFrames(files: string[]): Promise<{ order: number[]; reason: s
   const mid = Math.floor(files.length / 2);
   const fallback = { order: [mid, ...files.map((_, i) => i).filter((i) => i !== mid)].slice(0, BEST_SHOTS), reason: "fallback: middle frames" };
   try {
-    const client = new Anthropic();
+    const client = meteredAnthropic("jobs/design-frames");
     const content: Anthropic.ContentBlockParam[] = [];
     for (const [i, file] of files.entries()) {
       content.push({ type: "text", text: `Frame ${i}:` });

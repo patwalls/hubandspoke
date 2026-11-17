@@ -17,6 +17,7 @@
  */
 import { createHash } from "node:crypto";
 import Anthropic from "@anthropic-ai/sdk";
+import { meteredAnthropic } from "@/lib/llm/metered";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { formats, type ClipPostSkillCheck } from "@/lib/db/schema";
@@ -66,7 +67,7 @@ export async function classifySkill(args: {
   if (!skill) return { verdict: "none", reason: "The format has no Skill written yet." };
   let response: Anthropic.Message;
   try {
-    const client = args.client ?? new Anthropic();
+    const client = args.client ?? meteredAnthropic("clip-editor/skill-clip-check");
     response = await client.messages.create({
       model: MODEL,
       max_tokens: 200,

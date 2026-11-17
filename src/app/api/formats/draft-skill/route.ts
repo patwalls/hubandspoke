@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
+import { meteredAnthropic } from "@/lib/llm/metered";
 import { and, eq, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { formats, productionItems } from "@/lib/db/schema";
@@ -392,7 +393,7 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  const client = new Anthropic();
+  const client = meteredAnthropic("api/formats/draft-skill");
   const response = await client.messages.create({
     model: MODEL,
     max_tokens: 2048,

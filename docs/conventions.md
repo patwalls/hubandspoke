@@ -613,6 +613,20 @@ that motivated this scaffold). The MCP keeps a persistent profile in
 `~/Library/Caches/ms-playwright/mcp-chrome-profile/` so logging in once
 sticks across sessions.
 
+## Model calls are metered — `meteredAnthropic(feature)`
+
+Build every Anthropic client with `meteredAnthropic("<feature>")` from
+`src/lib/llm/metered.ts`, never a bare `new Anthropic()`. It is the same
+client with a custom `fetch` that records each Messages API call's model and
+tokens (input, output, cache read/write) in `llm_calls` under that feature
+name — streams included — without touching the response the caller reads.
+Name the feature after the module (`clip-idea-agent`,
+`newsletter-drafter/agent`, `jobs/design-frames`) so a spend read groups
+cleanly. Recording is fire-and-forget: a failed insert logs a warning and the
+call still succeeds. Tests that inject `client:` stay unmetered (no DB). Store
+tokens, not dollars — prices are applied at read time. OpenAI calls (Whisper,
+image) are not metered yet.
+
 ## LLM eval tests (gated) — `*.eval.test.ts`
 
 When the thing that can break is a **model's judgment** (an eligibility

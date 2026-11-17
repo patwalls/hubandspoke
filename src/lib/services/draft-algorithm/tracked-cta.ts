@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import Anthropic from "@anthropic-ai/sdk";
+import { meteredAnthropic } from "@/lib/llm/metered";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
@@ -363,7 +364,7 @@ async function planCta(
   args: GenerateTrackedCtaArgs & { leadMagnets: LeadMagnet[] },
   tier: CtaPlannerTier,
 ): Promise<CtaPlan> {
-  const client = new Anthropic();
+  const client = meteredAnthropic("draft-algorithm/tracked-cta");
   const { model, effort, searchRounds } = ctaPlannerConfig(tier);
   const channel = args.channel as CtaChannel;
 

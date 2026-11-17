@@ -5,6 +5,7 @@
 // `{ ok: false }` and keep the current copy.
 
 import Anthropic from "@anthropic-ai/sdk";
+import { meteredAnthropic } from "@/lib/llm/metered";
 import type { PastIssue } from "./sources";
 import { newsletterModel } from "./agent";
 
@@ -24,7 +25,7 @@ export async function rewriteSpecial(args: {
   instruction?: string | null;
   client?: Anthropic;
 }): Promise<SpecialRewriteResult> {
-  const client = args.client ?? new Anthropic();
+  const client = args.client ?? meteredAnthropic("newsletter-drafter/special-rewrite");
   const examples = args.pastIssues
     .slice(0, MAX_EXEMPLARS)
     .map((p, i) => `### Past issue ${i + 1}\n${p.body}`)

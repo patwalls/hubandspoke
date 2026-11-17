@@ -15,6 +15,7 @@
  * opening ~minute (`fallbackIntroRange`), never throws.
  */
 import Anthropic from "@anthropic-ai/sdk";
+import { meteredAnthropic } from "@/lib/llm/metered";
 
 const MODEL = "claude-haiku-5-5";
 export const POST_CLIP_PICKER_VERSION = `${MODEL}:post-clip:v1`;
@@ -196,7 +197,7 @@ export async function pickPostClip(args: {
 
   let response: Anthropic.Message;
   try {
-    const client = args.client ?? new Anthropic();
+    const client = args.client ?? meteredAnthropic("clip-editor/pick-post-clip");
     response = await client.messages.create({
       model: MODEL,
       max_tokens: 400,

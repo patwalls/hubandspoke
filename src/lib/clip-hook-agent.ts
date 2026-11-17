@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { meteredAnthropic } from "@/lib/llm/metered";
 import {
   resolveAnchorForRange,
   tokenize,
@@ -491,7 +492,7 @@ function validate(
 export async function writeFormatHookForSection(
   args: HookGenerateArgs,
 ): Promise<HookGenerationResult> {
-  const client = args.client ?? new Anthropic();
+  const client = args.client ?? meteredAnthropic("clip-hook-agent");
 
   const formatBlock = args.formatSkillSection
     ? `=====================================================

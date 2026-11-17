@@ -2256,6 +2256,15 @@ Routing contract is pinned by `src/lib/s3.test.ts`.
 
 ---
 
+### Model calls are metered (2026-11-17)
+
+Every Anthropic call made by a task or service (clip ideas/hooks/sections,
+newsletter drafter, design editor, draft algorithm, cross-post fit, why-it-won,
+schedule matcher…) goes through `meteredAnthropic(feature)`
+(`src/lib/llm/metered.ts`) and writes one `llm_calls` row (feature, model,
+tokens) after the response arrives. The insert is fire-and-forget on the same
+process's DB pool — it never fails or delays the task. No new task or cron.
+
 ## External systems
 
 | System | Used by | Cost notes |

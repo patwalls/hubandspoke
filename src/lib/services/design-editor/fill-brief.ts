@@ -27,6 +27,7 @@
  * way derivative-hook.ts uses them.
  */
 import Anthropic from "@anthropic-ai/sdk";
+import { meteredAnthropic } from "@/lib/llm/metered";
 import { and, desc, eq, isNotNull, ne, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { brands, contentDrafts, formats, productionItems } from "@/lib/db/schema";
@@ -334,7 +335,7 @@ export async function generateDesignFill(args: GenerateFillArgs): Promise<Genera
   const [pillar] = await db.select({ title: productionItems.title, description: productionItems.description }).from(productionItems).where(eq(productionItems.id, sourceId)).limit(1);
 
   const research = args.research === true;
-  const client = args.client ?? new Anthropic();
+  const client = args.client ?? meteredAnthropic("design-editor/fill-brief");
   const prompt = buildFillPrompt({
     title: pillar?.title ?? item.title,
     formatName,

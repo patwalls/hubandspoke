@@ -12,6 +12,7 @@
  * dropped. What to do with the positions (cut ranges) stays deterministic.
  */
 import Anthropic from "@anthropic-ai/sdk";
+import { meteredAnthropic } from "@/lib/llm/metered";
 import type { EditorWord } from "@/lib/clip-editor/words";
 
 const MODEL = "claude-haiku-5-5";
@@ -76,7 +77,7 @@ export async function detectFillerWords(args: {
   // numbers are easier for the model to echo back reliably than sparse
   // five-digit ones.
   const listing = words.map((w, i) => `${i + 1}: ${w.text}`).join("\n");
-  const client = args.client ?? new Anthropic();
+  const client = args.client ?? meteredAnthropic("clip-editor/detect-fillers");
 
   let response: Anthropic.Message;
   try {

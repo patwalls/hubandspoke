@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { meteredAnthropic } from "@/lib/llm/metered";
 import type { AssistantToolCall } from "@/lib/db/schema";
 import { ASSISTANT_TOOLS, runAssistantTool, toolStatus, type AssistantToolContext } from "@/lib/assistant/tools";
 import type { CardBlock } from "@/lib/assistant/cards";
@@ -102,7 +103,7 @@ export async function runAssistant(
   turns: ChatTurn[],
   ctx: AssistantToolContext & { userName?: string | null },
   emit: (e: AssistantEvent) => void,
-  client: Anthropic = new Anthropic(),
+  client: Anthropic = meteredAnthropic("assistant/agent"),
 ): Promise<AssistantRunResult> {
   const messages = trimHistory(turns);
   const result: AssistantRunResult = { answer: "", toolCalls: [], inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 };

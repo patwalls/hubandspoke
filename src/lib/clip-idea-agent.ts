@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { meteredAnthropic } from "@/lib/llm/metered";
 
 // Sonnet 5.5 (was Sonnet 4.6). Prompt V9 (2026-05-21): split the monolithic prompt into a
 // format-agnostic SECTION_SELECTION_PROMPT_BASE plus a per-format FORMAT
@@ -943,7 +944,7 @@ ${lines.join("\n")}`;
 export async function generateClipIdeas(
   args: GenerateArgs
 ): Promise<GenerationResult> {
-  const client = new Anthropic();
+  const client = meteredAnthropic("clip-idea-agent");
 
   const { block: refLibraryBlock, hooks: referenceHooks } =
     buildReferenceLibrary(args.blueprint);

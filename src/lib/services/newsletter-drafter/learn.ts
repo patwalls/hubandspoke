@@ -12,6 +12,7 @@
 // (`newsletter-template-learn`): one Opus call over up to 12 issues.
 
 import Anthropic from "@anthropic-ai/sdk";
+import { meteredAnthropic } from "@/lib/llm/metered";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db";
@@ -183,7 +184,7 @@ export async function learnTemplate(proposalId: string, opts: { signal?: AbortSi
     const issues = await getPastIssues(f.brand, f.name, null, [], { limit: LEARN_ISSUES, charBudget: LEARN_ISSUE_CHARS });
     if (issues.length < 2) return fail(`Only ${issues.length} past issue${issues.length === 1 ? "" : "s"} of "${f.name}" to learn from — the history sync brings in sent issues; try again after it runs.`);
     await db.update(newsletterTemplateProposals).set({ issueCount: issues.length, updatedAt: new Date() }).where(eq(newsletterTemplateProposals.id, row.id));
-    const client = opts.client ?? new Anthropic();
+    const client = opts.client ?? meteredAnthropic("newsletter-drafter/learn");
     const prompt = buildLearnPrompt({ formatName: f.name, brandLabel: brand?.label ?? f.brand, skill: f.instructions, current, issues, caseStudies: brandHasCaseStudies(f.brand) });
     const messages: Anthropic.Beta.BetaMessageParam[] = [{ role: "user", content: prompt }];
     let proposal: LearnedProposal | null = null;

@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { meteredAnthropic } from "@/lib/llm/metered";
 import { randomUUID } from "node:crypto";
 import type {
   ContentDraftContent,
@@ -871,7 +872,7 @@ async function createMessagesWithOverloadRetry(
 export async function generateDraft(
   args: GenerateDraftArgs,
 ): Promise<GenerateDraftResult> {
-  const client = new Anthropic();
+  const client = meteredAnthropic("draft-agent");
 
   const tools: Anthropic.Tool[] = [
     {

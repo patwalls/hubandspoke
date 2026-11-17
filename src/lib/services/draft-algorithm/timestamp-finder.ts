@@ -18,6 +18,7 @@
 // "what's interesting" is the editorial judgment we're paying for.
 
 import Anthropic from "@anthropic-ai/sdk";
+import { meteredAnthropic } from "@/lib/llm/metered";
 
 const MODEL = "claude-opus-5-5";
 
@@ -164,7 +165,7 @@ export async function findInterestingTimestamps(
   args: FindTimestampsArgs,
 ): Promise<FoundTimestamp[]> {
   const count = Math.max(1, Math.min(10, args.count));
-  const client = args.client ?? new Anthropic();
+  const client = args.client ?? meteredAnthropic("draft-algorithm/timestamp-finder");
 
   const userBlocks: Anthropic.TextBlockParam[] = [];
   userBlocks.push({
