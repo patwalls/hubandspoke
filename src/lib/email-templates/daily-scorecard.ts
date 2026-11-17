@@ -4,6 +4,7 @@
  * the renderer directly to display HTML in a browser without sending.
  */
 import type { ScorecardData, BrandScorecard } from "@/lib/services/scorecard";
+import type { AiSpendSpike } from "@/lib/services/ai-spend";
 
 export interface RenderedEmail {
   subject: string;
@@ -44,7 +45,29 @@ function fmtRange(start: Date, end: Date): string {
   return `${fmt(start)} – ${fmt(inclusiveEnd)}`;
 }
 
-export function renderDailyScorecardEmail(data: ScorecardData): RenderedEmail {
+function fmtUsd(n: number): string {
+  return `$${n.toFixed(2)}`;
+}
+
+/**
+ * The AI-spend spike line (admins only — the task passes spikes only to
+ * admin recipients). One short line, under the brand table; absent when
+ * nothing spiked.
+ */
+export function aiSpikeLine(spikes: AiSpendSpike[]): string | null {
+  if (spikes.length === 0) return null;
+  const parts = spikes
+    .slice(0, 3)
+    .map((s) => `${s.feature} ${fmtUsd(s.costUsd)} (usually ${fmtUsd(s.usualUsd)}/day)`);
+  const more = spikes.length > 3 ? ` and ${spikes.length - 3} more` : "";
+  return `AI spend spiked yesterday: ${parts.join("; ")}${more}.`;
+}
+
+export function renderDailyScorecardEmail(
+  data: ScorecardData,
+  opts: { aiSpikes?: AiSpendSpike[] } = {},
+): RenderedEmail {
+  const spikeLine = aiSpikeLine(opts.aiSpikes ?? []);
   const { thisWeek, lastWeek } = data;
   const headlineDelta = fmtDelta(
     thisWeek.totalOriginals,
@@ -82,6 +105,10 @@ export function renderDailyScorecardEmail(data: ScorecardData): RenderedEmail {
     textLines.push(
       `  ${b.label}: ${b.originals} originals (${d.arrow}${d.text})${goalSuffix} — ${b.accountsShipped}/${b.totalAccounts} accounts shipped${sub ? `; ${sub}` : ""}`
     );
+  }
+  if (spikeLine) {
+    textLines.push("");
+    textLines.push(spikeLine);
   }
   textLines.push("");
   textLines.push("— Hub & Spoke");
@@ -139,6 +166,8 @@ export function renderDailyScorecardEmail(data: ScorecardData): RenderedEmail {
         <p style="margin:0 0 12px 0;font-size:11px;color:#737373;text-transform:uppercase;letter-spacing:0.04em;">By brand</p>
         ${renderBrandTable(thisWeek.byBrand, lastWeek.byBrand)}
       </div>
+
+      ${spikeLine ? `<p style="margin:16px 0 0 0;font-size:12px;color:#525252;">${escapeHtml(spikeLine)}</p>` : ""}
 
       <p style="margin:24px 0 0 0;font-size:11px;color:#a3a3a3;">— Hub &amp; Spoke</p>
     </div>
