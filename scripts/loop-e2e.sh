@@ -16,6 +16,34 @@
 # credentials — so a page that needs S3 / an LLM / Notion shows its empty or error state.
 set -euo pipefail
 
+# Dependencies: reinstall only when the lockfile changed since the last run in this worktree.
+# Next's build cache (.next) is keyed on the same lockfile sum: a cache written by another Next
+# (or another react / swc) fails every page of the next run, and a dependency update used to
+# leave it in place until someone cleared it by hand (idea d15f20). A .next that is a link is
+# another checkout's cache (the ship broker links gitignored entries in from Pat's checkout,
+# whose node_modules differ), so the link goes, never what it points at, and this run keeps its own.
+prepare_deps() {
+  local sum
+  sum=$(shasum -a 256 package-lock.json | cut -c1-16)
+  if [[ ! -d node_modules || "$(cat node_modules/.lock-sum 2>/dev/null)" != "$sum" ]]; then
+    echo "== npm ci"
+    npm ci --no-audit --no-fund --loglevel=error >/dev/null
+    echo "$sum" > node_modules/.lock-sum
+  fi
+  if [[ -L .next ]]; then
+    echo "== .next was a link to $(readlink .next): this run builds its own"
+    rm -f .next
+  fi
+  if [[ "$(cat .next/.lock-sum 2>/dev/null)" != "$sum" ]]; then
+    [[ -e .next ]] && echo "== .next is from other dependencies: cleared"
+    rm -rf .next
+    mkdir .next
+    echo "$sum" > .next/.lock-sum
+  fi
+}
+# Only the dependency step, for its test (src/app/loop-e2e-deps.test.ts).
+if [[ "${1:-}" == "--deps-only" ]]; then prepare_deps; exit 0; fi
+
 SPEC="${1:?usage: loop-e2e.sh <spec>.spec.ts [/tmp/hs-build/<name>.png]}"
 SHOT="${2:-}"
 [[ "$SPEC" =~ ^[a-z0-9-]+\.spec\.ts$ ]] || { echo "spec must be a file name in tests/e2e, e.g. whats-new.spec.ts"; exit 2; }
@@ -43,14 +71,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Dependencies: reinstall only when the lockfile changed since the last run in this worktree.
-LOCK_SUM=$(shasum -a 256 package-lock.json | cut -c1-16)
-if [[ ! -d node_modules || "$(cat node_modules/.lock-sum 2>/dev/null)" != "$LOCK_SUM" ]]; then
-  echo "== npm ci"
-  npm ci --no-audit --no-fund --loglevel=error >/dev/null
-  echo "$LOCK_SUM" > node_modules/.lock-sum
-fi
-
+prepare_deps
 echo "== postgres :$PGPORT"
 "$PGBIN/initdb" -D "$WORK/pg" -U e2e --auth=trust >/dev/null
 "$PGBIN/pg_ctl" -D "$WORK/pg" -o "-p $PGPORT -k '' -c listen_addresses=127.0.0.1" -l "$WORK/pg.log" -w start >/dev/null
