@@ -8,7 +8,8 @@
  * cache (production:list-instant) only helps a tab that already loaded it.
  *
  * So after an invalidation we ask our own dyno, a few seconds later, to
- * rebuild In Production's key for every brand (`/api/warm?only=production`).
+ * rebuild the report for every brand (`/api/warm?only=production`) — both
+ * keys since 2026-11-17: In Production's and the queue's.
  * A self-request, not an in-process call: it runs in its own request scope,
  * after the revalidation has been applied, so the fresh result is what lands
  * in the cache.

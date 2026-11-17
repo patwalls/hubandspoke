@@ -163,6 +163,62 @@ test("a duplicated post shows on its brand's report and /all's on the next read"
     await popup.getByRole("button", { name: "Got it" }).click({ timeout: 15_000 }).catch(() => {});
     await expect(page.locator(`[data-production-row="${id}"]`)).toBeVisible({ timeout: 20_000 });
     await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    // (the shot is taken by the last test)
+  } finally {
+    if (ids.length) await sql`DELETE FROM production_items WHERE id IN ${sql(ids)}`;
+    await sql.end();
+  }
+});
+
+// M3 (2026-11-17): the re-warm rebuilds the queue's key (excludeIdea=false)
+// too, and the view history / format odds behind both keys are memoized per
+// dyno. Neither may hold back an edit: after an edit and the re-warm, the
+// queue's key and In Production's both show the new status, and the queue
+// page still renders.
+test("after an edit and the re-warm, the queue's report and In Production's both show it", async ({ page }) => {
+  test.setTimeout(90_000);
+  const sql = postgres(process.env.DATABASE_URL!, { max: 1 });
+  const tag = `E2E Queue Rewarm ${Date.now()}`;
+  const ids: string[] = [];
+  type Report = { items: { id: string; status: string | null }[] };
+  const statusIn = async (query: string, id: string) => {
+    const res = await page.request.get(`/api/reports/production?brand=starter-story${query}`);
+    expect(res.ok(), await res.text()).toBeTruthy();
+    return ((await res.json()) as Report).items.find((i) => i.id === id)?.status ?? null;
+  };
+  try {
+    const res = await page.request.post("/api/production-items", {
+      data: {
+        title: `${tag} post`,
+        platform: ["linkedin"],
+        postType: "linkedin",
+        publishedDate: new Date().toISOString().slice(0, 10),
+        brand: "starter-story",
+      },
+    });
+    expect(res.ok(), await res.text()).toBeTruthy();
+    const id = (await res.json()).id as string;
+    ids.push(id);
+    await sql`UPDATE production_items SET status = 'Review' WHERE id = ${id}`;
+    const touch = await page.request.put("/api/production-items", { data: { id, title: `${tag} post` } });
+    expect(touch.ok(), await touch.text()).toBeTruthy();
+    // Cache both keys with the post in Review.
+    expect(await statusIn("", id)).toBe("Review");
+    expect(await statusIn("&excludeIdea=true", id)).toBe("Review");
+
+    const move = await page.request.put("/api/production-items", {
+      data: { id, status: "Ready To Publish" },
+    });
+    expect(move.ok(), await move.text()).toBeTruthy();
+    await page.waitForTimeout(6_000); // past the 4 s re-warm delay
+    expect(await statusIn("", id)).toBe("Ready To Publish");
+    expect(await statusIn("&excludeIdea=true", id)).toBe("Ready To Publish");
+
+    await page.goto("/starter-story/queue");
+    const popup = page.getByRole("dialog", { name: "What's new" });
+    await popup.getByRole("button", { name: "Got it" }).click({ timeout: 15_000 }).catch(() => {});
+    await expect(page.getByText("Loading...")).toHaveCount(0, { timeout: 20_000 });
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
     if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT, fullPage: true });
   } finally {
     if (ids.length) await sql`DELETE FROM production_items WHERE id IN ${sql(ids)}`;

@@ -48,3 +48,19 @@ describe("getProductionReportCached — one cache per brand", () => {
     expect(allCache.tags.some((t) => expired.has(t))).toBe(true);
   });
 });
+
+describe("getProductionReportCached — slow inputs shared", () => {
+  it("both keys of a brand (queue + In Production) load the view history and odds once", async () => {
+    const { buildViewPredictorContext } = await import("@/lib/services/view-predictor");
+    const { loadFormatOdds } = await import("@/lib/services/clip-odds");
+    vi.mocked(buildViewPredictorContext).mockClear();
+    vi.mocked(loadFormatOdds).mockClear();
+    // A cold report after an edit used to rebuild both from every published
+    // row of the brand, for each key, every time.
+    await getProductionReportCached("shared-inputs-brand", true);
+    await getProductionReportCached("shared-inputs-brand", false);
+    await getProductionReportCached("shared-inputs-brand", true);
+    expect(vi.mocked(buildViewPredictorContext)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(loadFormatOdds)).toHaveBeenCalledTimes(1);
+  });
+});

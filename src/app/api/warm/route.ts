@@ -36,9 +36,11 @@ export async function GET(request: NextRequest) {
   const brands = await getEnabledBrands();
 
   // `?only=production` — the after-edit re-warm (src/lib/report-rewarm.ts):
-  // rebuild just In Production's key (excludeIdea=true) for the brands the
-  // edits expired (`&brands=a,b`; without it, every brand). Sequential, one
-  // connection.
+  // rebuild both production-report keys — In Production's (excludeIdea=true)
+  // and the queue's (excludeIdea=false; until 2026-11-17 only the first, so
+  // every queue open after an edit computed it cold, p95 4.8 s) — for the
+  // brands the edits expired (`&brands=a,b`; without it, every brand).
+  // Sequential, one connection; In Production first (the busier screen).
   if (request.nextUrl.searchParams.get("only") === "production") {
     const { getProductionReportCached } = await import(
       "@/lib/services/production-report"
@@ -46,13 +48,16 @@ export async function GET(request: NextRequest) {
     const only = request.nextUrl.searchParams.get("brands");
     const wanted = only ? new Set(only.split(",")) : null;
     const slugs = brands.map((x) => x.slug).filter((b) => !wanted || wanted.has(b));
-    for (const b of slugs) {
-      const t = Date.now();
-      try {
-        await getProductionReportCached(b, true);
-        timings[`production-no-ideas:${b}`] = Date.now() - t;
-      } catch {
-        timings[`production-no-ideas:${b}`] = -1;
+    for (const excludeIdea of [true, false]) {
+      for (const b of slugs) {
+        const key = `production${excludeIdea ? "-no-ideas" : ""}:${b}`;
+        const t = Date.now();
+        try {
+          await getProductionReportCached(b, excludeIdea);
+          timings[key] = Date.now() - t;
+        } catch {
+          timings[key] = -1;
+        }
       }
     }
     return NextResponse.json({ ok: true, totalMs: Date.now() - t0, timings });

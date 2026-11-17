@@ -42,7 +42,7 @@ describe("GET /api/warm", () => {
     ]);
   });
 
-  it("?only=production rebuilds just In Production's key for every brand", async () => {
+  it("?only=production rebuilds both keys (In Production and the queue) for every brand", async () => {
     const { GET } = await import("./route");
     const res = await GET(
       new NextRequest("http://localhost/api/warm?only=production", {
@@ -51,7 +51,12 @@ describe("GET /api/warm", () => {
     );
     expect(res.status).toBe(200);
     const calls = productionReport.mock.calls.map(([b, x]) => `${b}:${x}`).sort();
-    expect(calls).toEqual(["my-first-million:true", "starter-story:true"]);
+    expect(calls).toEqual([
+      "my-first-million:false",
+      "my-first-million:true",
+      "starter-story:false",
+      "starter-story:true",
+    ]);
   });
 
   it("?only=production&brands= rebuilds just the brands an edit expired", async () => {
@@ -63,7 +68,8 @@ describe("GET /api/warm", () => {
     );
     expect(res.status).toBe(200);
     const calls = productionReport.mock.calls.map(([b, x]) => `${b}:${x}`);
-    expect(calls).toEqual(["my-first-million:true"]);
+    // In Production's key first (the busier screen), then the queue's.
+    expect(calls).toEqual(["my-first-million:true", "my-first-million:false"]);
   });
 
   it("?only=production without the secret is a 401 noop", async () => {
