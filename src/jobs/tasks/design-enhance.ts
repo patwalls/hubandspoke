@@ -12,6 +12,7 @@
 // call, no ffmpeg, so it shouldn't wait behind renders.
 import type { Task } from "graphile-worker";
 import OpenAI, { toFile } from "openai";
+import { meteredOpenAI } from "@/lib/llm/metered-openai";
 import { fetch as undiciFetch } from "undici";
 import { imageSize } from "image-size";
 import { and, eq } from "drizzle-orm";
@@ -35,7 +36,7 @@ const MAX_SOURCE_BYTES = 25 * 1024 * 1024;
 const OPENAI_TIMEOUT_MS = 180_000;
 
 let _openai: OpenAI | null = null;
-const openai = () => (_openai ??= new OpenAI());
+const openai = () => (_openai ??= meteredOpenAI("jobs/design-enhance"));
 
 async function loadSource(src: ImageSource, signal: AbortSignal): Promise<{ buf: Buffer; type: string }> {
   if (!canEnhance(src)) throw new Error("Only stored or https pictures can be enhanced");

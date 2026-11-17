@@ -2265,6 +2265,14 @@ schedule matcher…) goes through `meteredAnthropic(feature)`
 tokens) after the response arrives. The insert is fire-and-forget on the same
 process's DB pool — it never fails or delays the task. No new task or cron.
 
+OpenAI calls (2026-11-17, ai-spend M2) go through `meteredOpenAI(feature)`
+(`src/lib/llm/metered-openai.ts`) the same way, `provider = 'openai'`:
+`jobs/whisper-pipeline` and `services/clip-editor/transcribe-upload`
+(whisper-1, billed by duration → `audio_seconds`), `jobs/diarize-transcript`
+(gpt-4o-transcribe-diarize, tokens) and `jobs/design-enhance` (gpt-image,
+tokens). The model comes from the request's multipart `model` field because
+those responses don't name it.
+
 ## External systems
 
 | System | Used by | Cost notes |

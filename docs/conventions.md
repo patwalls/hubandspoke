@@ -629,8 +629,11 @@ for the worker); one-off scripts and tests record nothing. **Keep
 `metered.ts` free of DB imports** — client components import pure helpers
 from the services that build a client, so it lands in browser bundles (a DB
 import there breaks `next build` with "Can't resolve 'tls'"). Store
-tokens, not dollars — prices are applied at read time. OpenAI calls (Whisper,
-image) are not metered yet.
+tokens, not dollars — prices are applied at read time. OpenAI clients are
+the same: `meteredOpenAI("<feature>")` from `src/lib/llm/metered-openai.ts`,
+never a bare `new OpenAI()` (whisper-1 records `audio_seconds`, token models
+record tokens). A unit test (`metered-openai.test.ts`) fails on any bare
+`new Anthropic(` / `new OpenAI(` in `src/` outside `src/lib/llm/`.
 
 ## LLM eval tests (gated) — `*.eval.test.ts`
 

@@ -22,6 +22,8 @@ export interface LlmUsage {
   outputTokens: number;
   cacheReadTokens: number;
   cacheWriteTokens: number;
+  /** Audio billed by duration (OpenAI whisper-1); absent for token-billed calls. */
+  audioSeconds?: number;
 }
 
 type RawUsage = {
@@ -99,7 +101,8 @@ export function setLlmCallRecorder(fn: RecordFn | null): void {
   (globalThis as WithRecorder)[RECORDER_KEY] = fn ?? undefined;
 }
 
-function installedRecorder(): RecordFn | undefined {
+/** The recorder installed at boot, if any. Shared with metered-openai.ts. */
+export function installedRecorder(): RecordFn | undefined {
   return (globalThis as WithRecorder)[RECORDER_KEY];
 }
 
