@@ -10,7 +10,8 @@
  * and writes one row. The caller's response is untouched: we read a clone.
  *
  * Recording never throws and never blocks the caller: a failed insert is
- * logged and dropped. Dollars are NOT stored; they are computed at read time
+ * logged and dropped. Nothing is recorded until a server process installs the
+ * writer (`installLlmCallRecorder()` in ./record.ts). Dollars are NOT stored; they are computed at read time
  * from a price table so a price change never rewrites history.
  */
 import Anthropic from "@anthropic-ai/sdk";
@@ -83,26 +84,34 @@ export function isBilledMessagesUrl(url: string): boolean {
   }
 }
 
-async function recordLlmCall(provider: string, feature: string, usage: LlmUsage): Promise<void> {
-  // Imported lazily so modules that build a client (and their unit tests)
-  // don't open a DB connection just by being imported.
-  const [{ db }, { llmCalls }] = await Promise.all([
-    import("@/lib/db"),
-    import("@/lib/db/schema"),
-  ]);
-  await db.insert(llmCalls).values({ provider, feature, ...usage });
+export type RecordFn = (provider: string, feature: string, usage: LlmUsage) => Promise<void>;
+
+// The DB writer lives in ./record.ts (server-only) and is installed at boot by
+// src/instrumentation.ts (web) and src/jobs/worker.ts (worker). This module
+// must stay free of DB imports: client components import pure helpers from
+// services that build a metered client, so it ends up in browser bundles.
+// Kept on globalThis because Next bundles instrumentation separately from
+// routes — a module-level variable would not be shared between them.
+const RECORDER_KEY = Symbol.for("hubandspoke.llmCallRecorder");
+type WithRecorder = typeof globalThis & { [RECORDER_KEY]?: RecordFn };
+
+export function setLlmCallRecorder(fn: RecordFn | null): void {
+  (globalThis as WithRecorder)[RECORDER_KEY] = fn ?? undefined;
 }
 
-type RecordFn = (provider: string, feature: string, usage: LlmUsage) => Promise<void>;
+function installedRecorder(): RecordFn | undefined {
+  return (globalThis as WithRecorder)[RECORDER_KEY];
+}
 
 /** A `fetch` that records the usage of every billed Messages response. Exported for tests. */
 export function meteredFetch(
   feature: string,
   opts: { record?: RecordFn; fetchImpl?: typeof fetch } = {},
 ): typeof fetch {
-  const record = opts.record ?? recordLlmCall;
   return async (input, init) => {
     const res = await (opts.fetchImpl ?? globalThis.fetch)(input, init);
+    const record = opts.record ?? installedRecorder();
+    if (!record) return res; // no recorder installed (scripts, tests, browser)
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     if (!res.ok || !isBilledMessagesUrl(url)) return res;
     const copy = res.clone();

@@ -623,7 +623,12 @@ name — streams included — without touching the response the caller reads.
 Name the feature after the module (`clip-idea-agent`,
 `newsletter-drafter/agent`, `jobs/design-frames`) so a spend read groups
 cleanly. Recording is fire-and-forget: a failed insert logs a warning and the
-call still succeeds. Tests that inject `client:` stay unmetered (no DB). Store
+call still succeeds. The DB writer is `src/lib/llm/record.ts`, installed once
+per process at boot (`src/instrumentation.ts` for web, `src/jobs/worker.ts`
+for the worker); one-off scripts and tests record nothing. **Keep
+`metered.ts` free of DB imports** — client components import pure helpers
+from the services that build a client, so it lands in browser bundles (a DB
+import there breaks `next build` with "Can't resolve 'tls'"). Store
 tokens, not dollars — prices are applied at read time. OpenAI calls (Whisper,
 image) are not metered yet.
 

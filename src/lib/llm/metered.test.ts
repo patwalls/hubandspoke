@@ -1,5 +1,8 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
+  setLlmCallRecorder,
   isBilledMessagesUrl,
   meteredFetch,
   usageFromMessageBody,
@@ -107,5 +110,34 @@ describe("meteredFetch", () => {
     expect(record).toHaveBeenCalledOnce();
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
+  });
+});
+
+describe("the installed recorder", () => {
+  afterEach(() => setLlmCallRecorder(null));
+  const anthropic = async () => new Response(JSON.stringify(body));
+
+  it("records nothing until a server process installs one, then uses it", async () => {
+    const record = vi.fn(async () => {});
+    const f = meteredFetch("x", { fetchImpl: anthropic });
+    await f("https://api.anthropic.com/v1/messages");
+    await new Promise((r) => setTimeout(r, 0));
+    expect(record).not.toHaveBeenCalled();
+
+    setLlmCallRecorder(record);
+    await f("https://api.anthropic.com/v1/messages");
+    await new Promise((r) => setTimeout(r, 0));
+    expect(record).toHaveBeenCalledWith("anthropic", "x", expect.objectContaining({ outputTokens: 80 }));
+  });
+});
+
+// Regression (PR #194's first CI run): client components import pure helpers
+// from services that build a metered client, so metered.ts lands in browser
+// bundles — any DB import here (even a lazy one) breaks `next build` with
+// "Can't resolve 'tls'". The DB writer lives in record.ts.
+describe("metered.ts stays browser-safe", () => {
+  it("imports nothing from the DB layer", () => {
+    const src = readFileSync(join(__dirname, "metered.ts"), "utf8");
+    expect(src).not.toMatch(/["']@\/lib\/db|["']\.\/record|["']postgres["']/);
   });
 });

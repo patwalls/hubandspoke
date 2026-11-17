@@ -21,8 +21,10 @@ import {
 import { RECONCILE_INTERVAL_MS, reconcileLocks, shouldReportReconcile } from "./lock-reconcile";
 import { workerLogger } from "./worker-logger";
 import { isBlockedError } from "./blocked";
+import { installLlmCallRecorder } from "@/lib/llm/record";
 
 async function main() {
+  installLlmCallRecorder(); // every Anthropic call a task makes records its tokens (llm_calls)
   // Own pool with explicit SSL — Heroku Postgres requires it, and
   // graphile-worker's `connectionString` shortcut doesn't negotiate it.
   const pgPool = buildPgPool({ max: 6 });
