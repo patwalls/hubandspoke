@@ -1086,6 +1086,13 @@
       "when": 1794875740953,
       "tag": "0154_llm_calls",
       "breakpoints": true
+    },
+    {
+      "idx": 155,
+      "version": "7",
+      "when": 1794892308188,
+      "tag": "0155_llm_calls_audio_seconds",
+      "breakpoints": true
     }
   ]
 }

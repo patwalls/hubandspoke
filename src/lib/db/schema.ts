@@ -3128,6 +3128,8 @@ export const llmCalls = pgTable(
     outputTokens: integer("output_tokens").notNull().default(0),
     cacheReadTokens: integer("cache_read_tokens").notNull().default(0),
     cacheWriteTokens: integer("cache_write_tokens").notNull().default(0),
+    /** Seconds of audio for calls billed by duration (OpenAI whisper-1); 0 otherwise. */
+    audioSeconds: real("audio_seconds").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [

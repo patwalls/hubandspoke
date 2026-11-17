@@ -17,7 +17,7 @@ import { spawn } from "child_process";
 import type { Task } from "graphile-worker";
 import { eq, sql } from "drizzle-orm";
 import ffmpegInstaller from "@ffmpeg-installer/ffmpeg";
-import OpenAI from "openai";
+import { meteredOpenAI } from "@/lib/llm/metered-openai";
 import { db } from "@/lib/db";
 import { accounts, productionItems, transcripts } from "@/lib/db/schema";
 import { getPresignedGetUrl } from "@/lib/s3";
@@ -184,7 +184,7 @@ async function diarizeOneChunk(args: {
     }
 
     const started = Date.now();
-    const resp = (await new OpenAI().audio.transcriptions.create(
+    const resp = (await meteredOpenAI("jobs/diarize-transcript").audio.transcriptions.create(
       {
         file: createReadStream(audioPath),
         model: DIARIZE_MODEL,

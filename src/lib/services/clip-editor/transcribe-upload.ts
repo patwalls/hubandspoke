@@ -7,6 +7,7 @@
  * pipeline (src/jobs/tasks/whisper-pipeline.ts).
  */
 import OpenAI from "openai";
+import { meteredOpenAI } from "@/lib/llm/metered-openai";
 import { punctuateWords } from "@/lib/transcripts/punctuate-words";
 
 const WHISPER_MODEL = "whisper-1";
@@ -27,7 +28,7 @@ interface WhisperVerboseResponse {
 let _openai: OpenAI | null = null;
 function openai(): OpenAI {
   if (!process.env.OPENAI_API_KEY) throw new Error("OPENAI_API_KEY not set");
-  return (_openai ??= new OpenAI());
+  return (_openai ??= meteredOpenAI("services/clip-editor/transcribe-upload"));
 }
 
 export async function transcribeUploadAudio(audio: File): Promise<UploadWord[]> {

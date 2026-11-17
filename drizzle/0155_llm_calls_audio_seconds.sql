@@ -1,0 +1,1 @@
+ALTER TABLE "llm_calls" ADD COLUMN "audio_seconds" real DEFAULT 0 NOT NULL;

@@ -24,6 +24,7 @@ import { spawn } from "child_process";
 import { eq, sql } from "drizzle-orm";
 import ffmpegInstaller from "@ffmpeg-installer/ffmpeg";
 import OpenAI from "openai";
+import { meteredOpenAI } from "@/lib/llm/metered-openai";
 import { db } from "@/lib/db";
 import { productionItems, syncLogs, transcripts } from "@/lib/db/schema";
 import {
@@ -89,7 +90,7 @@ function openai(): OpenAI {
       "whisper_failed",
     );
   }
-  _openai = new OpenAI();
+  _openai = meteredOpenAI("jobs/whisper-pipeline");
   return _openai;
 }
 
