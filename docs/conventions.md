@@ -604,6 +604,14 @@ fresh-no-auth browser, add
 CI & Dependabot below — CI gates on typecheck, unit tests and build only).
 Adding e2e is a follow-up (browser caching, secrets, flake budget).
 
+**The product loop's browser check** (`scripts/loop-e2e.sh`, run on the
+MacBook Pro by `ship run hubandspoke e2e --branch …`) keeps its own
+`node_modules` and `.next` in the broker's worktree, both keyed on the
+`package-lock.json` sum: a dependency update reinstalls one and clears the
+other, so a Next upgrade never needs a hand cache clear. A `.next` that is a
+link (the broker links gitignored entries in from Pat's checkout) is replaced
+by a real one, never cleared through. Test: `src/app/loop-e2e-deps.test.ts`.
+
 **Visual verification from Claude Code.** `@playwright/mcp` is registered
 in `.mcp.json` as the `playwright` server. From inside Claude Code,
 `mcp__playwright__browser_navigate` + `mcp__playwright__browser_snapshot`
