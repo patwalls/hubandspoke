@@ -36,7 +36,12 @@ const MODEL = "claude-haiku-5-5";
 //   clips (hooks-learn M3) — returns `onScreenTitle`, stored on
 //   clip_ideas.on_screen_title. Prompt otherwise identical to v5, so clip-odds
 //   and clip-trim reads use generated_by ~ 'hook-v[56]'.
-export const HOOK_PROMPT_VERSION = 6;
+// v7 (2026-11-18): + WHERE THEY ENDED INSTEAD — up to 5 quoted endings (the AI
+//   window's last words → the editor's) under the trim block (clip-trim M3).
+//   On v5/v6 the opening cut fell (42% → 20% of edited clips) but the ending
+//   cut didn't (~60%). Prompt otherwise = v6; clip-odds / clip-trim reads use
+//   generated_by ~ 'hook-v[5-7]', clip-trim compares v7 endings with v5/v6.
+export const HOOK_PROMPT_VERSION = 7;
 export const HOOK_GENERATED_BY = `${MODEL}:hook-v${HOOK_PROMPT_VERSION}`;
 
 const DEFAULT_FORMAT_BLOCK = `FORMAT — narrator-overlay hook, 30–60s vertical Reel.

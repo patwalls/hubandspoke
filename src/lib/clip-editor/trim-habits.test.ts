@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createDefaultDoc, type ClipEditDoc } from "./doc";
-import { clipTrim, runUpSkip, summarizeTrims, trimHabitsBlock, trimHabitsLine } from "./trim-habits";
+import { clipTrim, endingPairs, runUpSkip, summarizeTrims, trimHabitsBlock, trimHabitsLine } from "./trim-habits";
 
 const IDEA = { startSec: 100, endSec: 160 };
 const doc = (): ClipEditDoc => structuredClone(createDefaultDoc({ startSec: 100, endSec: 160, hook: "h" }));
@@ -134,5 +134,44 @@ describe("runUpSkip (editor: skip the run-up, M4)", () => {
   it("ignores an uploaded clip's words", () => {
     const up = words.map((w) => ({ ...w, mediaId: "m1" }));
     expect(runUpSkip(IDEA, doc(), up, 9)).toBeNull();
+  });
+});
+
+describe("endingPairs + the WHERE THEY ENDED INSTEAD block (clip-trim M3, hook-v7)", () => {
+  // One word every 2 s across the window: w100 … w158.
+  const words = Array.from({ length: 30 }, (_, i) => ({ text: `w${100 + i * 2}`, startSec: 100 + i * 2 }));
+  const row = (d: ClipEditDoc) => ({ ...IDEA, doc: d, words });
+
+  it("quotes the AI window's last words and the last words the editor kept, for clips whose end was cut", () => {
+    const pairs = endingPairs([row(cut(doc(), 150, 160)), row(doc()), row(cut(doc(), 100, 120))]);
+    expect(pairs).toHaveLength(1);
+    expect(pairs[0].cutSec).toBe(10);
+    expect(pairs[0].aiEnd.split(" ").at(-1)).toBe("w158");
+    expect(pairs[0].editorEnd.split(" ").at(-1)).toBe("w148");
+    expect(pairs[0].aiEnd.split(" ")).toHaveLength(12);
+  });
+
+  it("skips slivers under 3 s, uploaded clips' words, and stops at the cap", () => {
+    expect(endingPairs([row(cut(doc(), 158.5, 160))])).toEqual([]);
+    const uploaded = { ...IDEA, doc: cut(doc(), 150, 160), words: words.map((w) => ({ ...w, mediaId: "m1" })) };
+    expect(endingPairs([uploaded])).toEqual([]);
+    expect(endingPairs(Array.from({ length: 8 }, () => row(cut(doc(), 150, 160))), 3)).toHaveLength(3);
+  });
+
+  it("the block quotes the pairs only when editors cut the ending often enough to learn from", () => {
+    const tails = [1, 2, 3, 4, 5].map(() => cut(doc(), 145, 160));
+    const s = summarizeTrims(tails.map((d) => ({ ...IDEA, doc: d })))!;
+    const endings = endingPairs(tails.map(row));
+    const block = trimHabitsBlock({ ...s, endings })!;
+    expect(block).toContain("WHERE THEY ENDED INSTEAD");
+    expect(block).toContain('AI ended: "…');
+    expect(block).toContain('w158" → editor ended: "…');
+    expect(block).toContain("(15s cut)");
+    expect(block.match(/AI ended:/g)).toHaveLength(5);
+
+    const heads = [1, 2, 3, 4, 5].map(() => cut(doc(), 100, 115));
+    const hs = summarizeTrims(heads.map((d) => ({ ...IDEA, doc: d })))!;
+    expect(trimHabitsBlock({ ...hs, endings })).not.toContain("WHERE THEY ENDED INSTEAD");
+    expect(trimHabitsBlock(s)).not.toContain("WHERE THEY ENDED INSTEAD");
   });
 });

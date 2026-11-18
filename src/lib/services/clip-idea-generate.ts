@@ -287,7 +287,7 @@ export async function generateClipIdeasForItem(
   });
   const editorRewrites = hookLearning.pairs;
   // How editors trim this format's AI clip windows (clip-trim M1). Fail-soft.
-  const editorTrims = await loadTrimHabits({ brand: item.brand, formatName: format.name }).catch((err) => {
+  const editorTrims = await loadTrimHabits({ brand: item.brand, formatName: format.name, withEndings: true }).catch((err) => {
     console.warn(`[clip-idea-generate] format=${format.name} trim habits read failed: ${err instanceof Error ? err.message : err}`);
     return null;
   });
