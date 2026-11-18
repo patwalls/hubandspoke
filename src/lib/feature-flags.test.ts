@@ -75,7 +75,7 @@ describe("resolveFeatureFlags", () => {
       newsletterTemplateAdmin: false,
       winnersEmail: false,
       myWorkDigest: true,
-      crossPostUsualEditor: false,
+      crossPostUsualEditor: true,
     });
     expect(resolveFeatureFlags({ email: "Sam@StarterStory.com" }, {}).newsletterDrafter).toBe(true);
     expect(resolveFeatureFlags({ email: "Sam@StarterStory.com" }, {}).newsletterTemplateAdmin).toBe(true);
