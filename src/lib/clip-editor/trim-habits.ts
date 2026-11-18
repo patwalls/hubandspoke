@@ -29,6 +29,20 @@ export interface TrimSummary {
   medianHeadSec: number;
   tailCut: number;
   medianTailSec: number;
+  /** Quoted examples of where the AI's window ended vs where the editor
+   *  ended the clip (clip-trim M3, hook-v7). Only the writer's loader fills
+   *  these; absent everywhere else. */
+  endings?: EndingPair[];
+}
+
+/** One edited clip's ending, in words (clip-trim M3). */
+export interface EndingPair {
+  /** The last words inside the AI's window. */
+  aiEnd: string;
+  /** The last words the editor kept. */
+  editorEnd: string;
+  /** Seconds the editor cut off the end. */
+  cutSec: number;
 }
 
 /** A cut shorter than this is an edge tidy, not a trim. */
@@ -108,11 +122,62 @@ export function trimHabitsBlock(s: TrimSummary | null): string | null {
     facts.push(`cut the ending on ${s.tailCut} (median ${s.medianTailSec}s)`);
     moves.push(`end on the payoff line, not the wind-down after it (set tightEndSec up to ~${s.medianTailSec}s earlier when the section trails off)`);
   }
+  const endings = share(s.tailCut) ? (s.endings ?? []).slice(0, MAX_ENDING_PAIRS) : [];
+  const endingsBlock = endings.length
+    ? [
+        ``,
+        `WHERE THEY ENDED INSTEAD — recent clips of this format, the AI window's last words → the line the editor ended on:`,
+        ...endings.map((e) => `- AI ended: "…${e.aiEnd}" → editor ended: "…${e.editorEnd}" (${Math.round(e.cutSec)}s cut)`),
+        `End on a line like the editor's: the point landing, not the talk that follows it.`,
+      ]
+    : [];
   return [
     `HOW EDITORS TRIM THIS FORMAT'S CLIPS — of the last ${s.clips} edited clips, editors ${facts.join(" and ")} before posting.`,
     ``,
     `Cut it the way they do: ${moves.join("; ")}. Only narrow where this section actually has that slack — a section that already starts on its point keeps its start. The anchor stays inside, and the clip stays at least 25s.`,
+    ...endingsBlock,
   ].join("\n");
+}
+
+// ─── Endings in words (clip-trim M3) ───────────────────────────────────────
+
+/** Pairs the writer is shown at most. */
+export const MAX_ENDING_PAIRS = 5;
+/** Words quoted from each side of a pair. */
+const ENDING_WORDS = 12;
+
+function wordsEndingAt(words: Array<{ text: string; startSec: number; mediaId?: string }>, from: number, to: number): string {
+  const inside = words.filter((w) => !w.mediaId && w.startSec >= from && w.startSec < to);
+  return inside
+    .slice(-ENDING_WORDS)
+    .map((w) => w.text.trim())
+    .filter(Boolean)
+    .join(" ");
+}
+
+/**
+ * Seconds alone didn't move the endings (hook-v5/v6: editors still cut the
+ * end on ~60% of edited clips, as before v4), so the writer also sees the
+ * words: for each recent clip whose end was cut ≥ MIN_TRIM_SEC, the AI
+ * window's last words and the last words the editor kept. Rows come newest
+ * first; clips without words over the window are skipped.
+ */
+export function endingPairs(
+  rows: Array<{ startSec: number; endSec: number; doc: ClipEditDoc; words: Array<{ text: string; startSec: number; mediaId?: string }> }>,
+  max = MAX_ENDING_PAIRS,
+): EndingPair[] {
+  const out: EndingPair[] = [];
+  for (const r of rows) {
+    if (out.length >= max) break;
+    const t = clipTrim(r, r.doc);
+    if (!t || t.tailSec < MIN_TRIM_SEC) continue;
+    const keptEnd = r.endSec - t.tailSec;
+    const aiEnd = wordsEndingAt(r.words, r.startSec, r.endSec);
+    const editorEnd = wordsEndingAt(r.words, r.startSec, keptEnd);
+    if (!aiEnd || !editorEnd || aiEnd === editorEnd) continue;
+    out.push({ aiEnd, editorEnd, cutSec: t.tailSec });
+  }
+  return out;
 }
 
 /** The format page's one line (clip-trim M2), e.g. "Editors cut the opening

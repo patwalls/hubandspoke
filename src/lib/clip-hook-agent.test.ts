@@ -349,8 +349,8 @@ describe("writeFormatHookForSection — wiring", () => {
     expect(candidate.reason).toMatch(/agent error/i);
   });
 
-  it("is attributed to the prompt version that writes on-screen titles (hook-v6; v5 added real outcomes)", () => {
-    expect(HOOK_PROMPT_VERSION).toBe(6);
-    expect(HOOK_GENERATED_BY).toMatch(/:hook-v6$/);
+  it("is attributed to the prompt version that quotes editors' endings (hook-v7; v6 titles, v5 real outcomes)", () => {
+    expect(HOOK_PROMPT_VERSION).toBe(7);
+    expect(HOOK_GENERATED_BY).toMatch(/:hook-v7$/);
   });
 });
