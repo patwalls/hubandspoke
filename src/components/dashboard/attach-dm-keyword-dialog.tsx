@@ -50,8 +50,10 @@ interface Props {
    *  go.starterstory.com pool. */
   brand?: string;
   /** Called after a successful save so the parent can refresh its view.
-   *  Receives the newly-attached slug (or null on detach). */
-  onSaved: (slug: string | null) => Promise<void> | void;
+   *  Receives the newly-attached slug (or null on detach), plus every DM
+   *  keyword in the pool so the caller can spot another post's keyword in
+   *  copied caption text (`followKeywordInCaption`). */
+  onSaved: (slug: string | null, pool: string[]) => Promise<void> | void;
 }
 
 type View = "loading" | "list" | "edit" | "new";
@@ -262,7 +264,7 @@ export function AttachDmKeywordDialog({
       // points the per-post link at it and the keyword link at the per-post go
       // URL. Then attach the keyword slug to the post.
       await saveChain(selectedSlug, trimmed);
-      await onSaved(selectedSlug);
+      await onSaved(selectedSlug, links.map((l) => l.slug));
       onOpenChange(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Save failed");
@@ -292,7 +294,7 @@ export function AttachDmKeywordDialog({
       // Same go→go chain as the existing-slug path; the server creates the
       // keyword link if it doesn't exist yet.
       await saveChain(slugValue, urlValue);
-      await onSaved(slugValue);
+      await onSaved(slugValue, links.map((l) => l.slug));
       onOpenChange(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Save failed");
@@ -306,7 +308,7 @@ export function AttachDmKeywordDialog({
     setSaving(true);
     setError(null);
     try {
-      await onSaved(null);
+      await onSaved(null, links.map((l) => l.slug));
       onOpenChange(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Detach failed");

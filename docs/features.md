@@ -277,6 +277,14 @@ shim are gone. Replacement architecture:
   prompts for its destination URL (shared across all posts using that slug),
   then two writes land: `PATCH /api/short-links/:slug` + `PUT /api/production-items`
   setting `productionItems.short_link_slug`.
+- **The caption follows the keyword (2026-11-18).** After the dialog saves, the
+  post's current draft caption is rewritten to the new keyword (toast "Caption now
+  says X", mark `dm-keyword:caption-followed`) — on the post page and in the clip
+  editor's Post tab alike. `followKeywordInCaption` (`src/lib/dm-keyword-text.ts`)
+  swaps the post's previous keyword, or — when the caption carries another post's
+  keyword copied over on a cross-post/repost — the one pool keyword quoted
+  upper-case (`"SIDEHUSTLE"`/`“SIDEHUSTLE”`). Two quoted pool keywords or none →
+  the caption is left alone.
 - `productionItems.short_link_slug` is the only hubandspoke-side state for the
   per-post attachment. No tables, no redirect route, and no click-tracking code
   in hubandspoke — the slug is a pointer to the Rails-side short link.

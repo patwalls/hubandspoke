@@ -98,7 +98,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { FormatChannelWithAccount } from "@/lib/format-channels";
-import type { PostType } from "@/lib/platform-field-schemas";
+import { PLATFORM_FIELD_MAP, type PostType } from "@/lib/platform-field-schemas";
+import { followKeywordInCaption } from "@/lib/dm-keyword-text";
 import { PLATFORM_META, toPlatform } from "@/lib/platforms";
 import { ContentPreview } from "./preview/content-preview";
 import { PublishedEmbed } from "./preview/published-embed";
@@ -1829,9 +1830,11 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
   // snapshot — blur-save semantics. Returns quickly if the value matches the
   // last server-known value for that field (avoids a PUT on every blur).
   const onCommit = useCallback(
-    async (fieldKey: string) => {
+    async (fieldKey: string, value?: string) => {
       if (!draft) return;
-      const nextValue = liveContent?.[fieldKey];
+      // `value` lets a caller commit a value it just set with onLocalEdit,
+      // before React has re-rendered liveContent (the keyword dialog below).
+      const nextValue = value ?? liveContent?.[fieldKey];
       const prevValue = draft.content[fieldKey];
       if (
         (typeof nextValue === "string" && prevValue === nextValue) ||
@@ -4988,9 +4991,22 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
         currentSlug={item.shortLinkSlug ?? null}
         baseUrl={dmBaseUrl}
         brand={item.brand ?? undefined}
-        onSaved={async (nextSlug) => {
+        onSaved={async (nextSlug, pool) => {
+          const prevSlug = item.shortLinkSlug ?? null;
           await persistField({ shortLinkSlug: nextSlug });
           setDmRefresh((k) => k + 1);
+          // The caption follows the keyword (as it does in the clip editor's
+          // Post tab): people used to retype "Comment or DM me …" by hand
+          // after every keyword change.
+          const captionKey = item.postType ? PLATFORM_FIELD_MAP[item.postType as PostType]?.caption ?? null : null;
+          const caption = captionKey && typeof liveContent?.[captionKey] === "string" ? (liveContent[captionKey] as string) : null;
+          if (!canEdit || !draft || !captionKey || caption == null) return;
+          const rewritten = followKeywordInCaption(caption, { prev: prevSlug, next: nextSlug, pool });
+          if (rewritten === caption) return;
+          onLocalEdit(captionKey, rewritten);
+          await onCommit(captionKey, rewritten);
+          trackUsage("dm-keyword:caption-followed");
+          toast.success(`Caption now says ${nextSlug!.toUpperCase()}`);
         }}
       />
 

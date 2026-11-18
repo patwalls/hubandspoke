@@ -20,7 +20,7 @@ import { ContentPreview } from "@/components/dashboard/preview/content-preview";
 import type { EnrichmentMedia } from "@/components/dashboard/enrichment-dialog";
 import { AttachDmKeywordDialog } from "@/components/dashboard/attach-dm-keyword-dialog";
 import { PLATFORM_FIELD_MAP, type PostType } from "@/lib/platform-field-schemas";
-import { captionMentionsKeyword, keywordCtaLine, replaceKeywordInCaption } from "@/lib/dm-keyword-text";
+import { captionMentionsKeyword, followKeywordInCaption, keywordCtaLine, replaceKeywordInCaption } from "@/lib/dm-keyword-text";
 import { useCanEditBrand } from "@/components/brand-access";
 
 interface DraftRow {
@@ -170,11 +170,11 @@ export function PostPane({
   );
 
   /** A new keyword: remember it, tell the parent, and rewrite the caption. */
-  const keywordChanged = async (slug: string | null, from: string | null) => {
+  const keywordChanged = async (slug: string | null, from: string | null, pool?: string[]) => {
     setKeywordState({ base: dmKeywordProp, value: slug });
     onDmKeywordChange?.(slug);
-    if (!captionKey || !slug || !from) return;
-    const rewritten = replaceKeywordInCaption(caption, from, slug);
+    if (!captionKey || !slug) return;
+    const rewritten = followKeywordInCaption(caption, { prev: from, next: slug, pool });
     if (rewritten !== caption) {
       onLocalEdit(captionKey, rewritten);
       await onCommit(captionKey, rewritten);
@@ -292,7 +292,7 @@ export function PostPane({
         itemId={itemId}
         currentSlug={currentKeyword}
         baseUrl="https://go.starterstory.com"
-        onSaved={(slug) => keywordChanged(slug, currentKeyword)}
+        onSaved={(slug, pool) => keywordChanged(slug, currentKeyword, pool)}
       />
 
       <div className="min-h-0 flex-1 overflow-y-auto pr-1">
