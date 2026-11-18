@@ -106,12 +106,15 @@ const FLAGS = {
   /**
    * Cross-post picker: a target whose cross-posts always get handed to one
    * editor (e.g. the Shorts editor) is assigned to them, noted on its row,
-   * instead of the dialog's "Assign to" pick. Pat-first while it proves out.
+   * instead of the dialog's "Assign to" pick. Pat-first 2026-11-18 07:25,
+   * on for everyone the same day (2026-11-18): no errors, and the e2e spec
+   * covers the dialog. The allowlist stays so flipping back restores it.
    * See docs/features.md → "Cross-post queue".
    */
   crossPostUsualEditor: {
     emails: ["patrickswalls@gmail.com", "e2e@local.test"],
     envVar: "FEATURE_CROSS_POST_USUAL_EDITOR_EMAILS",
+    everyone: true,
   },
 } as const satisfies Record<string, FlagDefinition>;
 

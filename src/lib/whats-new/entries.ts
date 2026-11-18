@@ -43,6 +43,16 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-11-18-cross-post-usual-editor",
+    shippedAt: "2026-11-18T11:44:29Z",
+    kind: "feature",
+    title: "Cross-posts go straight to the editor who always takes them",
+    body: "When the last few cross-posts to an account were all handed to the same editor, a new one to that account is assigned to them automatically — its row in the Cross-post dialog says \"→ <name>\". Everything else still goes to the person you pick in \"Assign to\".",
+    href: "/[brand]/queue/cross-post",
+    screen: "/[brand]/queue/cross-post",
+    audience: { usersOf: ["/[brand]/queue/cross-post", "/[brand]/content/[id]?tab=cross-post"] },
+  },
+  {
     id: "2026-11-17-ai-spend-page",
     shippedAt: "2026-11-17T18:25:18Z",
     kind: "feature",
