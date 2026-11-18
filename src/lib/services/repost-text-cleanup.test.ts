@@ -155,4 +155,47 @@ describe("stripDateOpenerWithLLM", () => {
       OPENER_POST,
     );
   });
+
+  // The cross-post click waits on this call (POST /cross-post p50 ≈ 1.3 s,
+  // p95 in the 14 s bucket, 2026-11-18). These keep it bounded.
+  it("skips the LLM when the caption has no line break (no standalone opener line can exist)", async () => {
+    const fake = fakeClient({ toolInput: { opener: "x" } });
+    const oneLine = "8 years ago today I learned the most important lesson of my career.";
+    expect(await stripDateOpenerWithLLM(oneLine, { client: fake.client })).toBe(oneLine);
+    expect(fake.calls).toBe(0);
+  });
+
+  it("parallel cross-posts of one caption share a single model call", async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    const create = vi.fn(async () => {
+      await gate;
+      return {
+        content: [
+          {
+            type: "tool_use",
+            id: "t",
+            name: "return_opener",
+            input: { opener: "8 years ago today:" },
+          },
+        ],
+      } as unknown as Anthropic.Message;
+    });
+    const client = { messages: { create } } as unknown as Anthropic;
+    const all = Promise.all(
+      [1, 2, 3, 4].map(() => stripDateOpenerWithLLM(OPENER_POST, { client })),
+    );
+    release();
+    expect(await all).toEqual([OPENER_CLEANED, OPENER_CLEANED, OPENER_CLEANED, OPENER_CLEANED]);
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it("bounds the call: a short timeout and no retries, so a slow model never holds the click", async () => {
+    const fake = fakeClient({ toolInput: { opener: "" } });
+    await stripDateOpenerWithLLM(OPENER_POST, { client: fake.client });
+    const create = fake.client.messages.create as unknown as ReturnType<typeof vi.fn>;
+    const reqOpts = create.mock.calls[0][1] as { timeout?: number; maxRetries?: number };
+    expect(reqOpts.maxRetries).toBe(0);
+    expect(reqOpts.timeout).toBeLessThanOrEqual(4_000);
+  });
 });
