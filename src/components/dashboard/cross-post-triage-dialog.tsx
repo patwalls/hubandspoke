@@ -39,6 +39,7 @@ import type { BrandAccount } from "@/lib/services/cross-post-candidates";
 import { PreviewEmbed } from "./preview/embed";
 import { useDialogUrl } from "./use-dialog-url";
 import { useCanEditBrand } from "@/components/brand-access";
+import { useFeatureFlags } from "@/components/clip-editor/use-feature-flags";
 
 const VIEW_ONLY_TITLE = "View only — you don't have edit access to this brand";
 
@@ -290,6 +291,35 @@ export function CrossPostTriagePanel({
     };
   }, [assignableUsers.length]);
 
+  // Targets whose cross-posts always get handed to one editor (the Shorts
+  // editor, say): they go to that editor, whatever "Assign to" says, and the
+  // row says so. Per brand; flag `crossPostUsualEditor`.
+  const flags = useFeatureFlags();
+  const usualBrand = candidate.brand || (brand === "all" ? null : brand);
+  const [usualEditors, setUsualEditors] = useState<{
+    brand: string;
+    editors: Record<string, { userId: string; name: string | null }>;
+  } | null>(null);
+  useEffect(() => {
+    if (!flags?.crossPostUsualEditor || !usualBrand || !canEdit) return;
+    if (usualEditors?.brand === usualBrand) return;
+    let cancelled = false;
+    void fetch(`/api/cross-post-queue/usual-editors?brand=${encodeURIComponent(usualBrand)}`)
+      .then((r) => (r.ok ? r.json() : { editors: {} }))
+      .then((j: { editors?: Record<string, { userId: string; name: string | null }> }) => {
+        if (!cancelled) setUsualEditors({ brand: usualBrand, editors: j.editors ?? {} });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [flags?.crossPostUsualEditor, usualBrand, canEdit, usualEditors?.brand]);
+  /** The editor a target goes to when it isn't the "Assign to" pick. */
+  const usualEditorFor = (key: string) => {
+    const u = usualEditors?.brand === usualBrand ? usualEditors.editors[key] : undefined;
+    return u && u.userId !== assigneeUserId ? u : null;
+  };
+
   const targets: TargetPair[] = useMemo(() => {
     const existingByPair = new Map(
       candidate.existingCrossPosts.map((x) => [
@@ -437,7 +467,7 @@ export function CrossPostTriagePanel({
               targetAccountId: accountId,
               targetPostType: postType,
               assign: true,
-              editorUserId: assigneeUserId,
+              editorUserId: usualEditorFor(key)?.userId ?? assigneeUserId,
               manual: opts.manual,
             }),
           }
@@ -838,6 +868,15 @@ export function CrossPostTriagePanel({
                           PLATFORM_META[toPlatform(t.account.platform)].label}
                       </span>
                     </span>
+                    {!isDone && usualEditorFor(key) && (
+                      <span
+                        className="text-[10px] text-muted-foreground whitespace-nowrap"
+                        title={`The last cross-posts here were all handed to ${usualEditorFor(key)!.name ?? "them"}, so this one goes straight to them.`}
+                        data-testid="cross-post-usual-editor"
+                      >
+                        → {(usualEditorFor(key)!.name ?? "usual editor").split(" ")[0]}
+                      </span>
+                    )}
                     {isDone && (
                       <span
                         className="text-[10px] text-muted-foreground whitespace-nowrap"

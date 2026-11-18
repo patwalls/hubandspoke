@@ -39,3 +39,35 @@ export function usualTargetKeys(
   }
   return out;
 }
+
+// ── The target's usual editor ───────────────────────────────────────────
+// Some targets always end up with one person: the curator cross-posts a
+// reel everywhere assigned to themself, then hands the YouTube Short to the
+// Shorts editor by hand, every time. When a target's last USUAL_EDITOR_RUN
+// cross-posts all ended with the same editor, and none of them was that
+// editor's own (each was handed to them by whoever made it), the picker
+// assigns that target to them and says so on the row.
+
+export const USUAL_EDITOR_RUN = 5;
+
+export interface RecentCrossPost {
+  /** Who it's assigned to now (after any hand-off). */
+  editorUserId: string | null;
+  /** Who created it (the item_created event's user). */
+  creatorUserId: string | null;
+}
+
+/** The editor a target's cross-posts always go to, or null. `recent` is the
+ *  target's latest cross-posts, newest first. */
+export function usualEditorOf(recent: RecentCrossPost[]): string | null {
+  if (recent.length < USUAL_EDITOR_RUN) return null;
+  const run = recent.slice(0, USUAL_EDITOR_RUN);
+  const editor = run[0].editorUserId;
+  if (!editor) return null;
+  for (const r of run) {
+    if (r.editorUserId !== editor) return null;
+    // Their own cross-posts don't show a hand-off — that's just who posts.
+    if (!r.creatorUserId || r.creatorUserId === editor) return null;
+  }
+  return editor;
+}
