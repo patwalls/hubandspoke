@@ -30,3 +30,29 @@ function keywordPattern(keyword: string): RegExp {
   // characters are letters/digits/dashes, so \b works at both ends.
   return new RegExp(`\\b${escaped}\\b`, "gi");
 }
+
+/**
+ * The caption after the post's keyword changed to `next`, from the post
+ * page's keyword dialog. Two cases:
+ *  - the caption says the previous keyword → swap it (`replaceKeywordInCaption`);
+ *  - otherwise the caption may carry ANOTHER post's keyword (copied along
+ *    with the copy on a cross-post or repost). If exactly one keyword from
+ *    the pool appears quoted the way every post shows it (`"SIDEHUSTLE"`,
+ *    straight or curly quotes, upper-case), swap just those quoted tokens.
+ *    Quoted + upper-case only, so a pool slug that is also an ordinary word
+ *    ("launch") never rewrites the sentence it sits in.
+ * Returns the caption unchanged when there is nothing (or no single thing)
+ * to swap.
+ */
+export function followKeywordInCaption(caption: string, args: { prev: string | null; next: string | null; pool?: readonly string[] }): string {
+  const { prev, next } = args;
+  if (!next) return caption;
+  if (prev && captionMentionsKeyword(caption, prev)) return replaceKeywordInCaption(caption, prev, next);
+  const quoted = (slug: string) => {
+    const escaped = slug.toUpperCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`(["“])${escaped}(["”])`, "g");
+  };
+  const found = [...new Set((args.pool ?? []).map((s) => s.toLowerCase()))].filter((s) => s !== next.toLowerCase() && quoted(s).test(caption));
+  if (found.length !== 1) return caption;
+  return caption.replace(quoted(found[0]), (_m, open: string, close: string) => `${open}${next.toUpperCase()}${close}`);
+}
