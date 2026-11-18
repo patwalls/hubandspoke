@@ -95,6 +95,10 @@ export function removeOpenerLine(body: string, opener: string): string {
 // source is being cross-posted, minutes apart.
 const MEMO_MAX = 200;
 const memo = new Map<string, string>();
+/** Calls in flight, per body — parallel POSTs for one source join them. */
+const inflight = new Map<string, Promise<string | null>>();
+/** The longest the cross-post click waits on the model (p50 ≈ 1.3 s). */
+const CALL_TIMEOUT_MS = 4_000;
 
 function remember(body: string, opener: string) {
   memo.delete(body);
@@ -108,6 +112,7 @@ function remember(body: string, opener: string) {
 /** Test hook: forget remembered answers. */
 export function clearDateOpenerMemo() {
   memo.clear();
+  inflight.clear();
 }
 
 /**
@@ -127,31 +132,56 @@ export async function stripDateOpenerWithLLM(
   if (trimmed.length === 0) return body;
   if (trimmed.length < MIN_BODY_CHARS_FOR_LLM) return body;
 
+  // Structural pre-check: an opener is a standalone first line followed by
+  // a line break (the prompt's own definition). A caption with no line break
+  // after its first line can't have one — don't make the click wait on a
+  // model to say so.
+  if (!/\S[^\n]*\r?\n\s*\S/.test(body)) return body;
+
   const known = memo.get(body);
   if (known !== undefined) {
     remember(body, known);
     return removeOpenerLine(body, known);
   }
 
-  const client = opts.client ?? meteredAnthropic("repost-text-cleanup");
+  // The cross-post dialog sends one POST per target at the same moment, all
+  // with the same caption: they share one model call instead of N.
+  let pending = inflight.get(body);
+  if (!pending) {
+    pending = askOpener(body, opts.client ?? meteredAnthropic("repost-text-cleanup"));
+    inflight.set(body, pending);
+    void pending.finally(() => inflight.delete(body));
+  }
+  const opener = await pending;
+  return opener === null ? body : removeOpenerLine(body, opener);
+}
 
+/** The model's opener for `body` ("" = none), or null on any failure
+ *  (failures are not remembered, so the next cross-post asks again). */
+async function askOpener(body: string, client: Anthropic): Promise<string | null> {
   let response: Anthropic.Message;
   try {
-    response = await client.messages.create({
-      model: MODEL,
-      // The answer is one line at most.
-      max_tokens: 256,
-      system: SYSTEM_PROMPT,
-      tools: TOOLS,
-      tool_choice: { type: "tool", name: "return_opener" },
-      messages: [{ role: "user", content: body }],
-    });
+    response = await client.messages.create(
+      {
+        model: MODEL,
+        // The answer is one line at most.
+        max_tokens: 256,
+        system: SYSTEM_PROMPT,
+        tools: TOOLS,
+        tool_choice: { type: "tool", name: "return_opener" },
+        messages: [{ role: "user", content: body }],
+      },
+      // Someone is waiting on the click. A slow or overloaded model passes
+      // the caption through (the opener stays, the editor can delete it)
+      // instead of retrying with backoff for up to a minute.
+      { timeout: CALL_TIMEOUT_MS, maxRetries: 0 },
+    );
   } catch (err) {
     console.error(
       "stripDateOpenerWithLLM: LLM call failed; passing body through",
-      err,
+      err instanceof Error ? err.message : err,
     );
-    return body;
+    return null;
   }
 
   for (const block of response.content) {
@@ -159,9 +189,9 @@ export async function stripDateOpenerWithLLM(
     const input = block.input as { opener?: unknown };
     if (typeof input.opener !== "string") continue;
     remember(body, input.opener);
-    return removeOpenerLine(body, input.opener);
+    return input.opener;
   }
 
   // No tool_use block found — fail-soft.
-  return body;
+  return null;
 }
