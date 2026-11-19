@@ -20,6 +20,7 @@ import {
   type EditorRewriteExample,
 } from "@/lib/services/draft-algorithm/editor-rewrites";
 import { findInterestingTimestamps } from "@/lib/services/draft-algorithm/timestamp-finder";
+import { KEYWORD_PLACEHOLDER } from "@/lib/dm-keyword-text";
 
 // Opus for copywriting judgment. Short-form copy rewards nuance more than
 // speed — a weak hook sinks a post, and the cost delta vs haiku is trivial
@@ -132,7 +133,13 @@ const MODEL = "claude-opus-5-5";
 // the brand + format (editor-rewrites.ts) so those fixes happen up front.
 // v17 (2026-10-30): those pairs include cross-posts — a source caption
 // copied verbatim, then fixed by an editor — labelled COPIED CAPTION.
-export const PROMPT_VERSION = 17;
+// v18 (2026-11-19): DM KEYWORD. Instagram captions were drafted with
+// "Comment \"SIDEPROJECT\"" keywords copied from past captions and editor
+// rewrites — other posts' keywords — and editors swapped ~50 of them by hand
+// in a month. The per-call payload now says the post's own keyword, or, when
+// none is attached yet, to write the "KEYWORD" placeholder the keyword
+// dialogs fill in (src/lib/dm-keyword-text.ts).
+export const PROMPT_VERSION = 18;
 export const GENERATED_BY = `${MODEL}:v${PROMPT_VERSION}`;
 
 const SYSTEM_PROMPT = `You write platform-specific draft copy for a production team that turns long-form YouTube interviews into posts across X/Twitter, Instagram, LinkedIn, and YouTube.
@@ -365,6 +372,10 @@ export interface GenerateDraftArgs {
    *  (instagram_*, tiktok, threads, youtube_long/shorts) — same single-shot
    *  shape as v11 for those. */
   cta?: { channel: string; utmCampaign: string | null };
+  /** v18: set only for Instagram posts on a brand with ManyChat DM keywords.
+   *  `word` = the word people comment for the keyword attached to this post
+   *  (upper-cased in the prompt), or null when none is attached yet. */
+  dmKeyword?: { word: string | null };
   /** v13: real prior cross-post pairs from the team's publishing history,
    *  scoped to the same (accountId, sourcePostType → targetPostType)
    *  direction. The agent treats these as the canonical answer to "how
@@ -457,6 +468,30 @@ export interface GenerateDraftResult {
 // hook/description. Missing fields are dropped (not rendered as "—") so
 // slim items pay only for what they have. Returns null when there's no
 // editorial signal at all (all fields null) — caller filters out.
+/**
+ * v18: the post's ManyChat DM keyword, for Instagram captions. Past captions
+ * and editor rewrites quote keywords that belong to OTHER posts; copying one
+ * sends the reader's comment to someone else's link. With a keyword attached
+ * the caption uses it; without one it uses the KEYWORD_PLACEHOLDER the
+ * keyword dialogs swap for the real one. Null (no block) when not set.
+ */
+export function renderDmKeywordBlock(dm: GenerateDraftArgs["dmKeyword"]): string | null {
+  if (!dm) return null;
+  const word = dm.word?.trim().toUpperCase() || null;
+  const lines = [`## DM KEYWORD`];
+  if (word) {
+    lines.push(
+      `This post's ManyChat keyword is "${word}". If the caption asks people to comment a word to get the link DM'd, that word is "${word}", in quotes, exactly. Never use any other keyword — the ones quoted in past captions and editor rewrites belong to other posts.`,
+    );
+  } else {
+    lines.push(
+      `This post has no ManyChat keyword yet. The keywords quoted in past captions and editor rewrites ("Comment \"SOMETHING\"") belong to OTHER posts: never copy one and never make one up. If the caption asks people to comment a word to get the link DM'd, write the word as "${KEYWORD_PLACEHOLDER}", in quotes, exactly — it is replaced with the post's keyword when one is attached.`,
+    );
+  }
+  lines.push(``);
+  return lines.join("\n");
+}
+
 export function renderEditorialContextBlock(
   ec: EditorialContext | null | undefined,
 ): string | null {
@@ -1073,6 +1108,7 @@ export async function generateDraft(
       : null;
 
   const editorialContextBlock = renderEditorialContextBlock(args.editorialContext);
+  const dmKeywordBlock = renderDmKeywordBlock(args.dmKeyword);
 
   // v16: what editors keep changing in this format's drafts.
   const editorRewritesBlock = args.editorRewrites
@@ -1081,6 +1117,7 @@ export async function generateDraft(
 
   const perCallPayload = [
     ctaContextBlock,
+    dmKeywordBlock,
     priorPairsBlock,
     editorRewritesBlock,
     editorialContextBlock,

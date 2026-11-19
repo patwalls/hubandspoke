@@ -16,6 +16,8 @@ import { enqueue } from "@/jobs/enqueue";
 import { recordToolAction } from "@/lib/services/content-events";
 import { applyDraftPatch, NoCurrentDraftError } from "@/lib/services/content-drafts/apply-patch";
 import { parseDesignDoc } from "@/lib/design-editor/doc";
+import { followKeywordInCaption } from "@/lib/dm-keyword-text";
+import { commentKeywordFor } from "@/lib/cta-offer-brands";
 import type { DesignFill } from "@/lib/design-editor/template-fill";
 
 export class DesignNotFoundError extends Error {
@@ -106,6 +108,14 @@ export async function exportDesign(args: {
  * than racing it, using the platform's field schema so the simulator
  * renders it like any other draft.
  */
+/** `caption` with its quoted "KEYWORD" placeholder replaced by the post's
+ *  attached keyword; unchanged when either is missing. */
+async function fillKeywordPlaceholder(itemId: string, caption: string): Promise<string> {
+  const [item] = await db.select({ brand: productionItems.brand, slug: productionItems.shortLinkSlug }).from(productionItems).where(eq(productionItems.id, itemId)).limit(1);
+  const word = item ? commentKeywordFor(item.brand, item.slug) : null;
+  return word ? followKeywordInCaption(caption, { prev: null, next: word }) : caption;
+}
+
 export async function seedCaption(itemId: string, caption: string, actorUserId: string): Promise<void> {
   const [current] = await db
     .select({ content: contentDrafts.content })
@@ -114,9 +124,17 @@ export async function seedCaption(itemId: string, caption: string, actorUserId: 
     .limit(1);
   if (current) {
     const existing = (current.content as { caption?: unknown }).caption;
-    if (typeof existing === "string" && existing.trim()) return;
+    let patch = caption;
+    if (typeof existing === "string" && existing.trim()) {
+      // Left alone, except the draft writer's "KEYWORD" placeholder: the
+      // design path attaches the keyword on the server (ensureDmKeyword), so
+      // no dialog is there to fill it in.
+      const filled = await fillKeywordPlaceholder(itemId, existing);
+      if (filled === existing) return;
+      patch = filled;
+    }
     try {
-      await applyDraftPatch({ itemId, validatedPatch: { caption }, actorUserId });
+      await applyDraftPatch({ itemId, validatedPatch: { caption: patch }, actorUserId });
     } catch (err) {
       if (!(err instanceof NoCurrentDraftError)) throw err;
     }

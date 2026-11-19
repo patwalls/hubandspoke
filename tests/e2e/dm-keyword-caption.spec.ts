@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import postgres from "postgres";
 
 // Picking a DM keyword on the post page used to leave the caption saying the
@@ -7,7 +7,8 @@ import postgres from "postgres";
 // post. Now the caption follows the keyword. The short-link service is
 // external (no credentials in e2e), so only its calls are faked here; the
 // keyword save on the item and the caption save are the app's own.
-test("attaching a DM keyword on the post page rewrites the caption's keyword", async ({ page }) => {
+
+async function attachAndCheck(page: Page, opts: { cta: (other: string) => string; before: string; after: string; shot?: boolean }) {
   const sql = postgres(process.env.DATABASE_URL!, { max: 1 });
   try {
     const stamp = Date.now();
@@ -22,7 +23,7 @@ test("attaching a DM keyword on the post page rewrites the caption's keyword", a
     });
     expect(res.ok(), await res.text()).toBeTruthy();
     const id = (await res.json()).id as string;
-    const caption = `Built an app in a week ${stamp}.\n\n👇 Comment or DM me “SIDEHUSTLE” and I'll send you the full episode.`;
+    const caption = `Built an app in a week ${stamp}.\n\n👇 ${opts.cta("SIDEHUSTLE")}`;
     await sql`UPDATE production_items SET status = 'Ready To Publish', enrichment_completed_at = now() WHERE id = ${id}`;
     await sql`
       INSERT INTO content_drafts (production_item_id, version, is_current, content, field_schema_snapshot, generated_by)
@@ -41,7 +42,7 @@ test("attaching a DM keyword on the post page rewrites the caption's keyword", a
       await popup.getByRole("button", { name: "Got it" }).click();
     });
     await page.goto(`/starter-story/content/${id}`);
-    await expect(page.getByText("SIDEHUSTLE", { exact: false }).first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText(opts.before, { exact: false }).first()).toBeVisible({ timeout: 15_000 });
 
     await page.getByTitle("ManyChat DM keyword for this post's auto-reply flow").click();
     await page.getByRole("button", { name: "+ Attach DM keyword" }).click();
@@ -56,11 +57,32 @@ test("attaching a DM keyword on the post page rewrites the caption's keyword", a
     await expect.poll(async () => {
       const [d] = await sql`SELECT content FROM content_drafts WHERE production_item_id = ${id} AND is_current`;
       return d?.content?.caption as string;
-    }).toContain("Comment or DM me “FIRSTSALE” and I'll send you the full episode.");
+    }).toContain(opts.after);
     const [item] = await sql`SELECT short_link_slug FROM production_items WHERE id = ${id}`;
     expect(item.short_link_slug).toBe("firstsale");
-    if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT, fullPage: false });
+    if (opts.shot && process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT, fullPage: false });
   } finally {
     await sql.end();
   }
+}
+
+test("attaching a DM keyword on the post page rewrites the caption's keyword", async ({ page }) => {
+  await attachAndCheck(page, {
+    cta: () => "Comment or DM me “SIDEHUSTLE” and I'll send you the full episode.",
+    before: "SIDEHUSTLE",
+    after: "Comment or DM me “FIRSTSALE” and I'll send you the full episode.",
+  });
+});
+
+// The draft writer no longer copies another post's keyword into a caption
+// when the post has none yet: it writes the “KEYWORD” placeholder, and
+// attaching a keyword fills it in (here even with another pool keyword
+// quoted further down the caption).
+test("attaching a DM keyword fills the draft's “KEYWORD” placeholder", async ({ page }) => {
+  await attachAndCheck(page, {
+    cta: (other) => `Comment “KEYWORD” and I'll DM you the playbook. (Last week's was “${other}”.)`,
+    before: "“KEYWORD”",
+    after: "Comment “FIRSTSALE” and I'll DM you the playbook. (Last week's was “SIDEHUSTLE”.)",
+    shot: true,
+  });
 });

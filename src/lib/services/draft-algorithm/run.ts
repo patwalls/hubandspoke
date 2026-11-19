@@ -41,6 +41,7 @@ import { getTopPerformingCaptions } from "./exemplars";
 import { loadPriorCrossPostExamples } from "./prior-cross-post-examples";
 import { loadEditorRewrites } from "./editor-rewrites";
 import { generateTrackedCta } from "./tracked-cta";
+import { dmKeywordContext } from "./dm-keyword-context";
 import {
   runDescriptStepForDerivative,
   type DescriptStepStatus,
@@ -970,6 +971,7 @@ export async function runDraftAlgorithm(
     pastCaptions,
     mediaContext,
     cta: undefined,
+    dmKeyword: dmKeywordContext(item),
     priorCrossPostExamples,
     editorialContext,
     editorRewrites,

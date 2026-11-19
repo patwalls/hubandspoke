@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { captionMentionsKeyword, followKeywordInCaption, keywordCtaLine, replaceKeywordInCaption } from "./dm-keyword-text";
+import { KEYWORD_PLACEHOLDER, captionMentionsKeyword, followKeywordInCaption, keywordCtaLine, replaceKeywordInCaption } from "./dm-keyword-text";
 
 describe("the DM keyword in a caption", () => {
   it("replaces the old keyword wherever it appears, whole-word and any case, always upper-cased", () => {
@@ -27,6 +27,17 @@ describe("the caption follows a keyword picked on the post page", () => {
     expect(followKeywordInCaption(caption, { prev: null, next: "firstsale", pool })).toBe(
       "Ready to launch your app?\n\n👇 Comment or DM me “FIRSTSALE” and I'll send you the full episode.",
     );
+  });
+  it("fills the draft writer's \"KEYWORD\" placeholder (straight or curly quotes), even with another pool keyword nearby", () => {
+    expect(KEYWORD_PLACEHOLDER).toBe("KEYWORD");
+    expect(followKeywordInCaption('Comment "KEYWORD" and I\'ll DM you the playbook.', { prev: null, next: "firstsale", pool })).toBe(
+      'Comment "FIRSTSALE" and I\'ll DM you the playbook.',
+    );
+    expect(followKeywordInCaption("Comment “KEYWORD” below. Like SIDEHUSTLE? “SIDEHUSTLE”", { prev: null, next: "firstsale", pool })).toBe(
+      "Comment “FIRSTSALE” below. Like SIDEHUSTLE? “SIDEHUSTLE”",
+    );
+    // An unquoted word "keyword" in the copy is prose, not the placeholder.
+    expect(followKeywordInCaption("Pick one keyword and own it.", { prev: null, next: "firstsale", pool })).toBe("Pick one keyword and own it.");
   });
   it("never rewrites an ordinary word that happens to be a pool keyword", () => {
     const caption = "How to launch in a week. Comment \"SIDEHUSTLE\" for the episode.";

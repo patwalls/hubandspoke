@@ -285,6 +285,11 @@ shim are gone. Replacement architecture:
   keyword copied over on a cross-post/repost — the one pool keyword quoted
   upper-case (`"SIDEHUSTLE"`/`“SIDEHUSTLE”`). Two quoted pool keywords or none →
   the caption is left alone.
+- **Drafts never borrow another post's keyword (2026-11-19).** The draft
+  algorithm writes an Instagram caption's comment CTA with the post's own
+  keyword, or with the placeholder `“KEYWORD”` when none is attached yet;
+  attaching one (dialog, clip editor Post tab, or the design editor's automatic
+  keyword) fills the placeholder in.
 - `productionItems.short_link_slug` is the only hubandspoke-side state for the
   per-post attachment. No tables, no redirect route, and no click-tracking code
   in hubandspoke — the slug is a pointer to the Rails-side short link.

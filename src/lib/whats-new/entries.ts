@@ -43,6 +43,15 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-11-19-dm-keyword-placeholder",
+    shippedAt: "2026-11-19T00:32:45Z",
+    kind: "fix",
+    title: "New Instagram captions say “KEYWORD” until the post has a DM keyword",
+    body: "AI captions used to borrow a keyword from an older post (“Comment SIDEPROJECT…”). Now a new caption uses the post's own DM keyword, or says “KEYWORD” until you attach one, and attaching one puts it in the caption for you.",
+    screen: "/[brand]/content/[id]",
+    audience: { usersOf: ["/[brand]/content/[id]"] },
+  },
+  {
     id: "2026-11-18-cross-post-usual-editor",
     shippedAt: "2026-11-18T11:44:29Z",
     kind: "feature",
