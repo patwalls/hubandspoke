@@ -5,7 +5,7 @@ import type { Metadata } from "next";
 import { fetchBrandBySlug } from "@/lib/db/brands";
 import { QueueView } from "@/components/dashboard/queue-view";
 import { getClippableFormats, getFormatNameToIdMap } from "@/lib/db/formats";
-import { getProductionReportCached } from "@/lib/services/production-report";
+import { getProductionReportFast } from "@/lib/services/production-report";
 import { auth } from "@/lib/auth";
 import { listNewsletterFormats } from "@/lib/services/newsletter-drafter/queries";
 import { isAdminNow } from "@/lib/brand-access";
@@ -37,7 +37,7 @@ export default async function BrandQueuePage({
       // SSR the queue's primary payload (60s-cached) so the All tab paints
       // with data — the client previously fetched this after hydration and
       // it measured 1.5-2.7s. Fail-open to the client fetch, loudly.
-      getProductionReportCached(brand, false).catch((err) => {
+      getProductionReportFast(brand, false).catch((err) => {
         Sentry.captureException(err, { tags: { surface: "queue-ssr", brand } });
         return null;
       }),
@@ -65,6 +65,7 @@ export default async function BrandQueuePage({
       <QueueView
         key={brand}
         initialItems={initialItems}
+        initialStale={report?.stale === true}
         brand={brand}
         initialSource="all"
         clippableFormats={clippableFormats.map((f) => ({
