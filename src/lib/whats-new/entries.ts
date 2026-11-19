@@ -43,6 +43,15 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-11-19-cross-post-reach",
+    shippedAt: "2026-11-19T17:40:37Z",
+    kind: "feature",
+    title: "See what each account usually gets before you cross-post to it",
+    body: "On a post's Cross-post tab, accounts you've posted to recently now show their typical views over the last 30 days (hover for the numbers). Accounts where most posts got no likes say so in amber, so you can tell which channels are worth the time.",
+    screen: "/[brand]/content/[id]?tab=cross-post",
+    audience: { usersOf: ["/[brand]/content/[id]?tab=cross-post", "/[brand]/queue/cross-post"] },
+  },
+  {
     id: "2026-11-19-dm-keyword-placeholder",
     shippedAt: "2026-11-19T00:32:45Z",
     kind: "fix",

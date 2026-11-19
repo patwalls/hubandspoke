@@ -28,6 +28,7 @@ import {
 } from "@/lib/platforms";
 import { isNotionAuthoritative } from "@/lib/platform";
 import { usualTargetKeys, type TargetCommonalityRow } from "@/lib/cross-post-usual";
+import { channelReachLabel, type ChannelReach } from "@/lib/channel-reach";
 import { trackUsage } from "@/lib/usage/track";
 import {
   PLATFORM_FIELD_SCHEMAS,
@@ -122,6 +123,10 @@ interface CrossPostTriagePanelProps {
    *  historical cross-post count. The panel uses this to surface the most
    *  common targets first. Empty for formats with no cross-post history. */
   targetCommonality?: Record<string, TargetCommonalityRow[]>;
+  /** What each target (`<accountId>:<postType>`) typically gets over the
+   *  last 30 days. Shown as a quiet "~1.2K views" on its row; absent →
+   *  rows show nothing extra. */
+  channelReach?: Record<string, ChannelReach>;
   /** Default true — queue triage dismisses the candidate from the queue
    *  after a successful submit so it doesn't reappear tomorrow. Pass
    *  `false` when the panel is rendered from a non-queue surface (e.g.
@@ -207,6 +212,7 @@ export function CrossPostTriagePanel({
   brandAccounts,
   brand,
   targetCommonality,
+  channelReach,
   dismissAfterSubmit = true,
   showSourceHeader = true,
   showSecondaryFooter = true,
@@ -868,6 +874,25 @@ export function CrossPostTriagePanel({
                           PLATFORM_META[toPlatform(t.account.platform)].label}
                       </span>
                     </span>
+                    {!isDone &&
+                      (() => {
+                        const reach = channelReachLabel(channelReach?.[key]);
+                        if (!reach) return null;
+                        return (
+                          <span
+                            className={cn(
+                              "text-[10px] whitespace-nowrap",
+                              reach.quiet
+                                ? "text-amber-700 dark:text-amber-400"
+                                : "text-muted-foreground",
+                            )}
+                            title={reach.title}
+                            data-testid="cross-post-reach"
+                          >
+                            {reach.text}
+                          </span>
+                        );
+                      })()}
                     {!isDone && usualEditorFor(key) && (
                       <span
                         className="text-[10px] text-muted-foreground whitespace-nowrap"
