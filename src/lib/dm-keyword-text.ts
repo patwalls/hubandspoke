@@ -68,3 +68,43 @@ export function followKeywordInCaption(caption: string, args: { prev: string | n
   if (found.length !== 1) return caption;
   return caption.replace(quoted(found[0]), (_m, open: string, close: string) => `${open}${next.toUpperCase()}${close}`);
 }
+
+/** What's wrong between a caption and the post's DM keyword, if anything. */
+export type CaptionKeywordMismatch =
+  /** The draft writer's `"KEYWORD"` placeholder is still in the caption. */
+  | { kind: "placeholder"; says: string }
+  /** The caption quotes another keyword from the pool (copied from an older
+   *  post's caption) and never says the attached one. */
+  | { kind: "other"; says: string };
+
+/**
+ * Would someone commenting what the caption says get this post's DM? The
+ * post page asks this before anyone publishes (people used to catch it by
+ * eye, days after drafting, and retype it). `keyword` is the word people
+ * comment (`commentKeywordFor`), null when none is attached; `pool` the
+ * brand's keyword words. Same quoted-upper-case rule as
+ * `followKeywordInCaption`, so whatever this flags, that function can fix.
+ */
+export function captionKeywordMismatch(caption: string, args: { keyword: string | null; pool?: readonly string[] }): CaptionKeywordMismatch | null {
+  const { keyword } = args;
+  if (quotedPattern(KEYWORD_PLACEHOLDER).test(caption) && keyword?.toUpperCase() !== KEYWORD_PLACEHOLDER) return { kind: "placeholder", says: KEYWORD_PLACEHOLDER };
+  if (!keyword || captionMentionsKeyword(caption, keyword)) return null;
+  const found = [...new Set((args.pool ?? []).map((s) => s.toLowerCase()))].filter((s) => s !== keyword.toLowerCase() && quotedPattern(s).test(caption));
+  return found.length === 1 ? { kind: "other", says: found[0].toUpperCase() } : null;
+}
+
+/** Quoted upper-case words in a caption (`"SIDEHUSTLE"`, curly quotes too),
+ *  other than `except` — the cheap test for whether checking the caption
+ *  against the keyword pool is worth fetching the pool at all. */
+export function quotedUpperWords(caption: string, except: string | null): string[] {
+  const out = new Set<string>();
+  for (const m of caption.matchAll(/["“]([A-Z0-9][A-Z0-9_-]{2,})["”]/g)) {
+    if (m[1].toLowerCase() !== except?.toLowerCase()) out.add(m[1]);
+  }
+  return [...out];
+}
+
+function quotedPattern(slug: string): RegExp {
+  const escaped = slug.toUpperCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`["“]${escaped}["”]`);
+}

@@ -100,6 +100,7 @@ import {
 import type { FormatChannelWithAccount } from "@/lib/format-channels";
 import { PLATFORM_FIELD_MAP, type PostType } from "@/lib/platform-field-schemas";
 import { followKeywordInCaption } from "@/lib/dm-keyword-text";
+import { CaptionKeywordCheck } from "@/components/dashboard/caption-keyword-check";
 import { PLATFORM_META, toPlatform } from "@/lib/platforms";
 import { ContentPreview } from "./preview/content-preview";
 import { PublishedEmbed } from "./preview/published-embed";
@@ -2120,6 +2121,25 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
   const isPrePublish = item.status !== "Published";
   const isPrePublishInline =
     isPrePublish && INLINE_DRAFTING_POST_TYPES.has(item.postType ?? "");
+  // Instagram caption vs the post's DM keyword (another post's keyword or
+  // the "KEYWORD" placeholder) — one line above the draft, one-click fix.
+  const igCaptionKey = item.postType?.startsWith("instagram_") ? PLATFORM_FIELD_MAP[item.postType as PostType]?.caption ?? null : null;
+  const igCaption = igCaptionKey && typeof liveContent?.[igCaptionKey] === "string" ? (liveContent[igCaptionKey] as string) : null;
+  const captionKeywordCheck =
+    isPrePublish && draft && igCaptionKey ? (
+      <CaptionKeywordCheck
+        brand={item.brand ?? null}
+        slug={item.shortLinkSlug ?? null}
+        caption={igCaption}
+        canEdit={canEdit}
+        onAttach={() => setDmKeywordDialogOpen(true)}
+        onFix={async (fixed, keyword) => {
+          onLocalEdit(igCaptionKey, fixed);
+          await onCommit(igCaptionKey, fixed);
+          toast.success(`Caption now says ${keyword.toUpperCase()}`);
+        }}
+      />
+    ) : null;
   // Uploaded source recordings (and any item with archived video but no live
   // post to embed — `isPublished` keys off publishedLink, which an upload
   // never has) should still preview their MP4. Without this the left pane
@@ -3772,6 +3792,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
       {isPrePublishInline ? (
         <div className="space-y-2">
         <LearnedEditsChip itemId={item.id} brand={brand} />
+        {captionKeywordCheck}
         <ContentPreview
           item={item}
           media={data.media ?? []}
@@ -3953,7 +3974,8 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
          * simulator inline on the Details tab; published items get no
          * preview at all. */}
         {isPrePublish && !isPrePublishInline && (
-          <TabsContent value="preview" className="pt-4">
+          <TabsContent value="preview" className="pt-4 space-y-2">
+            {captionKeywordCheck}
             <ContentPreview
               item={item}
               media={data.media ?? []}

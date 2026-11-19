@@ -290,6 +290,16 @@ shim are gone. Replacement architecture:
   keyword, or with the placeholder `“KEYWORD”` when none is attached yet;
   attaching one (dialog, clip editor Post tab, or the design editor's automatic
   keyword) fills the placeholder in.
+- **The post page checks the caption against the keyword (2026-11-19).** Before
+  publish, an Instagram draft whose caption quotes another pool keyword (and never
+  the attached one) or still says `“KEYWORD”` gets one amber line above the draft —
+  "Caption says “X”, but this post's DM keyword is Y. Use Y" — and one click rewrites
+  it (`followKeywordInCaption`); with no keyword attached the click opens the
+  dialog. Renders nothing when the caption is fine; the pool is fetched only when
+  the caption quotes an upper-case word that isn't the keyword
+  (`src/components/dashboard/caption-keyword-check.tsx`,
+  `captionKeywordMismatch`). Marks `dm-keyword:caption-mismatch-shown` / `-fixed` /
+  `-attach`.
 - `productionItems.short_link_slug` is the only hubandspoke-side state for the
   per-post attachment. No tables, no redirect route, and no click-tracking code
   in hubandspoke — the slug is a pointer to the Rails-side short link.
