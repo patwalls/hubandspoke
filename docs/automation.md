@@ -1211,7 +1211,7 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
   `src/lib/services/clip-idea-drought-watch.ts` (detection + dedupe),
   `src/lib/email.ts` (`sendClipIdeaDroughtEmail`),
   `src/lib/services/alert-recipients.ts`,
-  `src/lib/db/schema.ts` (`clipIdeaDroughtAlerts`)
+  `src/lib/db/schema.ts` (`clipIdeaDroughtAlerts`, `clipIdeaRuns`)
 - **Inputs:** `productionItems` (youtube_long, Published, not deleted) published
   within the last 7 days that have a transcript AND ≥1 live `clip_sections` row,
   route to ≥1 clippable format under `getClippableFormatsForSourceAccount` rules
@@ -1228,6 +1228,18 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
   that `targetFormatId` (or the pillar's Regenerate button). Cause of the
   2026-10-21 alert: Futurepedia X Quotables was created Oct 20, a day after
   the Oct 19 pillar's run.
+  **The zero must be unexplained (2026-11-19):** every pass-2 run writes a
+  `clip_idea_runs` row (`clip-idea-generate.ts` → `recordClipIdeaRun`:
+  sections read, ideas made, `agent_errors`, and `skips` = each skipped
+  section's topic + reason + `agentError`). A gap whose **latest** run made 0
+  ideas with 0 agent errors is skipped — the writer read every section and
+  none fit, so the video simply doesn't have that format's subject. No run row
+  (older runs, or the job died mid-pass) still alerts, as before. Cause of the
+  2026-11-19 alert (HUBANDSPOKE-81): "How I Built It: $600K/Month SaaS" never
+  names a tool or a work routine — all 10 sections were rightly
+  `eligible:false` for Repackage Tech Stack With Hook (read-only replay), so it
+  was a false alarm. When it does alert, the email names how many sections
+  the writer gave up on and one reason.
 - **Dedup:** one row per `(pillar_id, format_id)` in `clip_idea_drought_alerts`.
   Once a gap is recorded it never re-alerts, even if the gap persists. If
   ideas are later regenerated, the row stays — no false-positive repeat.
@@ -1558,6 +1570,12 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
   - **Manual:** `POST /api/production-items/[id]/clip-ideas/generate` enqueues one job per `is_clippable_format=true` row on the pillar's brand. Body accepts `{ targetFormatId?, forceSections? }` — `targetFormatId` limits to one format; `forceSections: true` kills the existing section batch + cascade-deletes its derived clip_ideas across every format and re-detects from scratch.
   - **Auto (2026-06-09, narrow; extended 2026-06-29):** `transcribe-whisper` phase-2 success fires the same fan-out for (a) `source_recording` items uploaded via `+ Custom MP4 Upload` (`source_type='source_recording'` bypasses brand allowlist/status/recency gates) and (b) youtube_long originals on auto-enabled brands — gates in `src/lib/services/clip-ideas-auto.ts` (default since 2026-08-20: any brand with ≥1 clippable format; `AUTO_CLIP_IDEAS_BRANDS` env = explicit-allowlist override, empty = kill switch; plus Published + original + youtube_long, ≤7-day recency `AUTO_CLIP_IDEAS_MAX_AGE_DAYS`). The global post-`transcribe-whisper` auto-enqueue removed 2026-05-03 stays removed for everything else; per-(pillar, format) idempotency makes the auto path safe to race with a manual click.
 - **Files:** Section picker → `src/lib/clip-section-agent.ts` (Sonnet 5.5, format-agnostic) + `src/lib/services/clip-sections-detect.ts` (advisory-lock + persistence). Hook writer → `src/lib/clip-hook-agent.ts` (Haiku 5.5, per-(section, format)). Orchestrator → `src/lib/services/clip-idea-generate.ts`. Shared anchor utils → `src/lib/clip-anchor-utils.ts` (used by both v1 legacy and v2 agents). Worker task → `src/jobs/tasks/generate-clip-ideas.ts`.
+- **Run record (2026-11-19):** each pass-2 run (0 ideas or more) inserts one
+  `clip_idea_runs` row — sections read, ideas made, `agent_errors` (sections
+  the writer gave up on: `HookCandidate.agentError`), and `skips` (topic +
+  reason per skipped section). Fail-soft. Read by `clip-idea-drought-watch` to
+  tell a broken run from an honest "nothing fits"; also the place to read why
+  a format skipped a video without replaying Haiku.
 - **Owner (2026-10-23):** every generated idea row starts **unassigned** (`editor_user_id` NULL) — not the Generate clicker (`actorUserId`, now only stamped as killer on superseded ideas) and not the pillar's owner. Row values live in `src/lib/services/clip-idea-item-values.ts` (unit-tested). Whoever accepts/assigns the idea becomes its editor.
 - **Brand language (2026-08-20):** the orchestrator (`clip-idea-generate.ts`) looks up `brands.language` by slug after loading the item and passes it into `writeFormatHookForSection` (`HookGenerateArgs.language`). When `"pt-BR"`, the hook writer appends `"Respond exclusively in Brazilian Portuguese."` to its system prompt. All other brands default to English (no prompt change).
 - **v10 two-pass architecture (2026-05-22):** clip ideas are now generated in two passes instead of one full Sonnet pass per format:

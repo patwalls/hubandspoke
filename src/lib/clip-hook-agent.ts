@@ -171,6 +171,10 @@ export interface HookCandidate {
   extras: Record<string, unknown> | null;
   /** Short on-screen title (hooks-learn M3); only when asked for. */
   onScreenTitle?: string | null;
+  /** True when the writer gave up (validation failed twice / no tool call)
+   *  rather than judging the section. Recorded on `clip_idea_runs` so the
+   *  drought watch only alerts on broken runs, not honest "no fit"s. */
+  agentError?: boolean;
 }
 
 export interface HookGenerationResult {
@@ -612,6 +616,7 @@ ${DEFAULT_FORMAT_BLOCK}`;
     return {
       candidate: {
         eligible: false,
+        agentError: true,
         reason: `agent error: ${reason}`,
         hook: null,
         angle: null,

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   createTestAccount,
   createTestClipIdea,
+  createTestClipIdeaRun,
   createTestClipSection,
   createTestFormat,
   createTestFormatChannel,
@@ -9,6 +10,7 @@ import {
   createTestTranscript,
 } from "@/test/factories";
 import { findClipIdeaDroughts } from "./clip-idea-drought-watch";
+import type { ClipIdeaDroughtGap } from "./clip-idea-drought-watch";
 
 const HOURS = 3600_000;
 
@@ -30,6 +32,9 @@ async function processedPillar() {
     formatId: parent.id,
     accountId: account.id,
     postType: "youtube_long",
+    // Wired long before the run — a wire made "now" postdates the run and
+    // the route-must-predate-the-run rule (2026-10-21) hides every gap.
+    createdAt: new Date(Date.now() - 30 * 24 * HOURS),
   });
   const pillar = await createTestProductionItem({
     accountId: account.id,
@@ -76,5 +81,75 @@ describe("findClipIdeaDroughts", () => {
     const keys = await gapKeys();
     expect(keys).not.toContain(`${pillar.id}:${added.id}`);
     expect(keys).not.toContain(`${pillar.id}:${existing.id}`);
+  });
+
+  describe("what the writer's last run says (clip_idea_runs)", () => {
+    async function gapFormat() {
+      const { parent, pillar, ranAt } = await processedPillar();
+      const fmt = await createTestFormat({
+        parentFormatId: parent.id,
+        isClippableFormat: true,
+        createdAt: new Date(ranAt.getTime() - 24 * HOURS),
+      });
+      return { pillar, fmt, ranAt };
+    }
+    async function findGap(pillarId: string, formatId: string): Promise<ClipIdeaDroughtGap | undefined> {
+      return (await findClipIdeaDroughts(1000)).find(
+        (g) => g.pillarId === pillarId && g.formatId === formatId,
+      );
+    }
+
+    it("does not flag a run where every section was honestly judged a non-fit (2026-11-19 $600K/Month SaaS × Tech Stack)", async () => {
+      const { pillar, fmt, ranAt } = await gapFormat();
+      await createTestClipIdeaRun({
+        pillarId: pillar.id,
+        formatId: fmt.id,
+        formatName: fmt.name,
+        cleanSkips: 10,
+        createdAt: ranAt,
+      });
+      expect(await findGap(pillar.id, fmt.id)).toBeUndefined();
+    });
+
+    it("flags a run where the writer gave up on sections, and carries the reason", async () => {
+      const { pillar, fmt, ranAt } = await gapFormat();
+      await createTestClipIdeaRun({
+        pillarId: pillar.id,
+        formatId: fmt.id,
+        formatName: fmt.name,
+        cleanSkips: 3,
+        agentErrorReasons: ["agent error: validation failed: transcriptAnchorQuote shorter than 8 words"],
+        createdAt: ranAt,
+      });
+      const gap = await findGap(pillar.id, fmt.id);
+      expect(gap?.agentErrors).toBe(1);
+      expect(gap?.sampleError).toMatch(/shorter than 8 words/);
+    });
+
+    it("judges by the LATEST run: a clean regenerate clears an earlier broken one", async () => {
+      const { pillar, fmt, ranAt } = await gapFormat();
+      await createTestClipIdeaRun({
+        pillarId: pillar.id,
+        formatId: fmt.id,
+        formatName: fmt.name,
+        agentErrorReasons: ["agent error: no tool_use block"],
+        createdAt: new Date(ranAt.getTime() - HOURS),
+      });
+      await createTestClipIdeaRun({
+        pillarId: pillar.id,
+        formatId: fmt.id,
+        formatName: fmt.name,
+        cleanSkips: 4,
+        createdAt: ranAt,
+      });
+      expect(await findGap(pillar.id, fmt.id)).toBeUndefined();
+    });
+
+    it("still flags a gap with no run recorded (cause unknown)", async () => {
+      const { pillar, fmt } = await gapFormat();
+      const gap = await findGap(pillar.id, fmt.id);
+      expect(gap).toBeDefined();
+      expect(gap?.agentErrors).toBeNull();
+    });
   });
 });

@@ -45,6 +45,7 @@ import {
   apiRequests,
   brands,
   clipEdits,
+  clipIdeaRuns,
   clipIdeas,
   clipRenders,
   clipSections,
@@ -404,6 +405,52 @@ export interface CreateTestFormatOptions {
 }
 
 /**
+ * Insert a `clip_idea_runs` row (one pass-2 run of the hook writer for a
+ * pillar + format). Cascade-deleted with its pillar or format, so no cleanup
+ * entry. Pass `agentErrorReasons` for sections the writer gave up on;
+ * `cleanSkips` for honest eligible:false judgments.
+ */
+export async function createTestClipIdeaRun(opts: {
+  pillarId: string;
+  formatId: string;
+  formatName: string;
+  ideasCreated?: number;
+  cleanSkips?: number;
+  agentErrorReasons?: string[];
+  createdAt?: Date;
+}): Promise<typeof clipIdeaRuns.$inferSelect> {
+  const errors = opts.agentErrorReasons ?? [];
+  const skips = [
+    ...Array.from({ length: opts.cleanSkips ?? 0 }, (_, i) => ({
+      sectionId: randomUUID(),
+      topic: `vitest clean skip ${i}`,
+      reason: "No tools or working practices are named in this section.",
+      agentError: false,
+    })),
+    ...errors.map((reason, i) => ({
+      sectionId: randomUUID(),
+      topic: `vitest agent error ${i}`,
+      reason,
+      agentError: true,
+    })),
+  ];
+  const [row] = await db
+    .insert(clipIdeaRuns)
+    .values({
+      pillarId: opts.pillarId,
+      formatId: opts.formatId,
+      formatName: opts.formatName,
+      sectionsConsidered: skips.length + (opts.ideasCreated ?? 0),
+      ideasCreated: opts.ideasCreated ?? 0,
+      agentErrors: errors.length,
+      skips,
+      ...(opts.createdAt ? { createdAt: opts.createdAt } : {}),
+    })
+    .returning();
+  return row;
+}
+
+/**
  * Insert a `formats` row with sensible defaults. Auto-cleans in afterEach.
  * Names are randomized so re-running the same test doesn't trip the
  * brand+lower(name) unique index.
@@ -465,6 +512,9 @@ export async function createTestFormatChannel(opts: {
   formatId: string;
   accountId: string;
   postType?: string | null;
+  /** When the wire was made. Routing checks (drought watch) compare it to
+   *  the writer's run, so a wire "made now" postdates any past run. */
+  createdAt?: Date;
 }): Promise<typeof formatChannels.$inferSelect> {
   const [row] = await db
     .insert(formatChannels)
@@ -472,6 +522,7 @@ export async function createTestFormatChannel(opts: {
       formatId: opts.formatId,
       accountId: opts.accountId,
       postType: opts.postType ?? null,
+      ...(opts.createdAt ? { createdAt: opts.createdAt } : {}),
     })
     .returning();
   trackCleanup("formatChannels", row.id);

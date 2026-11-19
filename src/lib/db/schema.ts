@@ -1248,6 +1248,50 @@ export const clipIdeaDroughtAlerts = pgTable(
   ]
 );
 
+// One row per pass-2 run of the hook writer for a (pillar, format): how many
+// sections it read, how many ideas it made, and why each section was skipped.
+// Written by `generateClipIdeasForItem`. Lets `clip-idea-drought-watch` tell
+// "the writer broke" (agent errors) from "nothing in this video fits the
+// format" (every skip a clean eligible:false) — 2026-11-19: the $600K/Month
+// SaaS video has no tech-stack talk, all 10 sections were rightly skipped for
+// Repackage Tech Stack With Hook, and it still alerted.
+export type ClipIdeaRunSkip = {
+  sectionId: string;
+  topic: string;
+  reason: string;
+  agentError: boolean;
+};
+
+export const clipIdeaRuns = pgTable(
+  "clip_idea_runs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    pillarId: uuid("pillar_id")
+      .references((): AnyPgColumn => productionItems.id, { onDelete: "cascade" })
+      .notNull(),
+    formatId: uuid("format_id")
+      .references((): AnyPgColumn => formats.id, { onDelete: "cascade" })
+      .notNull(),
+    formatName: text("format_name").notNull(),
+    sectionsConsidered: integer("sections_considered").notNull(),
+    ideasCreated: integer("ideas_created").notNull(),
+    /** Sections the writer gave up on (validation failed twice / no tool
+     *  call). >0 on a 0-idea run = a pipeline problem worth an alert. */
+    agentErrors: integer("agent_errors").notNull(),
+    skips: jsonb("skips").$type<ClipIdeaRunSkip[]>().notNull().default([]),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("idx_clip_idea_runs_pillar_format").on(
+      table.pillarId,
+      table.formatId,
+      table.createdAt,
+    ),
+  ]
+);
+
 // Schema describing the fields a draft contains. Keyed by *platform* (where
 // the post lives) — see `src/lib/platform-field-schemas.ts` for the
 // authoritative map. The `prompt` on each field is the AI directive used at

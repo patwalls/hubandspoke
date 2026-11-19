@@ -26,6 +26,11 @@ export interface ClipIdeaDroughtGap {
   formatId: string;
   formatName: string;
   sectionCount: number;
+  /** From the latest `clip_idea_runs` row: sections the writer gave up on,
+   *  and one of their reasons. Null = no run recorded (pre-2026-11-19 run,
+   *  or the job died before pass 2 finished). */
+  agentErrors: number | null;
+  sampleError: string | null;
 }
 
 /**
@@ -38,6 +43,9 @@ export interface ClipIdeaDroughtGap {
  * came up empty, rather than "not published" or "not processed yet". The
  * route (format + its wire) must also predate the pillar's last generation
  * activity — a format added after the run was never offered to the writer.
+ *
+ * Also excludes a gap whose latest `clip_idea_runs` row made 0 ideas with 0
+ * agent errors — the writer read every section and none fit the format.
  *
  * Excludes any (pillar, format) already recorded in `clip_idea_drought_alerts`
  * so each gap alerts exactly once, never a daily repeat.
@@ -109,15 +117,30 @@ export async function findClipIdeaDroughts(
       r.format_id     AS format_id,
       r.format_name   AS format_name,
       (SELECT count(*)::int FROM clip_sections cs
-        WHERE cs.pillar_id = p.id AND cs.killed_at IS NULL) AS section_count
+        WHERE cs.pillar_id = p.id AND cs.killed_at IS NULL) AS section_count,
+      lr.agent_errors AS agent_errors,
+      (SELECT s->>'reason' FROM jsonb_array_elements(lr.skips) s
+        WHERE (s->>'agentError')::boolean LIMIT 1) AS sample_error
     FROM pillars p
     JOIN routed r ON r.pillar_id = p.id
     LEFT JOIN accounts a ON a.id = p.account_id
+    LEFT JOIN LATERAL (
+      SELECT cr.agent_errors, cr.ideas_created, cr.skips
+      FROM clip_idea_runs cr
+      WHERE cr.pillar_id = p.id AND cr.format_id = r.format_id
+      ORDER BY cr.created_at DESC
+      LIMIT 1
+    ) lr ON true
     -- The route must predate the writer's last run. A format created (or
     -- wired to the channel) after generation never had the writer run for it
     -- — that's "not processed yet", not a drought (2026-10-21: Futurepedia X
     -- Quotables was created a day after the Oct 19 pillar's run and alerted).
     WHERE r.routed_at <= p.last_generated_at
+      -- The writer judged every section and none fit (no agent errors): an
+      -- honest "this video doesn't have it", not a drought. 2026-11-19: the
+      -- $600K/Month SaaS video never talks tech stack; all 10 sections were
+      -- rightly skipped for Repackage Tech Stack With Hook and it alerted.
+      AND NOT COALESCE(lr.ideas_created = 0 AND lr.agent_errors = 0, false)
       AND NOT EXISTS (
         SELECT 1 FROM clip_ideas ci
         WHERE ci.source_production_item_id = p.id
@@ -138,6 +161,8 @@ export async function findClipIdeaDroughts(
     format_id: string;
     format_name: string;
     section_count: number;
+    agent_errors: number | null;
+    sample_error: string | null;
   }>;
 
   return rows.map((r) => ({
@@ -149,6 +174,8 @@ export async function findClipIdeaDroughts(
     formatId: r.format_id,
     formatName: r.format_name,
     sectionCount: Number(r.section_count),
+    agentErrors: r.agent_errors == null ? null : Number(r.agent_errors),
+    sampleError: r.sample_error,
   }));
 }
 
