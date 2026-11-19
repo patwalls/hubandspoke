@@ -19,6 +19,12 @@ export function replaceKeywordInCaption(caption: string, prev: string | null, ne
   return caption.replace(keywordPattern(prev), next.toUpperCase());
 }
 
+/** What the draft writer puts in a comment-to-get-the-link CTA when the post
+ *  has no keyword yet (draft-agent's DM KEYWORD block): an obvious
+ *  placeholder instead of a keyword copied from another post's caption.
+ *  Attaching a keyword swaps it in (`followKeywordInCaption`). */
+export const KEYWORD_PLACEHOLDER = "KEYWORD";
+
 /** The line to add when the caption doesn't mention the keyword at all. */
 export function keywordCtaLine(keyword: string): string {
   return `Comment "${keyword.toUpperCase()}" and I'll DM you the link.`;
@@ -41,6 +47,8 @@ function keywordPattern(keyword: string): RegExp {
  *    straight or curly quotes, upper-case), swap just those quoted tokens.
  *    Quoted + upper-case only, so a pool slug that is also an ordinary word
  *    ("launch") never rewrites the sentence it sits in.
+ *  - the caption has the draft writer's quoted `"KEYWORD"` placeholder →
+ *    swap it (checked before the pool, so a placeholder is never left behind).
  * Returns the caption unchanged when there is nothing (or no single thing)
  * to swap.
  */
@@ -52,6 +60,10 @@ export function followKeywordInCaption(caption: string, args: { prev: string | n
     const escaped = slug.toUpperCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     return new RegExp(`(["“])${escaped}(["”])`, "g");
   };
+  const placeholder = quoted(KEYWORD_PLACEHOLDER.toLowerCase());
+  if (next.toUpperCase() !== KEYWORD_PLACEHOLDER && placeholder.test(caption)) {
+    return caption.replace(placeholder, (_m, open: string, close: string) => `${open}${next.toUpperCase()}${close}`);
+  }
   const found = [...new Set((args.pool ?? []).map((s) => s.toLowerCase()))].filter((s) => s !== next.toLowerCase() && quoted(s).test(caption));
   if (found.length !== 1) return caption;
   return caption.replace(quoted(found[0]), (_m, open: string, close: string) => `${open}${next.toUpperCase()}${close}`);
