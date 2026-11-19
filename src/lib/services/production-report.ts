@@ -1,4 +1,5 @@
-import { compressedCache } from "@/lib/compressed-cache";
+import { compressedCacheParts } from "@/lib/compressed-cache";
+import { createLastGood } from "@/lib/last-good";
 import { getProductionPipeline } from "@/lib/db/queries";
 import {
   buildViewPredictorContext,
@@ -97,14 +98,17 @@ type ProductionReport = Awaited<ReturnType<typeof computeProductionReport>>;
 // 2026-11-16 every edit anywhere expired every brand's report at once, and
 // the after-edit re-warm rebuilt them one by one, so most brands sat cold
 // for most of a minute after any edit (sentry-tx p95 6 s, p50 59 ms).
-const perBrand = new Map<string, (excludeIdea: boolean) => Promise<ProductionReport>>();
+type BrandCache = ReturnType<
+  typeof compressedCacheParts<[excludeIdea: boolean], ProductionReport>
+>;
+const perBrand = new Map<string, BrandCache>();
 // `brand` comes from the URL; don't let junk values grow the map forever.
 const MAX_BRAND_CACHES = 200;
 
-function brandCache(brand: string) {
+function brandCache(brand: string): BrandCache {
   const hit = perBrand.get(brand);
   if (hit) return hit;
-  const fn = compressedCache(
+  const parts = compressedCacheParts(
     async (excludeIdea: boolean) =>
       timed("compute", () => computeProductionReport(brand, excludeIdea)),
     ["production-report", brand],
@@ -112,13 +116,49 @@ function brandCache(brand: string) {
     // say which brands they touched) — src/lib/production-report-tags.ts.
     { revalidate: 60, tags: [PRODUCTION_REPORT_TAG, productionReportTag(brand)] },
   );
-  if (perBrand.size < MAX_BRAND_CACHES) perBrand.set(brand, fn);
-  return fn;
+  if (perBrand.size < MAX_BRAND_CACHES) perBrand.set(brand, parts);
+  return parts;
 }
 
-export function getProductionReportCached(
+export async function getProductionReportCached(
   brand: string,
   excludeIdea: boolean,
 ): Promise<ProductionReport> {
-  return brandCache(brand)(excludeIdea);
+  const { raw, decode } = brandCache(brand);
+  // Through the last-good copy too, so /api/warm's rebuilds are what the
+  // next slow read falls back to.
+  return decode(await lastGood.fresh(lastGoodKey(brand, excludeIdea), () => raw(excludeIdea)));
+}
+
+function lastGoodKey(brand: string, excludeIdea: boolean): string {
+  return `${brand}:${excludeIdea ? 1 : 0}`;
+}
+
+/**
+ * Even after #191/#202 a report expired by an edit made its next reader wait
+ * on the rebuild (sentry-tx 11-19: p95 6.0 s, p50 59 ms; the queue page 4.8 s).
+ * Pages people open (In Production's API, the queue's SSR) read through this:
+ * wait up to LAST_GOOD_WAIT_MS for the fresh report, else get this dyno's last
+ * copy (≤ 10 min old) marked `stale` while the rebuild finishes behind it —
+ * the page asks again a few seconds later. Stored gzipped (~240 KB for the
+ * busiest brand). /api/warm keeps the plain read: it exists to rebuild.
+ */
+const LAST_GOOD_WAIT_MS = 800;
+const lastGood = createLastGood<string>({
+  waitMs: LAST_GOOD_WAIT_MS,
+  maxStaleMs: 10 * 60_000,
+});
+
+export async function getProductionReportFast(
+  brand: string,
+  excludeIdea: boolean,
+): Promise<ProductionReport & { stale?: true }> {
+  const { raw, decode } = brandCache(brand);
+  const got = await lastGood.get(lastGoodKey(brand, excludeIdea), () => raw(excludeIdea));
+  const report = await decode(got.value);
+  if (!got.stale) return report;
+  console.log(
+    `[production-report] served last-good brand=${brand} excludeIdea=${excludeIdea} age_s=${Math.round(got.ageMs / 1000)}`,
+  );
+  return { ...report, stale: true };
 }

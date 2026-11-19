@@ -61,6 +61,9 @@ interface QueueViewProps {
    *  All tab paints immediately and the mount fetch is skipped; manual
    *  refreshes/mutations still refetch via fetchQueue(). */
   initialItems?: ProductionItem[];
+  /** The SSR'd items are the server's last report while a rebuild runs
+   *  (getProductionReportFast): swap in the fresh one a few seconds later. */
+  initialStale?: boolean;
   initialSource: QueueSource;
   /** When initialSource is a `clip:<formatId>` value, this is the human-
    *  readable format name to filter rows by (matches `production_items.format`).
@@ -116,6 +119,7 @@ const CLIP_FORMAT_TAB_HINT = "AI-found clips, one tab per format";
 export function QueueView({
   brand,
   initialItems,
+  initialStale,
   initialSource,
   initialClipFormatFilter = null,
   clippableFormats = [],
@@ -281,6 +285,28 @@ export function QueueView({
     fetchQueue();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchQueue]);
+
+  // Painted from a stale report: fetch the fresh one quietly (no spinner —
+  // the rows on screen stay until it lands; a failure keeps them).
+  useEffect(() => {
+    if (!initialItems || !initialStale) return;
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/reports/production?brand=${encodeURIComponent(brand)}`);
+        if (!res.ok || cancelled) return;
+        const json = await res.json();
+        if (!cancelled && Array.isArray(json.items)) setItems(json.items);
+      } catch {
+        // keep the rows we have
+      }
+    }, 4_000);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [brand, initialStale]);
 
   useEffect(() => {
     void fetchCrossPostQueue(false);

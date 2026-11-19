@@ -25,7 +25,23 @@ export function compressedCache<Args extends unknown[], Result>(
   keyParts: string[],
   options: CacheOptions,
 ): (...args: Args) => Promise<Result> {
-  const cached = unstable_cache(
+  const { raw, decode } = compressedCacheParts(fn, keyParts, options);
+  return async (...args: Args) => decode(await raw(...args));
+}
+
+/**
+ * The same cache in two halves: `raw` returns the stored entry (gzipped JSON
+ * in base64, ~10× smaller than the value) and `decode` turns one into the
+ * value. For callers that keep entries around themselves (the In Production
+ * report's last-good copy, services/production-report.ts) without holding
+ * the decoded objects in memory.
+ */
+export function compressedCacheParts<Args extends unknown[], Result>(
+  fn: (...args: Args) => Promise<Result>,
+  keyParts: string[],
+  options: CacheOptions,
+): { raw: (...args: Args) => Promise<string>; decode: (entry: string) => Promise<Result> } {
+  const raw = unstable_cache(
     async (...args: Args) => {
       const json = JSON.stringify(await fn(...args));
       return (await gzipAsync(json)).toString("base64");
@@ -34,8 +50,9 @@ export function compressedCache<Args extends unknown[], Result>(
     [...keyParts, "gzip"],
     options,
   );
-  return async (...args: Args) => {
-    const json = await gunzipAsync(Buffer.from(await cached(...args), "base64"));
+  const decode = async (entry: string) => {
+    const json = await gunzipAsync(Buffer.from(entry, "base64"));
     return JSON.parse(json.toString("utf8")) as Result;
   };
+  return { raw, decode };
 }

@@ -32,6 +32,9 @@ import {
 // report cache, so the refetch that follows a change is the slow one (1.5-6s)
 // — exactly the moment someone returns to the list. Keyed by brand.
 const pipelineCache = new ReportCache<ProductionItem[]>();
+// A `stale: true` report is asked for again after this long, at most this often.
+const STALE_RETRY_MS = 4_000;
+const STALE_RETRY_MAX = 2;
 
 interface ProductionViewProps {
   brand: string;
@@ -225,8 +228,13 @@ export function ProductionView({ brand, currentUserId }: ProductionViewProps) {
   // Bumped per request so a slow, older response can't overwrite a newer one
   // (switching brands quickly).
   const requestSeq = useRef(0);
+  const staleRetries = useRef(0);
+  const staleTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const fetchPipelineRef = useRef<(() => Promise<void>) | undefined>(undefined);
+  useEffect(() => () => clearTimeout(staleTimer.current), []);
 
   const fetchPipeline = useCallback(async () => {
+    clearTimeout(staleTimer.current);
     const seq = ++requestSeq.current;
     const cached = pipelineCache.get(brand);
     if (cached) {
@@ -252,6 +260,15 @@ export function ProductionView({ brand, currentUserId }: ProductionViewProps) {
       const fresh: ProductionItem[] = json.items ?? [];
       pipelineCache.set(brand, fresh);
       setItems(fresh);
+      // The server answered with its last report while a rebuild runs
+      // (services/production-report.ts → getProductionReportFast): ask again
+      // shortly, at most twice in a row.
+      if (json.stale && staleRetries.current < STALE_RETRY_MAX) {
+        staleRetries.current += 1;
+        staleTimer.current = setTimeout(() => void fetchPipelineRef.current?.(), STALE_RETRY_MS);
+      } else {
+        staleRetries.current = 0;
+      }
     } catch (err) {
       console.error("Failed to fetch production pipeline:", err);
       if (!cached && seq === requestSeq.current) setItems([]);
@@ -261,6 +278,8 @@ export function ProductionView({ brand, currentUserId }: ProductionViewProps) {
   }, [brand]);
 
   useEffect(() => {
+    fetchPipelineRef.current = fetchPipeline;
+    staleRetries.current = 0;
     fetchPipeline();
   }, [fetchPipeline]);
 
