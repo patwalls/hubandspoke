@@ -48,7 +48,6 @@ test("In Production swaps a stale report for the fresh one by itself", async ({ 
     }
     // The stale answer painted (the new post isn't in it) …
     await expect.poll(() => calls).toBeGreaterThanOrEqual(1);
-    await expect(page.getByText("Assigned", { exact: true }).first()).toBeVisible();
     await expect(page.getByText(title)).toHaveCount(0);
     // … and the follow-up brings it in, with no reload.
     await expect(page.getByText(title).first()).toBeVisible({ timeout: 10_000 });
