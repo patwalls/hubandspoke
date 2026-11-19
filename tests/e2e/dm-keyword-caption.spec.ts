@@ -60,7 +60,11 @@ async function attachAndCheck(page: Page, opts: { cta: (other: string) => string
     }).toContain(opts.after);
     const [item] = await sql`SELECT short_link_slug FROM production_items WHERE id = ${id}`;
     expect(item.short_link_slug).toBe("firstsale");
-    if (opts.shot && process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT, fullPage: false });
+    if (opts.shot && process.env.E2E_SHOT) {
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      await page.screenshot({ path: process.env.E2E_SHOT, fullPage: false });
+    }
   } finally {
     await sql.end();
   }
