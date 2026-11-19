@@ -3,6 +3,7 @@
 import { useEffect, useState, type ComponentProps } from "react";
 import { CrossPostTriagePanel } from "./cross-post-triage-dialog";
 import type { TargetCommonalityRow } from "@/lib/cross-post-usual";
+import type { ChannelReach } from "@/lib/channel-reach";
 
 type PanelProps = ComponentProps<typeof CrossPostTriagePanel>;
 
@@ -13,22 +14,33 @@ type PanelProps = ComponentProps<typeof CrossPostTriagePanel>;
  * than from the queue). The tab only mounts when opened, so the lookup runs
  * then, not on every post page load. Waits for the ranking before drawing the
  * list so rows don't reorder under a click; a failed lookup just draws the
- * unranked list.
+ * unranked list. The same request brings each target's typical reach
+ * (channelReach), drawn quietly on its row.
  */
-export function CrossPostTabPanel(props: Omit<PanelProps, "targetCommonality">) {
+export function CrossPostTabPanel(
+  props: Omit<PanelProps, "targetCommonality" | "channelReach">,
+) {
   const itemId = props.candidate.id;
   const [ranking, setRanking] = useState<
     Record<string, TargetCommonalityRow[]> | null
   >(null);
+  const [reach, setReach] = useState<Record<string, ChannelReach>>({});
 
   useEffect(() => {
     let cancelled = false;
     fetch(`/api/production-items/${itemId}/cross-post-usual`)
       .then((r) => (r.ok ? r.json() : { targetCommonality: {} }))
       .catch(() => ({ targetCommonality: {} }))
-      .then((body: { targetCommonality?: Record<string, TargetCommonalityRow[]> }) => {
-        if (!cancelled) setRanking(body.targetCommonality ?? {});
-      });
+      .then(
+        (body: {
+          targetCommonality?: Record<string, TargetCommonalityRow[]>;
+          channelReach?: Record<string, ChannelReach>;
+        }) => {
+          if (cancelled) return;
+          setReach(body.channelReach ?? {});
+          setRanking(body.targetCommonality ?? {});
+        },
+      );
     return () => {
       cancelled = true;
     };
@@ -37,5 +49,5 @@ export function CrossPostTabPanel(props: Omit<PanelProps, "targetCommonality">) 
   if (ranking === null) {
     return <div className="h-40 animate-pulse rounded-md bg-muted/40" aria-hidden />;
   }
-  return <CrossPostTriagePanel {...props} targetCommonality={ranking} />;
+  return <CrossPostTriagePanel {...props} targetCommonality={ranking} channelReach={reach} />;
 }
