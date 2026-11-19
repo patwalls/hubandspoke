@@ -127,6 +127,11 @@ test("the cross-post queue's picker shows each account's typical reach", async (
       await page.screenshot({ path: process.env.E2E_SHOT.replace(/\.png$/, "-before.png"), fullPage: true });
     }
     await page.getByRole("button", { name: title }).click();
+    // The first test's accounts share the brand, so this run's may sit past
+    // the fold of the picker.
+    const showAll = page.getByRole("button", { name: /^Show all/ });
+    await expect(page.getByText("Cross-post to", { exact: false }).first()).toBeVisible({ timeout: 15_000 });
+    if (await showAll.isVisible()) await showAll.click();
     await expectReach(page, stamp);
     if (process.env.E2E_SHOT) {
       await page.waitForTimeout(500);
