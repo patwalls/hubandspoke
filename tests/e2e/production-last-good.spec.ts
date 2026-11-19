@@ -24,10 +24,15 @@ test("In Production swaps a stale report for the fresh one by itself", async ({ 
     const id = (await res.json()).id as string;
     await sql`UPDATE production_items SET status = 'Assigned' WHERE id = ${id}`;
 
+    // Every answer in the first 2 s is stale (dev-mode React mounts twice, so
+    // the page's own first load is two fetches); only the page's follow-up,
+    // 4 s after a stale answer, gets the real report.
     let calls = 0;
+    let firstAt = 0;
     await page.route("**/api/reports/production?*", async (route) => {
       calls += 1;
-      if (calls > 1) return route.continue();
+      if (!firstAt) firstAt = Date.now();
+      if (Date.now() - firstAt > 2_000) return route.continue();
       const real = await route.fetch();
       const body = await real.json();
       body.items = (body.items ?? []).filter((i: { id: string }) => i.id !== id);
@@ -43,10 +48,11 @@ test("In Production swaps a stale report for the fresh one by itself", async ({ 
     }
     // The stale answer painted (the new post isn't in it) …
     await expect.poll(() => calls).toBeGreaterThanOrEqual(1);
+    await expect(page.getByText("Assigned", { exact: true }).first()).toBeVisible();
     await expect(page.getByText(title)).toHaveCount(0);
     // … and the follow-up brings it in, with no reload.
     await expect(page.getByText(title).first()).toBeVisible({ timeout: 10_000 });
-    expect(calls).toBe(2);
+    expect(Date.now() - firstAt).toBeGreaterThan(2_000);
 
     if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT, fullPage: true });
   } finally {
