@@ -2,10 +2,12 @@ import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
+  clipIdeaRuns,
   clipIdeas,
   formatChannels,
   formats,
   productionItems,
+  type ClipIdeaRunSkip,
 } from "@/lib/db/schema";
 import { getTranscriptForPrompt } from "@/lib/services/whisper-transcribe";
 import { topShortFormPerformers } from "@/lib/db/queries";
@@ -34,6 +36,29 @@ import { loadFormatOdds } from "@/lib/services/clip-odds";
 import { oddsKey } from "@/lib/clip-odds";
 
 const HOOK_WRITER_CONCURRENCY = 5;
+
+/** Persist one pass-2 run (see `clipIdeaRuns`). Fail-soft: a failed write
+ *  only costs the drought watch its "clean no-fit" signal, so it alerts as
+ *  before. */
+async function recordClipIdeaRun(run: {
+  pillarId: string;
+  formatId: string;
+  formatName: string;
+  sectionsConsidered: number;
+  ideasCreated: number;
+  skips: ClipIdeaRunSkip[];
+}): Promise<void> {
+  try {
+    await db.insert(clipIdeaRuns).values({
+      ...run,
+      agentErrors: run.skips.filter((s) => s.agentError).length,
+    });
+  } catch (err) {
+    console.warn(
+      `[clip-idea-generate] format=${run.formatName} run record failed: ${err instanceof Error ? err.message : err}`,
+    );
+  }
+}
 
 /**
  * Map a `production_items.post_type` value to the matching
@@ -341,6 +366,7 @@ export async function generateClipIdeasForItem(
     section: LiveClipSection;
     candidate: (typeof candidates)[number]["candidate"];
   }> = [];
+  const skips: ClipIdeaRunSkip[] = [];
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
   for (let i = 0; i < candidates.length; i++) {
@@ -350,6 +376,12 @@ export async function generateClipIdeasForItem(
     if (c.eligible) {
       eligible.push({ section: liveSections[i], candidate: c });
     } else {
+      skips.push({
+        sectionId: liveSections[i].id,
+        topic: liveSections[i].topic,
+        reason: c.reason,
+        agentError: c.agentError === true,
+      });
       console.info(
         `[clip-idea-generate] section "${liveSections[i].topic}" skipped for format "${format.name}": ${c.reason}`,
       );
@@ -369,6 +401,14 @@ export async function generateClipIdeasForItem(
   }
 
   if (eligible.length === 0) {
+    await recordClipIdeaRun({
+      pillarId: productionItemId,
+      formatId: format.id,
+      formatName: format.name,
+      sectionsConsidered: liveSections.length,
+      ideasCreated: 0,
+      skips,
+    });
     return {
       status: "ok",
       ideasCreated: 0,
@@ -525,6 +565,15 @@ export async function generateClipIdeasForItem(
         .where(eq(clipIdeas.id, ci.id));
     }
   }
+
+  await recordClipIdeaRun({
+    pillarId: productionItemId,
+    formatId: format.id,
+    formatName: format.name,
+    sectionsConsidered: liveSections.length,
+    ideasCreated: inserted.length,
+    skips,
+  });
 
   return {
     status: "ok",

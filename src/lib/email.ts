@@ -424,6 +424,8 @@ export async function sendClipIdeaDroughtEmail(opts: {
     publishedDate: string | null;
     formatName: string;
     sectionCount: number;
+    agentErrors?: number | null;
+    sampleError?: string | null;
   }>;
 }) {
   const baseUrl =
@@ -435,16 +437,22 @@ export async function sendClipIdeaDroughtEmail(opts: {
 
   const subject = `[Hub & Spoke] Clip-idea drought: ${opts.gapCount} video/format gap${opts.gapCount === 1 ? "" : "s"}`;
 
+  // What the writer's last run says about the zero (clip_idea_runs). Null =
+  // no run recorded, so the cause is unknown.
+  const whyLine = (g: (typeof opts.gaps)[number]) =>
+    g.agentErrors != null && g.agentErrors > 0
+      ? `writer gave up on ${g.agentErrors} section${g.agentErrors === 1 ? "" : "s"}${g.sampleError ? `: ${g.sampleError}` : ""}`
+      : null;
   const linesText = opts.gaps
-    .map(
-      (g) =>
-        `  - [${g.brand ?? "?"} / ${g.sourceChannel ?? "?"}] "${g.title ?? g.pillarId}" (published ${g.publishedDate ?? "?"}): ${g.sectionCount} sections detected, 0 ideas for "${g.formatName}"\n    ${itemUrl(g.brand, g.pillarId)}`,
-    )
+    .map((g) => {
+      const why = whyLine(g);
+      return `  - [${g.brand ?? "?"} / ${g.sourceChannel ?? "?"}] "${g.title ?? g.pillarId}" (published ${g.publishedDate ?? "?"}): ${g.sectionCount} sections detected, 0 ideas for "${g.formatName}"${why ? `\n    ${why}` : ""}\n    ${itemUrl(g.brand, g.pillarId)}`;
+    })
     .join("\n");
   const linesHtml = opts.gaps
     .map(
       (g) =>
-        `<li style="margin-bottom:8px;">[${esc(g.brand ?? "?")} / ${esc(g.sourceChannel ?? "?")}] <a href="${itemUrl(g.brand, g.pillarId)}">${esc(g.title ?? g.pillarId)}</a> (published ${g.publishedDate ?? "?"}) — <strong>${g.sectionCount}</strong> sections detected, <strong>0 ideas</strong> for <em>${esc(g.formatName)}</em></li>`,
+        `<li style="margin-bottom:8px;">[${esc(g.brand ?? "?")} / ${esc(g.sourceChannel ?? "?")}] <a href="${itemUrl(g.brand, g.pillarId)}">${esc(g.title ?? g.pillarId)}</a> (published ${g.publishedDate ?? "?"}) — <strong>${g.sectionCount}</strong> sections detected, <strong>0 ideas</strong> for <em>${esc(g.formatName)}</em>${whyLine(g) ? `<br><span style="color:#b91c1c;">${esc(whyLine(g)!)}</span>` : ""}</li>`,
     )
     .join("");
 

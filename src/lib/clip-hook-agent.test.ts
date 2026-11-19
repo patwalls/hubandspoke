@@ -276,6 +276,18 @@ describe("writeFormatHookForSection — wiring", () => {
     expect(candidate.eligible).toBe(false);
     expect(candidate.hook).toBeNull();
     expect(candidate.reason).toMatch(/agent error/i);
+    // The drought watch reads this flag off clip_idea_runs to tell a broken
+    // run from an honest "no fit".
+    expect(candidate.agentError).toBe(true);
+  });
+
+  it("a clean eligible:false is a judgment, not an agent error (2026-11-19 drought false alarm)", async () => {
+    const { client } = makeClient([
+      { eligible: false, reason: "No tools or working practices are named in this section." },
+    ]);
+    const { candidate } = await writeFormatHookForSection(baseArgs({ client }));
+    expect(candidate.eligible).toBe(false);
+    expect(candidate.agentError).toBeFalsy();
   });
 
   describe("a section whose stored anchor is under 8 words", () => {
