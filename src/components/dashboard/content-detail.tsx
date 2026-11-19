@@ -1,6 +1,7 @@
 "use client";
 
 import { useHydrated, formatDisplayDate } from "@/lib/hooks/use-local-date";
+import { viewsCaption } from "@/lib/views-caption";
 import React, { useRef, useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
@@ -3697,9 +3698,13 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
           <p className="mt-3 text-xs text-muted-foreground">
             {item.postType === "newsletter" && item.newsletterRecipients
               ? `Unique opens · ${(((item.views ?? 0) / item.newsletterRecipients) * 100).toFixed(1)}% of ${formatCompact(item.newsletterRecipients)} delivered`
-              : item.viewsEstimated
-                ? "Estimated from likes"
-                : "Reported"}
+              : viewsCaption({
+                  postType: item.postType,
+                  views: item.views,
+                  viewsEstimated: item.viewsEstimated,
+                  likes: item.likes,
+                  synced: item.lastPerformanceSyncAt != null,
+                })}
             {item.postType !== "newsletter" && <ViewsAgainstUsual brand={brand} value={againstUsual} />}
           </p>
           {item.postType !== "newsletter" && <WhyItWon brand={brand} value={againstUsual} />}
