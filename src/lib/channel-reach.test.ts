@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { channelReachLabel, compactViews } from "./channel-reach";
+import { channelReachLabel, compactViews, quietChannels } from "./channel-reach";
 
 describe("compactViews", () => {
   it("keeps small numbers whole and shortens big ones", () => {
@@ -38,5 +38,25 @@ describe("channelReachLabel", () => {
     expect(channelReachLabel({ posts: 30, medianViews: 320, zeroLikes: 9 })?.quiet).toBe(false);
     // exactly half is
     expect(channelReachLabel({ posts: 10, medianViews: 77, zeroLikes: 5 })?.quiet).toBe(true);
+  });
+});
+
+describe("quietChannels", () => {
+  const row = (handle: string, posts: number, zeroLikes: number) => ({
+    handle,
+    postType: "facebook_post",
+    posts,
+    zeroLikes,
+    medianViews: 10,
+  });
+
+  it("keeps channels with 10+ posts where at least half got no likes, most no-like posts first", () => {
+    const out = quietChannels([
+      row("half", 10, 5),
+      row("loud", 40, 19),
+      row("few", 9, 9),
+      row("worst", 32, 20),
+    ]);
+    expect(out.map((r) => r.handle)).toEqual(["worst", "half"]);
   });
 });

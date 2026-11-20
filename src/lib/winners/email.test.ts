@@ -65,4 +65,37 @@ describe("buildWinnersEmail", () => {
     expect(e.text).toContain("One: 3 of 4 posts (best 4.0×)");
     expect(e.text).not.toContain("Four:");
   });
+
+  describe("quiet channels", () => {
+    const quiet = [
+      { handle: "skillleapai", postType: "facebook_post", posts: 32, zeroLikes: 20, medianViews: 40 },
+      { handle: "@other", postType: "threads", posts: 17, zeroLikes: 13, medianViews: null },
+    ];
+
+    it("lists each brand's quiet channels under its winners, with a link to the accounts page", () => {
+      const e = buildWinnersEmail({ ...base, brands: [{ ...brand("a", [w("Hit", 3)]), quiet }] })!;
+      expect(e.text).toContain("Mostly no likes (last 30 days):");
+      expect(e.text).toMatch(/@skillleapai .+: 20 of 32 posts got none/);
+      expect(e.text).toMatch(/@other .+: 13 of 17 posts got none/);
+      expect(e.text).toContain("https://app.test/a/accounts");
+      expect(e.html).toContain("20 of 32 posts got none");
+    });
+
+    it("keeps a brand that only has quiet channels, but quiet channels alone never send the email", () => {
+      expect(buildWinnersEmail({ ...base, brands: [{ ...brand("q", []), quiet }] })).toBeNull();
+      const e = buildWinnersEmail({ ...base, brands: [brand("a", [w("Hit", 3)]), { ...brand("q", []), quiet }] })!;
+      expect(e.subject).toBe('1 post beat their usual last week — top: 3.0× "Hit"');
+      // Brands with winners come first; the quiet-only brand still gets its section.
+      expect(e.text.indexOf("== A ==")).toBeLessThan(e.text.indexOf("== Q =="));
+      expect(e.text).toContain("https://app.test/q/accounts");
+      expect(e.html).not.toMatch(/<h3[^>]*>Q<\/h3>\s*<table/);
+    });
+
+    it("shows at most three", () => {
+      const many = Array.from({ length: 5 }, (_, i) => ({ ...quiet[0], handle: `acct${i}` }));
+      const e = buildWinnersEmail({ ...base, brands: [{ ...brand("a", [w("Hit", 3)]), quiet: many }] })!;
+      expect(e.text).toContain("@acct2");
+      expect(e.text).not.toContain("@acct3");
+    });
+  });
 });
