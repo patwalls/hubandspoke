@@ -38,7 +38,7 @@ test("the Monday email lists a brand's quiet channels", async ({ page }) => {
     }
 
     await page.goto("/api/winners-email/preview");
-    await expect(page.getByText(`E2E winner ${stamp}`)).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole("link", { name: `E2E winner ${stamp}` })).toBeVisible({ timeout: 15_000 });
     await expect(page.getByText("Mostly no likes (last 30 days)")).toBeVisible();
     await expect(page.getByText(new RegExp(`@${facebook} .+: 8 of 12 posts got none`))).toBeVisible();
     await expect(page.getByRole("link", { name: "accounts" })).toHaveAttribute("href", /\/starter-story\/accounts$/);
