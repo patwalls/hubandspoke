@@ -62,14 +62,14 @@ test("the dashboard shows posts that beat their usual this week", async ({ page 
     await expect(topLink).toHaveAttribute("href", /\/starter-story\/content\/[0-9a-f-]{36}$/);
     await expect(strip.getByRole("link")).toHaveCount(1);
     await expect(page.getByTestId("format-scoreboard")).toHaveCount(0);
-    if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT.replace(/\.png$/, "-collapsed.png") });
+    if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT });
     await toggle.click();
     const row = strip.getByRole("link", { name: new RegExp(winnerTitle) });
     await expect(row).toBeVisible();
     await expect(row).toContainText("8.4×");
     await expect(row.getByTestId("win-note")).toHaveText(`Why: ${winNote.note}`);
     await expect(strip.getByText(usualTitle)).toHaveCount(0);
-    if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT });
+    if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT.replace(/\.png$/, "-expanded.png") });
 
     await row.click();
     await expect(page).toHaveURL(/\/starter-story\/content\/[0-9a-f-]{36}/);
