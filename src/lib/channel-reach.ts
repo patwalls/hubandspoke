@@ -51,3 +51,23 @@ export function channelReachLabel(r: ChannelReach | undefined): ChannelReachLabe
     (r.zeroLikes > 0 ? `, ${r.zeroLikes} of ${r.posts} got no likes.` : ".");
   return { text, title, quiet };
 }
+
+export interface AccountReachLine extends ChannelReachLabel {
+  postType: string;
+}
+
+/** The Accounts page's "Typical post" cell for one account: a label per post
+ *  type that has enough history, busiest type first. `reach` is keyed
+ *  `<accountId>:<postType>` (fetchChannelReach). Empty = render nothing. */
+export function accountReachLines(
+  reach: Record<string, ChannelReach>,
+  accountId: string,
+): AccountReachLine[] {
+  const prefix = `${accountId}:`;
+  return Object.entries(reach)
+    .filter(([key]) => key.startsWith(prefix))
+    .map(([key, r]) => ({ postType: key.slice(prefix.length), r, label: channelReachLabel(r) }))
+    .filter((x): x is { postType: string; r: ChannelReach; label: ChannelReachLabel } => x.label != null)
+    .sort((a, b) => b.r.posts - a.r.posts || a.postType.localeCompare(b.postType))
+    .map(({ postType, label }) => ({ postType, ...label }));
+}

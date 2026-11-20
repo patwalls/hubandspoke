@@ -18,6 +18,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { EditGate, useCanEditBrand } from "@/components/brand-access";
+import { postTypeLabel } from "@/lib/badge-colors";
+import { REACH_WINDOW_DAYS, type AccountReachLine } from "@/lib/channel-reach";
 
 const VIEW_ONLY_TITLE = "View only — you don't have edit access to this brand";
 
@@ -101,6 +103,32 @@ interface AccountRow {
   /** Zernio ConnectedAccount id for TikTok posting. Null = not connected.
    *  Only meaningful for platform='tiktok' accounts. */
   zernioAccountId: string | null;
+  /** What a post here typically gets over the last 30 days, per post type
+   *  (accountReachLines). Absent/empty = too little history; blank cell. */
+  reach?: AccountReachLine[];
+}
+
+/** "Typical post" cell: one quiet line per post type; amber when most posts
+ *  got no likes. The type prefix only when the account posts several types. */
+function AccountReachCell({ lines }: { lines: AccountReachLine[] | undefined }) {
+  if (!lines || lines.length === 0) return null;
+  return (
+    <div className="flex flex-col items-end gap-0.5">
+      {lines.map((l) => (
+        <span
+          key={l.postType}
+          className={
+            "text-xs whitespace-nowrap " +
+            (l.quiet ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground")
+          }
+          title={l.title}
+          data-testid="account-reach"
+        >
+          {lines.length > 1 ? `${postTypeLabel(l.postType)} ${l.text}` : l.text}
+        </span>
+      ))}
+    </div>
+  );
 }
 
 interface BrandOption {
@@ -558,6 +586,12 @@ export function AccountsSettingsContent({
                   >
                     Views
                   </th>
+                  <th
+                    className="text-right px-3 py-2"
+                    title={`Median views per post over the last ${REACH_WINDOW_DAYS} days (5+ posts), and whether most posts got no likes`}
+                  >
+                    Typical post
+                  </th>
                   <th className="text-left px-3 py-2">Last refresh</th>
                   <th
                     className="text-left px-3 py-2"
@@ -663,6 +697,9 @@ export function AccountsSettingsContent({
                     </td>
                     <td className="text-right px-3 py-2 text-muted-foreground tabular-nums">
                       {formatCount(a.totalViews)}
+                    </td>
+                    <td className="text-right px-3 py-2 align-middle">
+                      <AccountReachCell lines={a.reach} />
                     </td>
                     <td className="px-3 py-2 text-xs text-muted-foreground">
                       <AccountStatusCell at={a.lastRefreshedAt} error={a.lastRefreshError} />

@@ -141,3 +141,28 @@ test("the cross-post queue's picker shows each account's typical reach", async (
     await sql.end();
   }
 });
+
+// The Accounts page carries the same numbers in a "Typical post" column, so
+// whoever runs the brand's channels sees which ones pay back the posting time.
+test("the Accounts page shows each account's typical post", async ({ page }) => {
+  const sql = postgres(process.env.DATABASE_URL!, { max: 1 });
+  try {
+    const { stamp } = await seedReach(page, sql);
+    await dismissWhatsNew(page);
+    await page.goto("/starter-story/accounts");
+    const row = (handle: string) => page.locator("tr").filter({ hasText: `@${handle}` });
+    const tiktok = row(`e2e_tiktok_${stamp}`).getByTestId("account-reach");
+    await expect(tiktok).toHaveText("~1.5K views", { timeout: 15_000 });
+    await expect(tiktok).toHaveAttribute("title", /6 posts here, typical post 1,500 views/);
+    await expect(row(`e2e_x_${stamp}`).getByTestId("account-reach")).toHaveText(
+      "~63 views · mostly no likes",
+    );
+    await expect(row(`e2e_threads_${stamp}`).getByTestId("account-reach")).toHaveCount(0);
+    if (process.env.E2E_SHOT) {
+      await page.waitForTimeout(500);
+      await page.screenshot({ path: process.env.E2E_SHOT, fullPage: true });
+    }
+  } finally {
+    await sql.end();
+  }
+});
