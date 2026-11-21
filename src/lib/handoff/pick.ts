@@ -21,18 +21,19 @@ export interface HandoffPerson {
 }
 
 export interface Handoff {
-  kind: "send-to-review" | "name-reviewer" | "approve";
+  kind: "send-to-review" | "name-reviewer" | "approve" | "assign";
   /** Status the item moves to. */
   to: string;
   /** Who it's handed to (the new editor). */
   person: HandoffPerson;
-  /** Other people it could go to (send-to-review / name-reviewer), best first. */
+  /** Other people it could go to (send-to-review / name-reviewer / assign), best first. */
   others: HandoffPerson[];
 }
 
 export const REVIEW = "Review";
 export const ASSIGNED = "Assigned";
 export const READY = "Ready To Publish";
+export const IDEA = "Idea";
 
 export function pickHandoff(input: {
   me: string;
@@ -44,8 +45,11 @@ export function pickHandoff(input: {
   reviewers: HandoffPerson[];
   /** Who last moved this item into Review. */
   sentToReviewBy: HandoffPerson | null;
+  /** Who hands this brand + format's posts in (Assigned → Review), most first. */
+  formatEditors?: HandoffPerson[];
 }): Handoff | null {
   const { me, status, editorUserId, brandStatuses, reviewers, sentToReviewBy } = input;
+  const formatEditors = input.formatEditors ?? [];
   const has = (s: string) => brandStatuses.size === 0 || brandStatuses.has(s);
 
   // Only the editor sends their own work to review.
@@ -75,6 +79,21 @@ export function pickHandoff(input: {
     return { kind: "approve", to: READY, person: sentToReviewBy, others: [] };
   }
 
+  // Not started yet (an Idea, or a clip built and parked in Ready To
+  // Publish) and nobody else holds it: give it to the person who makes this
+  // format, brief included. The curator did this in three steps (status,
+  // editor, comment) about once a day, almost always to the same editor.
+  if (
+    (status === IDEA || status === READY) &&
+    has(ASSIGNED) &&
+    (!editorUserId || editorUserId === me)
+  ) {
+    const candidates = formatEditors.filter((p) => p.id !== me);
+    if (candidates.length === 0) return null;
+    const [person, ...others] = candidates;
+    return { kind: "assign", to: ASSIGNED, person, others };
+  }
+
   return null;
 }
 
@@ -96,6 +115,7 @@ export function composerHandoffLabel(handoff: Handoff | null): string | null {
   const who = firstName(handoff.person.name);
   if (handoff.kind === "send-to-review") return `Comment & send to review → ${who}`;
   if (handoff.kind === "name-reviewer") return `Comment & hand to ${who}`;
+  if (handoff.kind === "assign") return `Comment & assign → ${who}`;
   return null;
 }
 

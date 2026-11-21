@@ -800,7 +800,7 @@ export function ContentActivity({ contentId, brand, refreshKey = 0, statusPalett
     if (withHandoff) {
       if (!handoff || !onHandoff) return;
       setPosting(true);
-      trackUsage("handoff:send-with-note", brand);
+      trackUsage(handoff.kind === "assign" ? "handoff:assign-with-note" : "handoff:send-with-note", brand);
       const ok = await onHandoff({ status: handoff.to, editorUserId: handoff.person.id });
       if (!ok) {
         setPosting(false);
@@ -1127,7 +1127,7 @@ export function ContentActivity({ contentId, brand, refreshKey = 0, statusPalett
                 onClick={() => void post(true)}
                 disabled={posting}
                 size="sm"
-                title={`Posts your comment and makes ${handoff?.person.name} the editor${handoff?.kind === "send-to-review" ? `, moving it to ${handoff.to}` : ""}`}
+                title={`Posts your comment and makes ${handoff?.person.name} the editor${handoff?.kind === "send-to-review" || handoff?.kind === "assign" ? `, moving it to ${handoff.to}` : ""}`}
               >
                 {handoffLabel}
               </Button>
