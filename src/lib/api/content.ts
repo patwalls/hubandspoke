@@ -16,7 +16,7 @@ import {
   transcripts,
   users,
 } from "@/lib/db/schema";
-import { htmlToPlainText } from "@/lib/comments/sanitize";
+import { commentText } from "@/lib/comments/sanitize";
 import { getPresignedGetUrl } from "@/lib/s3";
 import { z } from "zod";
 import { ApiError, decodeCursor, encodeCursor, zBool, zIsoDate, zLimit } from "./http";
@@ -439,16 +439,6 @@ export async function listDrafts(id: string, opts: { current_only?: boolean } = 
   };
 }
 
-/** htmlToPlainText keeps entities (the app renders them); the API returns real characters. */
-function decodeEntities(text: string): string {
-  return text
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&");
-}
 
 export interface ApiComment {
   id: string;
@@ -475,7 +465,7 @@ export async function listComments(id: string): Promise<{ data: ApiComment[] }> 
     data: rows.map((r) => ({
       id: r.c.id,
       content_id: id,
-      body_text: decodeEntities(htmlToPlainText(r.c.body)),
+      body_text: commentText(r.c.body),
       body_html: r.c.body,
       author: r.u?.id
         ? { id: r.u.id, name: r.u.name, email: r.u.email }

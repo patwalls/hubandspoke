@@ -4,7 +4,7 @@ import { db } from "@/lib/db";
 import { contentComments, contentDrafts, contentEvents, productionItems, users } from "@/lib/db/schema";
 import { requireSession } from "@/lib/auth-guards";
 import { getPresignedGetUrl } from "@/lib/s3";
-import { htmlToPlainText } from "@/lib/comments/sanitize";
+import { commentText } from "@/lib/comments/sanitize";
 import { draftPreview } from "@/lib/production/peek";
 
 interface RouteContext {
@@ -105,7 +105,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     // Oldest first, as they read on the content page.
     comments: commentRows.reverse().map((c) => ({
       author: c.userName || c.authorName || c.userEmail?.split("@")[0] || "Someone",
-      text: htmlToPlainText(c.body).slice(0, 400),
+      text: commentText(c.body).slice(0, 400),
       at: c.createdAt.toISOString(),
     })),
     statusSince: moved

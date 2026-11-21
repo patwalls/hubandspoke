@@ -46,6 +46,9 @@ test("a Short handed back as a Studio link offers its live link when publishing"
     const box = page.getByTestId("production-peek-publish");
     const offer = box.getByTestId("publish-studio-link");
     await expect(offer).toContainText("From Noa's YouTube Studio link");
+    // The peek shows the comment as written, not "Review &amp; publish."
+    await expect(page.getByText("Review & publish.", { exact: false })).toBeVisible();
+    await expect(page.getByText("&amp;", { exact: false })).toHaveCount(0);
     if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT });
     await offer.getByRole("button", { name: "Use youtube.com/shorts/e2eVid_0-Ab" }).click();
     await expect(box.getByRole("textbox")).toHaveValue("https://youtube.com/shorts/e2eVid_0-Ab");

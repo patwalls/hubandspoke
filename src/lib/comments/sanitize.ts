@@ -112,3 +112,25 @@ export function htmlToPlainText(html: string): string {
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
+
+/** Undo the HTML escaping htmlToPlainText leaves (sanitize-html escapes
+ *  text: `&` → `&amp;`). `&amp;` last, so `&amp;lt;` stays `&lt;`. */
+export function decodeEntities(text: string): string {
+  return text
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&");
+}
+
+/**
+ * A comment as text for React to render (peek, My Work previews). React
+ * escapes on its own, so the entities htmlToPlainText keeps would show up
+ * literally ("Review &amp; publish"). Never put this into raw HTML (emails):
+ * those sinks use htmlToPlainText, which stays escaped.
+ */
+export function commentText(html: string): string {
+  return decodeEntities(htmlToPlainText(html));
+}
