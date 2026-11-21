@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { deliveryLabel, linksInComment, pickDeliveryLink } from "./delivery-link";
+import { deliveryLabel, linksInComment, liveLinkFromStudio, pickDeliveryLink } from "./delivery-link";
 
 const mention = '<span data-type="mention" data-id="u1" class="mention">@Rita</span>';
 
@@ -56,5 +56,30 @@ describe("pickDeliveryLink", () => {
   });
   it("returns null with no comments", () => {
     expect(pickDeliveryLink([], since)).toBeNull();
+  });
+});
+
+describe("liveLinkFromStudio", () => {
+  it("turns a Studio link into the Short's public link", () => {
+    expect(liveLinkFromStudio("https://studio.youtube.com/video/NT-BHHKJ11g/edit", "youtube_shorts")).toBe(
+      "https://youtube.com/shorts/NT-BHHKJ11g",
+    );
+    expect(liveLinkFromStudio(" https://studio.youtube.com/video/6_TYneN_OkQ ", "youtube_shorts")).toBe(
+      "https://youtube.com/shorts/6_TYneN_OkQ",
+    );
+  });
+  it("gives long-form videos a watch link", () => {
+    expect(liveLinkFromStudio("https://studio.youtube.com/video/Cs0_dFJsikQ/edit", "youtube_long")).toBe(
+      "https://www.youtube.com/watch?v=Cs0_dFJsikQ",
+    );
+  });
+  it("offers nothing for other platforms, other hosts or other Studio pages", () => {
+    expect(liveLinkFromStudio("https://studio.youtube.com/video/NT-BHHKJ11g/edit", "instagram_reel")).toBeNull();
+    expect(liveLinkFromStudio("https://studio.youtube.com/video/NT-BHHKJ11g/edit", "youtube_community")).toBeNull();
+    expect(liveLinkFromStudio("https://studio.youtube.com/video/NT-BHHKJ11g/edit", null)).toBeNull();
+    expect(liveLinkFromStudio("https://studio.youtube.com/channel/UCabc/videos", "youtube_shorts")).toBeNull();
+    expect(liveLinkFromStudio("https://studio.youtube.com/video/short/edit", "youtube_shorts")).toBeNull();
+    expect(liveLinkFromStudio("https://www.canva.com/design/D/view", "youtube_shorts")).toBeNull();
+    expect(liveLinkFromStudio("not a url", "youtube_shorts")).toBeNull();
   });
 });

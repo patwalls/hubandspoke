@@ -21,6 +21,7 @@ import {
   validatePublishedLinkPlatform,
 } from "@/lib/published-link-validation";
 import { useCanEditBrand } from "@/components/brand-access";
+import { StudioLinkOffer, useStudioLiveLink } from "./studio-live-link";
 
 // The one and only path to status='Published' / status='Scheduled'. The
 // generic PUT /api/production-items route rejects those status values
@@ -138,6 +139,10 @@ export function PublishScheduleDialog({
     initialExpectedPublishAt,
     initialNoDate,
   ]);
+
+  // Handed back as a YouTube Studio link: offer the live link (studio-live-link).
+  const studio = useStudioLiveLink(itemId, currentStatus, postType, open && !initialLink);
+  const studioOffer = studio && !link.trim() ? studio : null;
 
   const linkValid = useMemo(() => {
     const t = link.trim();
@@ -309,6 +314,8 @@ export function PublishScheduleDialog({
                     {shareOk ? " Save again to use it anyway." : null}
                   </span>
                 </p>
+              ) : studioOffer ? (
+                <StudioLinkOffer offer={studioOffer} brand={brand} where="dialog" onUse={setLink} />
               ) : pasteTip && !link ? (
                 <p
                   className="text-[11px] text-muted-foreground"

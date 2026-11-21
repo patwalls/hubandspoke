@@ -9,6 +9,7 @@ import { useCanEditBrand } from "@/components/brand-access";
 import { READY_CHANGED_EVENT } from "@/lib/publish/events";
 import { shareLinkWarning, validatePublishedLinkPlatform } from "@/lib/published-link-validation";
 import { PostTypeTag } from "@/components/my-work/up-next";
+import { StudioLinkOffer, useStudioLiveLink } from "./studio-live-link";
 import { cn } from "@/lib/utils";
 import { statusClass } from "@/lib/badge-colors";
 import { trackUsage } from "@/lib/usage/track";
@@ -329,6 +330,7 @@ export function ProductionPeek({
           key={`publish-${live.id}`}
           id={live.id}
           brand={brand}
+          status={live.status}
           postType={live.postType}
           onPublished={(pid) => onMoved(pid, "Published")}
         />
@@ -362,11 +364,13 @@ export function ProductionPeek({
 function PeekPublish({
   id,
   brand,
+  status,
   postType,
   onPublished,
 }: {
   id: string;
   brand: string;
+  status: string | null;
   postType: string | null;
   onPublished: (id: string) => void;
 }) {
@@ -374,6 +378,7 @@ function PeekPublish({
   const [busy, setBusy] = useState(false);
   const [shareOk, setShareOk] = useState(false);
   const url = link.trim();
+  const studio = useStudioLiveLink(id, status, postType);
   const mismatch = validatePublishedLinkPlatform(url, postType);
   const shareWarn = mismatch ? null : shareLinkWarning(url);
 
@@ -438,6 +443,16 @@ function PeekPublish({
         <p className="text-xs text-destructive">{mismatch}</p>
       ) : shareWarn ? (
         <p className="text-xs text-amber-600 dark:text-amber-400">{shareWarn}</p>
+      ) : studio && !url ? (
+        <StudioLinkOffer
+          offer={studio}
+          brand={brand}
+          where="peek"
+          onUse={(u) => {
+            setLink(u);
+            setShareOk(false);
+          }}
+        />
       ) : null}
     </form>
   );
