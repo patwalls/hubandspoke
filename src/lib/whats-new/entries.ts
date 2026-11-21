@@ -43,6 +43,16 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-11-21-peek-publish",
+    shippedAt: "2026-11-21T11:49:57Z",
+    kind: "feature",
+    title: "Publish a post in Review straight from In Production",
+    body: "Peek a post in Review or Ready To Publish (the eye on its row, or Space), paste its live link and press Enter. It's marked published and the peek moves to the next post, so you don't have to open each one.",
+    href: "/[brand]/production",
+    screen: "production:peek:published",
+    audience: { usersOf: ["/[brand]/production"] },
+  },
+  {
     id: "2026-11-19-cross-post-reach",
     shippedAt: "2026-11-19T17:40:37Z",
     kind: "feature",
