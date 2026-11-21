@@ -2,14 +2,19 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ArrowRightIcon, XIcon } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { useCanEditBrand } from "@/components/brand-access";
+import { READY_CHANGED_EVENT } from "@/lib/publish/events";
+import { shareLinkWarning, validatePublishedLinkPlatform } from "@/lib/published-link-validation";
 import { PostTypeTag } from "@/components/my-work/up-next";
 import { cn } from "@/lib/utils";
 import { statusClass } from "@/lib/badge-colors";
 import { trackUsage } from "@/lib/usage/track";
 import { waitingFor } from "@/lib/my-work/waiting";
 import { isTypingTarget, readRun, stepFocus } from "@/lib/production/run";
-import type { PeekField } from "@/lib/production/peek";
+import { nextAfter, peekCanPublish, type PeekField } from "@/lib/production/peek";
 
 interface PeekData {
   id: string;
@@ -33,6 +38,15 @@ function rowEls(): HTMLElement[] {
 }
 
 /** Open the row the way a click on its title does (so the run is remembered). */
+/** The row after `id` on screen (else the one before) — where the peek goes
+ *  once its post is published and leaves the list. */
+export function rowAfter(id: string): string | null {
+  return nextAfter(
+    rowEls().map((r) => r.getAttribute("data-production-row") ?? ""),
+    id,
+  );
+}
+
 export function openRow(id: string): void {
   document.querySelector<HTMLAnchorElement>(`[data-production-row="${CSS.escape(id)}"] a[data-row-open]`)?.click();
 }
@@ -153,7 +167,19 @@ export function ProductionListKeys({
  * long it has sat in its status, beside the list. Not a modal, so the list
  * keys keep working under it.
  */
-export function ProductionPeek({ id, brand, onClose }: { id: string; brand: string; onClose: () => void }) {
+export function ProductionPeek({
+  id,
+  brand,
+  onClose,
+  onPublished,
+}: {
+  id: string;
+  brand: string;
+  onClose: () => void;
+  /** The post went live from the peek's link box: drop its row, step on. */
+  onPublished?: (id: string) => void;
+}) {
+  const canEdit = useCanEditBrand(brand);
   const [data, setData] = useState<PeekData | null>(null);
   const [failedId, setFailedId] = useState<string | null>(null);
   const failed = failedId === id;
@@ -273,6 +299,10 @@ export function ProductionPeek({ id, brand, onClose }: { id: string; brand: stri
         )}
       </div>
 
+      {shown && !stale && onPublished && peekCanPublish(shown.status, canEdit) && (
+        <PeekPublish key={shown.id} id={shown.id} brand={brand} postType={shown.postType} onPublished={onPublished} />
+      )}
+
       <div className="flex items-center gap-2 border-t px-4 py-3">
         <span className="text-[11px] text-muted-foreground">
           <kbd className="font-mono">j</kbd>/<kbd className="font-mono">k</kbd> next post
@@ -289,6 +319,96 @@ export function ProductionPeek({ id, brand, onClose }: { id: string; brand: stri
         </Button>
       </div>
     </aside>
+  );
+}
+
+/**
+ * "Posted it? Paste the live link" on a Review / Ready To Publish post's peek
+ * (review-doesnt-wait M1). Same guards and write as the Publish screen's rows:
+ * a link from another platform is refused, a share link warns once, and
+ * POST /publish sets link + date + Published in one go.
+ */
+function PeekPublish({
+  id,
+  brand,
+  postType,
+  onPublished,
+}: {
+  id: string;
+  brand: string;
+  postType: string | null;
+  onPublished: (id: string) => void;
+}) {
+  const [link, setLink] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [shareOk, setShareOk] = useState(false);
+  const url = link.trim();
+  const mismatch = validatePublishedLinkPlatform(url, postType);
+  const shareWarn = mismatch ? null : shareLinkWarning(url);
+
+  async function publish() {
+    if (!url || mismatch || busy) return;
+    if (shareWarn && !shareOk) {
+      setShareOk(true);
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/production-items/${encodeURIComponent(id)}/publish`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "publish", link: url }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(json?.error || "Couldn't mark as published");
+        return;
+      }
+      trackUsage("production:peek:published", brand);
+      window.dispatchEvent(new Event(READY_CHANGED_EVENT));
+      toast.success("Published");
+      onPublished(id);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form
+      className="space-y-1 border-t px-4 py-3"
+      data-testid="production-peek-publish"
+      onSubmit={(e) => {
+        e.preventDefault();
+        void publish();
+      }}
+    >
+      <label htmlFor={`peek-link-${id}`} className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+        Posted it? Paste the live link
+      </label>
+      <div className="flex gap-2">
+        <Input
+          id={`peek-link-${id}`}
+          value={link}
+          onChange={(e) => {
+            setLink(e.target.value);
+            setShareOk(false);
+          }}
+          placeholder="https://…"
+          className="h-8 text-sm"
+          disabled={busy}
+        />
+        <Button type="submit" size="sm" variant="outline" disabled={!url || !!mismatch || busy}>
+          {busy ? "Saving…" : shareWarn && shareOk ? "Keep anyway" : "Mark published"}
+        </Button>
+      </div>
+      {mismatch ? (
+        <p className="text-xs text-destructive">{mismatch}</p>
+      ) : shareWarn ? (
+        <p className="text-xs text-amber-600 dark:text-amber-400">{shareWarn}</p>
+      ) : null}
+    </form>
   );
 }
 

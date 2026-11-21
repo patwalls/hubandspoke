@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { draftPreview } from "./peek";
+import { draftPreview, nextAfter, peekCanPublish } from "./peek";
 import type { FormatFieldSchema } from "@/lib/db/schema";
 
 const schema: FormatFieldSchema = {
@@ -46,5 +46,27 @@ describe("the row peek's draft preview", () => {
 
   it("is empty with no draft", () => {
     expect(draftPreview(null, schema)).toEqual([]);
+  });
+});
+
+describe("peekCanPublish", () => {
+  it("offers the link box on posts about to go live, to people who can edit", () => {
+    expect(peekCanPublish("Review", true)).toBe(true);
+    expect(peekCanPublish("Ready To Publish", true)).toBe(true);
+  });
+  it("never on posts still being made, already dated, or live — or read-only viewers", () => {
+    for (const s of ["Assigned", "Idea", "Scheduled", "Published", null, undefined]) {
+      expect(peekCanPublish(s, true)).toBe(false);
+    }
+    expect(peekCanPublish("Review", false)).toBe(false);
+  });
+});
+
+describe("nextAfter", () => {
+  it("steps to the next row, or back one at the end, or nowhere", () => {
+    expect(nextAfter(["a", "b", "c"], "b")).toBe("c");
+    expect(nextAfter(["a", "b", "c"], "c")).toBe("b");
+    expect(nextAfter(["a"], "a")).toBeNull();
+    expect(nextAfter(["a", "b"], "z")).toBeNull();
   });
 });
