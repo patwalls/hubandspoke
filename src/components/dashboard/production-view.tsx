@@ -19,6 +19,7 @@ import { useRememberListUrl } from "@/lib/hooks/use-remember-list-url";
 import { readNextRows } from "@/lib/my-work/next-rows";
 import { ProductionListKeys, ProductionPeek } from "./production-peek";
 import { trackUsage } from "@/lib/usage/track";
+import { waitBucket } from "@/lib/usage/wait-bucket";
 import { ReportCache } from "@/lib/content-list/report-cache";
 import { onlyWaiting, WAITING_AFTER_DAYS } from "@/lib/production/waiting";
 import {
@@ -244,6 +245,7 @@ export function ProductionView({ brand, currentUserId }: ProductionViewProps) {
     } else {
       setLoading(true);
     }
+    const startedAt = performance.now();
     try {
       const res = await fetch(
         `/api/reports/production?brand=${encodeURIComponent(brand)}&excludeIdea=true`
@@ -260,6 +262,13 @@ export function ProductionView({ brand, currentUserId }: ProductionViewProps) {
       const fresh: ProductionItem[] = json.items ?? [];
       pipelineCache.set(brand, fresh);
       setItems(fresh);
+      // The wait people feel: only when nothing was on screen (no remembered
+      // list) and this isn't one of the quiet stale re-asks. Read by the
+      // production-instant project — GlitchTip can't tell us this.
+      if (!cached && staleRetries.current === 0) {
+        trackUsage(`production:wait:${waitBucket(performance.now() - startedAt)}`, brand);
+      }
+      if (json.stale) trackUsage("production:served-stale", brand);
       // The server answered with its last report while a rebuild runs
       // (services/production-report.ts → getProductionReportFast): ask again
       // shortly, at most twice in a row.
