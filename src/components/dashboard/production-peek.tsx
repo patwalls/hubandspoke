@@ -14,7 +14,15 @@ import { statusClass } from "@/lib/badge-colors";
 import { trackUsage } from "@/lib/usage/track";
 import { waitingFor } from "@/lib/my-work/waiting";
 import { isTypingTarget, readRun, stepFocus } from "@/lib/production/run";
-import { nextAfter, peekCanPublish, type PeekField } from "@/lib/production/peek";
+import { KillIdeaDialog } from "./kill-idea-dialog";
+import {
+  nextAfter,
+  peekCanApprove,
+  peekCanPublish,
+  peekStaleReview,
+  STALE_REVIEW_DAYS,
+  type PeekField,
+} from "@/lib/production/peek";
 
 interface PeekData {
   id: string;
@@ -171,13 +179,14 @@ export function ProductionPeek({
   id,
   brand,
   onClose,
-  onPublished,
+  onMoved,
 }: {
   id: string;
   brand: string;
   onClose: () => void;
-  /** The post went live from the peek's link box: drop its row, step on. */
-  onPublished?: (id: string) => void;
+  /** The peek moved the post (published, approved, held, killed): regroup or
+   *  drop its row and step on to the next one. */
+  onMoved?: (id: string, status: string) => void;
 }) {
   const canEdit = useCanEditBrand(brand);
   const [data, setData] = useState<PeekData | null>(null);
@@ -204,6 +213,10 @@ export function ProductionPeek({
   const shown = data;
   const stale = !!data && data.id !== id;
   const since = waitingFor(shown?.statusSince?.at);
+  const live = shown && !stale && onMoved ? shown : null;
+  const canApprove = !!live && peekCanApprove(live.status, canEdit);
+  const abandoned =
+    !!live && canEdit && peekStaleReview(live.status, live.statusSince?.at, live.comments.at(-1)?.at);
 
   return (
     <aside
@@ -299,8 +312,26 @@ export function ProductionPeek({
         )}
       </div>
 
-      {shown && !stale && onPublished && peekCanPublish(shown.status, canEdit) && (
-        <PeekPublish key={shown.id} id={shown.id} brand={brand} postType={shown.postType} onPublished={onPublished} />
+      {live && onMoved && (canApprove || abandoned) && (
+        <PeekReview
+          key={`review-${live.id}`}
+          id={live.id}
+          title={live.title}
+          brand={brand}
+          canApprove={canApprove}
+          staleFor={abandoned ? (since?.label ?? "") : null}
+          onMoved={onMoved}
+        />
+      )}
+
+      {live && onMoved && peekCanPublish(live.status, canEdit) && (
+        <PeekPublish
+          key={`publish-${live.id}`}
+          id={live.id}
+          brand={brand}
+          postType={live.postType}
+          onPublished={(pid) => onMoved(pid, "Published")}
+        />
       )}
 
       <div className="flex items-center gap-2 border-t px-4 py-3">
@@ -409,6 +440,100 @@ function PeekPublish({
         <p className="text-xs text-amber-600 dark:text-amber-400">{shareWarn}</p>
       ) : null}
     </form>
+  );
+}
+
+/**
+ * A Review post's verdict from the peek (review-doesnt-wait M2 + M3):
+ * Approve moves it to Ready To Publish; a post nobody has touched in
+ * STALE_REVIEW_DAYS asks "still needed?" with On Hold / Kill (Kill needs a
+ * reason, like everywhere else). Same PUT the status menu uses, so the
+ * status_change event and its side effects are identical.
+ */
+function PeekReview({
+  id,
+  title,
+  brand,
+  canApprove,
+  staleFor,
+  onMoved,
+}: {
+  id: string;
+  title: string | null;
+  brand: string;
+  canApprove: boolean;
+  /** "62d" when the post is abandoned in Review, else null. */
+  staleFor: string | null;
+  onMoved: (id: string, status: string) => void;
+}) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [killOpen, setKillOpen] = useState(false);
+
+  async function move(status: string, mark: string, killReason?: string) {
+    if (busy) return;
+    setBusy(status);
+    try {
+      const res = await fetch("/api/production-items", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, status, ...(killReason ? { killReason } : {}) }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(json?.error || `Couldn't move to ${status}`);
+        return;
+      }
+      trackUsage(`production:peek:${mark}`, brand);
+      if (status === "Ready To Publish") window.dispatchEvent(new Event(READY_CHANGED_EVENT));
+      toast.success(`Moved to ${status}`);
+      setKillOpen(false);
+      onMoved(id, status);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div className="space-y-2 border-t px-4 py-3" data-testid="production-peek-review">
+      {staleFor && (
+        <div
+          className="space-y-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200"
+          data-testid="production-peek-stale"
+        >
+          <p>
+            In Review {staleFor}, no comments in {STALE_REVIEW_DAYS} days. Still needed?
+          </p>
+          <div className="flex justify-end gap-2">
+            <Button size="sm" variant="outline" className="h-7" disabled={!!busy} onClick={() => void move("On Hold", "on-hold")}>
+              {busy === "On Hold" ? "Saving…" : "On Hold"}
+            </Button>
+            <Button size="sm" variant="outline" className="h-7" disabled={!!busy} onClick={() => setKillOpen(true)}>
+              Kill…
+            </Button>
+          </div>
+        </div>
+      )}
+      {canApprove && (
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+            Looks good?
+          </span>
+          <Button size="sm" variant="outline" className="ml-auto h-8" disabled={!!busy} onClick={() => void move("Ready To Publish", "approved")}>
+            {busy === "Ready To Publish" ? "Saving…" : "Approve → Ready To Publish"}
+          </Button>
+        </div>
+      )}
+      <KillIdeaDialog
+        open={killOpen}
+        onOpenChange={(o) => !busy && setKillOpen(o)}
+        title={title ?? ""}
+        noun="post"
+        saving={busy === "Killed"}
+        onConfirm={(reason) => move("Killed", "killed", reason)}
+      />
+    </div>
   );
 }
 

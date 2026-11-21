@@ -78,3 +78,37 @@ export function nextAfter(order: readonly string[], id: string): string | null {
   if (at < 0) return null;
   return order[at + 1] ?? order[at - 1] ?? null;
 }
+
+/** The peek's Approve button (review-doesnt-wait M2): a Review post moves to
+ *  Ready To Publish without opening it — for brands whose reviewer approves
+ *  and someone else posts (14 d: Review→RTP 11×, three people). */
+export function peekCanApprove(status: string | null | undefined, canEdit: boolean): boolean {
+  return canEdit && status === "Review";
+}
+
+/** How long a Review post sits untouched before the peek asks "still needed?". */
+export const STALE_REVIEW_DAYS = 14;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * A Review post nobody is working on (review-doesnt-wait M3): in Review
+ * 14 d+ AND no comment in 14 d. Every post stuck in Review on 2026-11-21 had
+ * comments, so "no comments at all" would match none — it's the last one that
+ * says whether anyone still cares. The peek then offers On Hold / Kill.
+ * No `statusSince` (moved before events were recorded) → not stale: we can't
+ * tell how long it's been.
+ */
+export function peekStaleReview(
+  status: string | null | undefined,
+  statusSinceAt: string | null | undefined,
+  lastCommentAt: string | null | undefined,
+  now: number = Date.now(),
+): boolean {
+  if (status !== "Review" || !statusSinceAt) return false;
+  const limit = STALE_REVIEW_DAYS * DAY_MS;
+  const since = Date.parse(statusSinceAt);
+  if (!Number.isFinite(since) || now - since < limit) return false;
+  if (!lastCommentAt) return true;
+  const last = Date.parse(lastCommentAt);
+  return !Number.isFinite(last) || now - last >= limit;
+}

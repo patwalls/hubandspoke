@@ -43,6 +43,16 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-11-21-peek-approve",
+    shippedAt: "2026-11-21T14:02:00Z",
+    kind: "feature",
+    title: "Approve or clear out Review posts from In Production",
+    body: "Peek a post in Review (the eye on its row, or Space) and press Approve to move it to Ready To Publish. The peek moves on to the next post. If a post has sat in Review for two weeks with no comments, the peek asks whether it's still needed, and you can put it On Hold or Kill it right there.",
+    href: "/[brand]/production",
+    screen: "production:peek:approved",
+    audience: { usersOf: ["/[brand]/production"] },
+  },
+  {
     id: "2026-11-21-peek-publish",
     shippedAt: "2026-11-21T11:49:57Z",
     kind: "feature",

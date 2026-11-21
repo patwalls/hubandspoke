@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { draftPreview, nextAfter, peekCanPublish } from "./peek";
+import { draftPreview, nextAfter, peekCanApprove, peekCanPublish, peekStaleReview } from "./peek";
 import type { FormatFieldSchema } from "@/lib/db/schema";
 
 const schema: FormatFieldSchema = {
@@ -68,5 +68,43 @@ describe("nextAfter", () => {
     expect(nextAfter(["a", "b", "c"], "c")).toBe("b");
     expect(nextAfter(["a"], "a")).toBeNull();
     expect(nextAfter(["a", "b"], "z")).toBeNull();
+  });
+});
+
+describe("peekCanApprove", () => {
+  it("only on a Review post, only for someone who can edit the brand", () => {
+    expect(peekCanApprove("Review", true)).toBe(true);
+    expect(peekCanApprove("Review", false)).toBe(false);
+    // Already approved / still being edited / live: nothing to approve.
+    for (const s of ["Ready To Publish", "Assigned", "Published", "On Hold", null]) {
+      expect(peekCanApprove(s, true)).toBe(false);
+    }
+  });
+});
+
+describe("peekStaleReview", () => {
+  const now = Date.parse("2026-11-21T12:00:00Z");
+  const daysAgo = (d: number) => new Date(now - d * 24 * 3600 * 1000).toISOString();
+
+  // The shapes of every post sitting in Review on prod, 2026-11-21.
+  it("abandoned: in Review 62 d, last comment 17 d ago", () => {
+    expect(peekStaleReview("Review", daysAgo(62), daysAgo(17), now)).toBe(true);
+  });
+  it("not abandoned: in Review 11 d but commented 4 d ago", () => {
+    expect(peekStaleReview("Review", daysAgo(11), daysAgo(4), now)).toBe(false);
+  });
+  it("not abandoned: in Review 20 d but someone commented this week", () => {
+    expect(peekStaleReview("Review", daysAgo(20), daysAgo(3), now)).toBe(false);
+  });
+  it("in Review 14 d+ with no comments at all is stale", () => {
+    expect(peekStaleReview("Review", daysAgo(15), null, now)).toBe(true);
+  });
+  it("a fresh Review post with no comments is not", () => {
+    expect(peekStaleReview("Review", daysAgo(1), null, now)).toBe(false);
+  });
+  it("never without a known move date, never outside Review", () => {
+    expect(peekStaleReview("Review", null, null, now)).toBe(false);
+    expect(peekStaleReview("Ready To Publish", daysAgo(60), null, now)).toBe(false);
+    expect(peekStaleReview("On Hold", daysAgo(60), null, now)).toBe(false);
   });
 });

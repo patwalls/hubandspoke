@@ -21,6 +21,8 @@ interface KillIdeaDialogProps {
   title: string;
   saving?: boolean;
   onConfirm: (reason: string) => void | Promise<void>;
+  /** What's being killed, for the button. Defaults to "idea". */
+  noun?: string;
 }
 
 export function KillIdeaDialog({
@@ -29,6 +31,7 @@ export function KillIdeaDialog({
   title,
   saving = false,
   onConfirm,
+  noun = "idea",
 }: KillIdeaDialogProps) {
   const [reason, setReason] = useState("");
 
@@ -83,7 +86,7 @@ export function KillIdeaDialog({
             onClick={handleConfirm}
             disabled={!canConfirm}
           >
-            {saving ? "Killing…" : "Kill idea"}
+            {saving ? "Killing…" : `Kill ${noun}`}
           </Button>
         </DialogFooter>
       </DialogContent>

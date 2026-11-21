@@ -586,10 +586,14 @@ export function ProductionView({ brand, currentUserId }: ProductionViewProps) {
           id={peekId}
           brand={brand}
           onClose={() => setPeekId(null)}
-          onPublished={(id) => {
-            // Published posts leave the list; the peek steps to the next one.
+          onMoved={(id, status) => {
+            // Published / Killed posts leave the list; approved or held ones
+            // regroup. Either way the peek steps to the next post.
             const next = rowAfter(id);
-            setItems((prev) => prev.filter((i) => i.id !== id));
+            const leaves = status === "Published" || status === "Killed";
+            setItems((prev) =>
+              leaves ? prev.filter((i) => i.id !== id) : prev.map((i) => (i.id === id ? { ...i, status } : i)),
+            );
             setPeekId(next);
           }}
         />
