@@ -56,3 +56,25 @@ export function draftPreview(
   }
   return out;
 }
+
+/**
+ * The peek's "paste the live link" box (review-doesnt-wait M1): shown only on
+ * posts someone is about to put live — Review and Ready To Publish. On the
+ * busiest brand the reviewer takes a post out of Review by posting it and
+ * pasting its link (every Review→Published move in 30 d set the link), so the
+ * peek can do that without opening the post. Never on Assigned (still being
+ * edited), Scheduled (has its date) or Published (already has a link).
+ */
+export const PEEK_PUBLISH_STATUSES: ReadonlySet<string> = new Set(["Review", "Ready To Publish"]);
+
+export function peekCanPublish(status: string | null | undefined, canEdit: boolean): boolean {
+  return canEdit && !!status && PEEK_PUBLISH_STATUSES.has(status);
+}
+
+/** The row after `id` in on-screen order (else the one before), so publishing
+ *  from the peek steps it to the next post instead of closing it. */
+export function nextAfter(order: readonly string[], id: string): string | null {
+  const at = order.indexOf(id);
+  if (at < 0) return null;
+  return order[at + 1] ?? order[at - 1] ?? null;
+}

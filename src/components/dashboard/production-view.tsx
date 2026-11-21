@@ -17,7 +17,7 @@ import type { ProductionItem } from "@/types";
 import { useUrlState } from "@/lib/hooks/use-url-state";
 import { useRememberListUrl } from "@/lib/hooks/use-remember-list-url";
 import { readNextRows } from "@/lib/my-work/next-rows";
-import { ProductionListKeys, ProductionPeek } from "./production-peek";
+import { ProductionListKeys, ProductionPeek, rowAfter } from "./production-peek";
 import { trackUsage } from "@/lib/usage/track";
 import { waitBucket } from "@/lib/usage/wait-bucket";
 import { ReportCache } from "@/lib/content-list/report-cache";
@@ -581,7 +581,19 @@ export function ProductionView({ brand, currentUserId }: ProductionViewProps) {
         </div>
       </div>
 
-      {peekId && <ProductionPeek id={peekId} brand={brand} onClose={() => setPeekId(null)} />}
+      {peekId && (
+        <ProductionPeek
+          id={peekId}
+          brand={brand}
+          onClose={() => setPeekId(null)}
+          onPublished={(id) => {
+            // Published posts leave the list; the peek steps to the next one.
+            const next = rowAfter(id);
+            setItems((prev) => prev.filter((i) => i.id !== id));
+            setPeekId(next);
+          }}
+        />
+      )}
 
       {loading ? (
         <div className="flex items-center justify-center py-20">
