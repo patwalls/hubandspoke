@@ -20,6 +20,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { trackUsage } from "@/lib/usage/track";
 import { statusClassFromToken, statusClass } from "@/lib/badge-colors";
 import { AccountBadge } from "@/components/ui/account-badge";
 import { SourceBadge } from "@/components/ui/source-badge";
@@ -128,6 +129,12 @@ export function GlobalSearch({
     onOpenChange(next);
   }
 
+  // Search opens from the nav button and ⌘K (both live in nav.tsx), so the
+  // mark rides on `open` turning true rather than on either trigger.
+  useEffect(() => {
+    if (open) trackUsage("search:open", brand);
+  }, [open, brand]);
+
   useEffect(() => {
     if (!open || !trimmed) return;
     const controller = new AbortController();
@@ -159,11 +166,13 @@ export function GlobalSearch({
 
   function handleSelect(input: RecordVisitInput) {
     recordVisit(input);
+    trackUsage("search:pick", brand);
     router.push(input.href);
     handleOpenChange(false);
   }
 
   function navigate(href: string) {
+    trackUsage("search:pick", brand);
     router.push(href);
     handleOpenChange(false);
   }
