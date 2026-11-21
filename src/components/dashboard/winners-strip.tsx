@@ -100,27 +100,46 @@ export function WinnersStrip({ brand }: { brand: string }) {
     >
       {/* Collapsed by default: one quiet line under the goal tiles. The list,
           the "why" notes and the format scoreboard are a click away — the
-          dashboard's job is the week's numbers, not this. */}
-      <button
-        type="button"
-        onClick={() => toggle(!open)}
-        aria-expanded={open}
-        aria-controls="winners-body"
-        className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-muted/40 rounded-lg"
-      >
-        <h2 id="winners-heading" className="shrink-0 font-medium">
-          Beat their usual this week
-        </h2>
-        <span className="min-w-0 flex-1 truncate text-muted-foreground">
-          {count} {count === 1 ? "post" : "posts"} · top{" "}
-          <span className="tabular-nums text-emerald-600 dark:text-emerald-400">{formatLift(top.lift)}</span>{" "}
-          {top.item.title || "Untitled"}
-        </span>
-        <ChevronDown
-          className={`size-4 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}
-          aria-hidden
-        />
-      </button>
+          dashboard's job is the week's numbers, not this. The top post's
+          title is a link straight to it (2026-11-20: 16 people saw the line
+          in 14 days, one ever expanded it); the rest of the line toggles. */}
+      <div className="flex w-full items-center gap-3 rounded-lg px-4 py-2.5 text-sm hover:bg-muted/40">
+        <button
+          type="button"
+          onClick={() => toggle(!open)}
+          aria-expanded={open}
+          aria-controls="winners-body"
+          className="flex shrink-0 items-center gap-3 text-left"
+        >
+          <h2 id="winners-heading" className="font-medium">
+            Beat their usual this week
+          </h2>
+          <span className="text-muted-foreground">
+            {count} {count === 1 ? "post" : "posts"} · top{" "}
+            <span className="tabular-nums text-emerald-600 dark:text-emerald-400">{formatLift(top.lift)}</span>
+          </span>
+        </button>
+        {open ? (
+          <span className="min-w-0 flex-1 truncate text-muted-foreground">{top.item.title || "Untitled"}</span>
+        ) : (
+          <Link
+            href={`/${brand}/content/${top.item.id}`}
+            onClick={() => trackUsage("home:winners:top-open", brand)}
+            className="min-w-0 flex-1 truncate text-muted-foreground hover:text-foreground hover:underline"
+            data-testid="winners-top-link"
+          >
+            {top.item.title || "Untitled"}
+          </Link>
+        )}
+        <button
+          type="button"
+          onClick={() => toggle(!open)}
+          aria-label={open ? "Hide this week's winners" : "Show this week's winners"}
+          className="shrink-0 text-muted-foreground hover:text-foreground"
+        >
+          <ChevronDown className={`size-4 transition-transform ${open ? "rotate-180" : ""}`} aria-hidden />
+        </button>
+      </div>
       {open && (
         <div id="winners-body" className="border-t border-border px-4 pb-3 pt-2">
           <p className="mb-1 text-xs text-muted-foreground">

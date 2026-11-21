@@ -56,17 +56,20 @@ test("the dashboard shows posts that beat their usual this week", async ({ page 
     // (the open list read as a junk drawer at the top of the dashboard).
     const toggle = strip.getByRole("button", { name: /Beat their usual this week/ });
     await expect(toggle).toHaveAttribute("aria-expanded", "false");
-    await expect(toggle).toContainText(winnerTitle);
-    await expect(strip.getByRole("link")).toHaveCount(0);
+    // The top post's title is a link straight to it; the rest of the line expands.
+    const topLink = strip.getByTestId("winners-top-link");
+    await expect(topLink).toHaveText(winnerTitle);
+    await expect(topLink).toHaveAttribute("href", /\/starter-story\/content\/[0-9a-f-]{36}$/);
+    await expect(strip.getByRole("link")).toHaveCount(1);
     await expect(page.getByTestId("format-scoreboard")).toHaveCount(0);
-    if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT.replace(/\.png$/, "-collapsed.png") });
+    if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT });
     await toggle.click();
     const row = strip.getByRole("link", { name: new RegExp(winnerTitle) });
     await expect(row).toBeVisible();
     await expect(row).toContainText("8.4×");
     await expect(row.getByTestId("win-note")).toHaveText(`Why: ${winNote.note}`);
     await expect(strip.getByText(usualTitle)).toHaveCount(0);
-    if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT });
+    if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT.replace(/\.png$/, "-expanded.png") });
 
     await row.click();
     await expect(page).toHaveURL(/\/starter-story\/content\/[0-9a-f-]{36}/);
