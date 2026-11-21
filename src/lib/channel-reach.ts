@@ -52,6 +52,28 @@ export function channelReachLabel(r: ChannelReach | undefined): ChannelReachLabe
   return { text, title, quiet };
 }
 
+// ── Monday email: quiet channels ─────────────────────────────────────────
+// The winners email names, per brand, the channels where most posts got no
+// likes — enough posts that it's a pattern, not a slow week — so whoever
+// plans cross-posts can decide if they're worth the editor time.
+
+/** A channel needs at least this many posts in the window to be called quiet. */
+export const QUIET_EMAIL_MIN_POSTS = 10;
+
+export interface QuietChannelRow extends ChannelReach {
+  handle: string;
+  postType: string;
+}
+
+/** Channels with ≥ QUIET_EMAIL_MIN_POSTS posts and ≥ half of them at 0
+ *  likes, most no-like posts first. Rows with no reported likes count as
+ *  likes > 0 (unknown is not quiet). */
+export function quietChannels(rows: QuietChannelRow[]): QuietChannelRow[] {
+  return rows
+    .filter((r) => r.posts >= QUIET_EMAIL_MIN_POSTS && r.zeroLikes / r.posts >= REACH_QUIET_SHARE)
+    .sort((a, b) => b.zeroLikes - a.zeroLikes || a.handle.localeCompare(b.handle));
+}
+
 export interface AccountReachLine extends ChannelReachLabel {
   postType: string;
 }
