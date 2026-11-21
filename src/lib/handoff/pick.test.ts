@@ -8,6 +8,41 @@ const john = { id: "john", name: "John Henry Parr" };
 const all = new Set<string>();
 
 describe("pickHandoff", () => {
+  const noman = { id: "noman", name: "Noman Bhagad" };
+  const base = { me: ME, brandStatuses: all, reviewers: [andrew], sentToReviewBy: null };
+
+  it("offers to assign an unstarted post to whoever makes its format", () => {
+    for (const status of ["Idea", "Ready To Publish"]) {
+      const h = pickHandoff({ ...base, status, editorUserId: null, formatEditors: [noman, john] });
+      expect(h).toEqual({ kind: "assign", to: "Assigned", person: noman, others: [john] });
+    }
+  });
+
+  it("offers assign when I picked it up myself first (the curator self-assigns)", () => {
+    const h = pickHandoff({ ...base, status: "Ready To Publish", editorUserId: ME, formatEditors: [noman] });
+    expect(h?.kind).toBe("assign");
+    expect(h?.person).toEqual(noman);
+  });
+
+  it("never offers to assign to me, or over someone else holding it", () => {
+    expect(pickHandoff({ ...base, status: "Idea", editorUserId: null, formatEditors: [{ id: ME, name: "Me" }] })).toBeNull();
+    expect(pickHandoff({ ...base, status: "Idea", editorUserId: "john", formatEditors: [noman] })).toBeNull();
+  });
+
+  it("offers no assign without format history, on started/finished posts, or without an Assigned status", () => {
+    expect(pickHandoff({ ...base, status: "Idea", editorUserId: null })).toBeNull();
+    for (const status of ["Published", "Scheduled", "Killed"]) {
+      expect(pickHandoff({ ...base, status, editorUserId: null, formatEditors: [noman] })).toBeNull();
+    }
+    const noAssigned = new Set(["Idea", "Ready To Publish", "Published"]);
+    expect(pickHandoff({ ...base, brandStatuses: noAssigned, status: "Idea", editorUserId: null, formatEditors: [noman] })).toBeNull();
+  });
+
+  it("an Assigned post still offers send-to-review, not assign", () => {
+    const h = pickHandoff({ ...base, status: "Assigned", editorUserId: ME, formatEditors: [noman] });
+    expect(h?.kind).toBe("send-to-review");
+  });
+
   it("offers the brand's top reviewer when the item is Assigned", () => {
     const h = pickHandoff({ me: ME, status: "Assigned", editorUserId: ME, brandStatuses: all, reviewers: [andrew, saj], sentToReviewBy: null });
     expect(h).toEqual({ kind: "send-to-review", to: "Review", person: andrew, others: [saj] });
@@ -75,6 +110,10 @@ describe("firstName", () => {
 });
 
 describe("composerHandoffLabel", () => {
+  it("labels the box's assign with the editor's first name", () => {
+    expect(composerHandoffLabel({ kind: "assign", to: "Assigned", person: john, others: [] })).toBe("Comment & assign → John");
+  });
+
   it("names the reviewer for send-to-review and name-reviewer", () => {
     expect(composerHandoffLabel({ kind: "send-to-review", to: "Review", person: andrew, others: [] })).toBe(
       "Comment & send to review → Andrew",

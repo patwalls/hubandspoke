@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { contentEvents, productionItems, users } from "@/lib/db/schema";
-import { REVIEW, type HandoffPerson } from "./pick";
+import { ASSIGNED, REVIEW, type HandoffPerson } from "./pick";
 
 const REVIEWER_WINDOW_DAYS = 30;
 
@@ -18,6 +18,33 @@ export async function getBrandReviewers(brand: string): Promise<HandoffPerson[]>
         eq(productionItems.brand, brand),
         eq(contentEvents.eventType, "status_change"),
         sql`${contentEvents.payload}->>'from' = ${REVIEW}`,
+        sql`${contentEvents.createdAt} > now() - make_interval(days => ${REVIEWER_WINDOW_DAYS})`,
+      ),
+    )
+    .groupBy(users.id, users.name)
+    .orderBy(desc(n))
+    .limit(5);
+  return rows.map((r) => ({ id: r.id, name: r.name ?? "Someone" }));
+}
+
+/**
+ * Who makes this brand + format's posts: people who handed them in (Assigned →
+ * Review) in 30 days, most first. The comment box's "Comment & assign →".
+ */
+export async function getFormatEditors(brand: string, format: string): Promise<HandoffPerson[]> {
+  const n = sql<number>`count(*)`;
+  const rows = await db
+    .select({ id: users.id, name: users.name, n })
+    .from(contentEvents)
+    .innerJoin(productionItems, eq(productionItems.id, contentEvents.contentItemId))
+    .innerJoin(users, eq(users.id, contentEvents.userId))
+    .where(
+      and(
+        eq(productionItems.brand, brand),
+        eq(productionItems.format, format),
+        eq(contentEvents.eventType, "status_change"),
+        sql`${contentEvents.payload}->>'from' = ${ASSIGNED}`,
+        sql`${contentEvents.payload}->>'to' = ${REVIEW}`,
         sql`${contentEvents.createdAt} > now() - make_interval(days => ${REVIEWER_WINDOW_DAYS})`,
       ),
     )

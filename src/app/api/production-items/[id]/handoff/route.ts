@@ -3,7 +3,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { requireSession } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
-import { getBrandReviewers, getSentToReviewBy } from "@/lib/handoff/queries";
+import { getBrandReviewers, getFormatEditors, getSentToReviewBy } from "@/lib/handoff/queries";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -14,7 +14,8 @@ interface RouteContext {
  *
  * What the content page's handoff button needs (rules in
  * src/lib/handoff/pick.ts): you, the brand's reviewers (most approvals in 30
- * days first) and who last sent this item to review. Read-only; the handoff
+ * days first), who last sent this item to review, and who makes this
+ * brand + format's posts (the comment box's "Comment & assign →"). Read-only; the handoff
  * itself is the usual PUT /api/production-items with status + editorUserId.
  */
 export async function GET(_request: NextRequest, context: RouteContext) {
@@ -24,15 +25,16 @@ export async function GET(_request: NextRequest, context: RouteContext) {
 
   const { id } = await context.params;
   const [item] = await db
-    .select({ brand: productionItems.brand })
+    .select({ brand: productionItems.brand, format: productionItems.format })
     .from(productionItems)
     .where(and(eq(productionItems.id, id), isNull(productionItems.deletedAt)))
     .limit(1);
   if (!item) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const [reviewers, sentToReviewBy] = await Promise.all([
+  const [reviewers, sentToReviewBy, formatEditors] = await Promise.all([
     item.brand ? getBrandReviewers(item.brand) : Promise.resolve([]),
     getSentToReviewBy(id),
+    item.brand && item.format ? getFormatEditors(item.brand, item.format) : Promise.resolve([]),
   ]);
-  return NextResponse.json({ me, reviewers, sentToReviewBy });
+  return NextResponse.json({ me, reviewers, sentToReviewBy, formatEditors });
 }

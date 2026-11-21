@@ -19,6 +19,7 @@ interface HandoffData {
   me: string | null;
   reviewers: HandoffPerson[];
   sentToReviewBy: HandoffPerson | null;
+  formatEditors?: HandoffPerson[];
 }
 
 const BTN =
@@ -56,7 +57,9 @@ export function useHandoff({
   const [data, setData] = useState<HandoffData | null>(null);
   // View-only users can't hand off (it's a status + editor change).
   const canEdit = useCanEditBrand(brand);
-  const relevant = canEdit && (status === "Assigned" || status === "Review");
+  const relevant =
+    canEdit &&
+    (status === "Assigned" || status === "Review" || status === "Idea" || status === "Ready To Publish");
 
   // Refetch on status change: "who sent it to review" moves with it.
   useEffect(() => {
@@ -81,6 +84,7 @@ export function useHandoff({
     brandStatuses,
     reviewers: data.reviewers,
     sentToReviewBy: data.sentToReviewBy,
+    formatEditors: data.formatEditors ?? [],
   });
 }
 
@@ -96,7 +100,8 @@ export function HandoffButton({
   onHandoff: (patch: { status: string; editorUserId: string }) => Promise<boolean>;
 }) {
   const [busy, setBusy] = useState(false);
-  if (!handoff) return null;
+  // "assign" lives in the comment box only (the brief is the point).
+  if (!handoff || handoff.kind === "assign") return null;
 
   async function go(person: HandoffPerson) {
     if (!handoff) return;
