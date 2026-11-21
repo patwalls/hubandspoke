@@ -22,6 +22,7 @@ import { trackUsage } from "@/lib/usage/track";
 import { waitBucket } from "@/lib/usage/wait-bucket";
 import { ReportCache } from "@/lib/content-list/report-cache";
 import { onlyWaiting, WAITING_AFTER_DAYS } from "@/lib/production/waiting";
+import { editorFilterMark, rowsPerEditor, withCount } from "@/lib/production/editor-filter";
 import {
   Popover,
   PopoverContent,
@@ -382,10 +383,9 @@ export function ProductionView({ brand, currentUserId }: ProductionViewProps) {
   // currently appear in the queue, they can search by name.
   const editorOptions = useMemo(() => {
     const usersById = new Map(users.map((u) => [u.id, u]));
-    const activeEditorIds = new Set<string>();
-    for (const item of pipelineCandidates) {
-      if (item.editorUserId) activeEditorIds.add(item.editorUserId);
-    }
+    // Each name carries how many rows that person holds ("Just me · 3").
+    const counts = rowsPerEditor(pipelineCandidates);
+    const activeEditorIds = new Set(counts.keys());
 
     const opts: { value: string; label: string; icon?: React.ReactNode }[] = [
       { value: "all", label: "All editors" },
@@ -395,7 +395,7 @@ export function ProductionView({ brand, currentUserId }: ProductionViewProps) {
     if (me) {
       opts.push({
         value: me.id,
-        label: "Just me",
+        label: withCount("Just me", counts.get(me.id)),
         icon: <EditorAvatar user={me} />,
       });
     }
@@ -410,7 +410,7 @@ export function ProductionView({ brand, currentUserId }: ProductionViewProps) {
     for (const u of rest) {
       opts.push({
         value: u.id,
-        label: u.name ?? u.email,
+        label: withCount(u.name ?? u.email, counts.get(u.id)),
         icon: <EditorAvatar user={u} />,
       });
     }
@@ -543,7 +543,11 @@ export function ProductionView({ brand, currentUserId }: ProductionViewProps) {
           label="Editor"
           value={selectedEditor}
           options={editorOptions}
-          onChange={(v) => filters.set("editor", v)}
+          onChange={(v) => {
+            const mark = editorFilterMark(v, selectedEditor, currentUserId);
+            if (mark) trackUsage(mark, brand);
+            filters.set("editor", v);
+          }}
         />
         <SelectPill
           label="Channel"
