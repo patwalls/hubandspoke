@@ -31,7 +31,7 @@ concurrency:
 
 jobs:
   probe:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, merge]
     timeout-minutes: 5
     env:
       BASE_URL: https://hubandspoke.starterstory.com
