@@ -11,7 +11,7 @@ test("paste the live link in the peek: the post goes Published and the peek move
     const ids: string[] = [];
     for (const n of [1, 2]) {
       const res = await page.request.post("/api/production-items", {
-        data: { title: `${tag} part ${n}`, platform: ["linkedin"], postType: "linkedin", brand: "starter-story" },
+        data: { title: `${tag} part ${n}`, platform: ["linkedin"], postType: "linkedin", publishedDate: new Date().toISOString().slice(0, 10), brand: "starter-story" },
       });
       expect(res.ok(), await res.text()).toBeTruthy();
       ids.push((await res.json()).id as string);
@@ -61,7 +61,7 @@ test("no link box on a post still being edited", async ({ page }) => {
   const tag = `E2E PeekNoPublish ${Date.now()}`;
   try {
     const res = await page.request.post("/api/production-items", {
-      data: { title: `${tag} part 1`, platform: ["linkedin"], postType: "linkedin", brand: "starter-story" },
+      data: { title: `${tag} part 1`, platform: ["linkedin"], postType: "linkedin", publishedDate: new Date().toISOString().slice(0, 10), brand: "starter-story" },
     });
     expect(res.ok(), await res.text()).toBeTruthy();
     const id = (await res.json()).id as string;
