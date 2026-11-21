@@ -12,8 +12,13 @@
  *   says what happened.
  * - Each post line: lift, title (links to the content page), account and
  *   platform, numbers vs. usual, and the "Why:" note when there is one.
+ * - Quiet channels (channels-worth-it M4): per brand, the channels where most
+ *   of 10+ posts in 30 days got no likes, so whoever plans cross-posts can
+ *   weigh them. A brand with only quiet channels still gets its section, but
+ *   quiet channels alone never send the email.
  */
 import { postTypeDisplay } from "@/lib/platforms";
+import { REACH_WINDOW_DAYS, type QuietChannelRow } from "@/lib/channel-reach";
 import { formatLift, measure, type FormatScore, type Winner, type WinnerCandidate } from "./pick";
 
 export interface EmailWinner extends WinnerCandidate {
@@ -30,6 +35,8 @@ export interface WinnersEmailBrand {
   label: string;
   winners: Winner<EmailWinner>[];
   formats: FormatScore[];
+  /** Channels where most posts got no likes (see `quietChannels`). */
+  quiet?: QuietChannelRow[];
 }
 
 export interface WinnersEmailInput {
@@ -47,6 +54,15 @@ export interface WinnersEmail {
 
 /** Formats per brand in the email — the top of the dashboard scoreboard. */
 export const EMAIL_FORMATS = 3;
+/** Quiet channels per brand in the email — the worst few. */
+export const EMAIL_QUIET = 3;
+
+const QUIET_HEADING = `Mostly no likes (last ${REACH_WINDOW_DAYS} days)`;
+
+function quietLine(q: QuietChannelRow): string {
+  const type = postTypeDisplay(q.postType).label || q.postType;
+  return `@${q.handle.replace(/^@/, "")} ${type}: ${q.zeroLikes} of ${q.posts} posts got none`;
+}
 
 const compact = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 });
 
@@ -72,12 +88,13 @@ function truncate(s: string, n: number): string {
 
 export function buildWinnersEmail(input: WinnersEmailInput): WinnersEmail | null {
   const { baseUrl } = input;
+  const quietOf = (b: WinnersEmailBrand) => (b.quiet ?? []).slice(0, EMAIL_QUIET);
   const brands = input.brands
-    .filter((b) => b.winners.length > 0)
+    .filter((b) => b.winners.length > 0 || quietOf(b).length > 0)
     .sort((a, b) => b.winners.length - a.winners.length || a.label.localeCompare(b.label));
-  if (brands.length === 0) return null;
-
   const total = brands.reduce((n, b) => n + b.winners.length, 0);
+  if (total === 0) return null;
+
   const best = brands
     .flatMap((b) => b.winners)
     .reduce((top, w) => (w.lift > top.lift ? w : top));
@@ -103,6 +120,9 @@ export function buildWinnersEmail(input: WinnersEmailInput): WinnersEmail | null
       ...(b.formats.length
         ? ["", "Formats that keep beating their usual (4 weeks):", ...b.formats.slice(0, EMAIL_FORMATS).map((f) => `  ${scoreLine(f)}`)]
         : []),
+      ...(quietOf(b).length
+        ? ["", `${QUIET_HEADING}:`, ...quietOf(b).map((q) => `  ${quietLine(q)}`), `  Accounts: ${baseUrl}/${b.slug}/accounts`]
+        : []),
       `Dashboard: ${baseUrl}/${b.slug}`,
     ]),
     "",
@@ -112,7 +132,9 @@ export function buildWinnersEmail(input: WinnersEmailInput): WinnersEmail | null
   const brandHtml = brands
     .map(
       (b) => `
-      <h3 style="margin:24px 0 6px;font-size:15px;">${escapeHtml(b.label)}</h3>
+      <h3 style="margin:24px 0 6px;font-size:15px;">${escapeHtml(b.label)}</h3>${
+        b.winners.length
+          ? `
       <table cellpadding="0" cellspacing="0" style="width:100%;max-width:560px;border-collapse:collapse;">${b.winners
         .map(
           ({ item, lift }) => `
@@ -130,13 +152,23 @@ export function buildWinnersEmail(input: WinnersEmailInput): WinnersEmail | null
         </tr>`,
         )
         .join("")}
-      </table>${
+      </table>`
+          : ""
+      }${
         b.formats.length
           ? `
       <p style="margin:12px 0 4px;color:#666;font-size:12px;">Formats that keep beating their usual (4 weeks)</p>
       <ul style="margin:0;padding-left:18px;font-size:13px;">${b.formats
         .slice(0, EMAIL_FORMATS)
         .map((f) => `<li>${escapeHtml(scoreLine(f))}</li>`)
+        .join("")}</ul>`
+          : ""
+      }${
+        quietOf(b).length
+          ? `
+      <p style="margin:12px 0 4px;color:#666;font-size:12px;">${escapeHtml(QUIET_HEADING)} · <a href="${baseUrl}/${b.slug}/accounts" style="color:#666;">accounts</a></p>
+      <ul style="margin:0;padding-left:18px;font-size:13px;color:#92400e;">${quietOf(b)
+        .map((q) => `<li>${escapeHtml(quietLine(q))}</li>`)
         .join("")}</ul>`
           : ""
       }
