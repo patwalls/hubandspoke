@@ -92,3 +92,31 @@ export function pickDeliveryLink(
   }
   return null;
 }
+
+/**
+ * The public link a YouTube Studio delivery link will have once it's live.
+ * The outside editors hand Shorts back as a Studio link
+ * (studio.youtube.com/video/<id>/edit), and the reviewer then pastes
+ * youtube.com/shorts/<same id> when it goes out — 25 of 25 in 30 days had
+ * the same id. So the Publish box can offer it in one click. Structural URL
+ * parsing only. Null unless the link is a Studio video link and the post is a
+ * YouTube Short or long-form video.
+ */
+export function liveLinkFromStudio(
+  url: string | null | undefined,
+  postType: string | null | undefined,
+): string | null {
+  if (!url || (postType !== "youtube_shorts" && postType !== "youtube_long")) return null;
+  let u: URL;
+  try {
+    u = new URL(url.trim());
+  } catch {
+    return null;
+  }
+  if (u.hostname.toLowerCase() !== "studio.youtube.com") return null;
+  const m = u.pathname.match(/^\/video\/([A-Za-z0-9_-]{11})(?:\/|$)/);
+  if (!m) return null;
+  return postType === "youtube_shorts"
+    ? `https://youtube.com/shorts/${m[1]}`
+    : `https://www.youtube.com/watch?v=${m[1]}`;
+}
