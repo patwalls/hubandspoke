@@ -23,6 +23,7 @@ import { IdeaQueueTable } from "./idea-queue-table";
 import { buildChannelOptions, matchesChannel } from "@/lib/channel-options";
 import type { ProductionItem } from "@/types";
 import type { CrossPostCandidatesResult } from "@/lib/services/cross-post-candidates";
+import type { ChannelReach } from "@/lib/channel-reach";
 import type { RepostCandidatesResult } from "@/lib/services/repost-candidates";
 import type { SpokeCandidatesResult } from "@/lib/services/spoke-candidates";
 import type { QueueHistoryEvent } from "@/app/api/queue/history/route";
@@ -180,8 +181,10 @@ export function QueueView({
   // flag read `initialItems` — the rows were thrown away and re-fetched.)
   const [items, setItems] = useState<ProductionItem[]>(initialItems ?? []);
   const [loading, setLoading] = useState(!initialItems);
-  const [crossPostData, setCrossPostData] =
-    useState<CrossPostCandidatesResult | null>(null);
+  // The queue route adds each target's 30-day reach to the candidates.
+  const [crossPostData, setCrossPostData] = useState<
+    (CrossPostCandidatesResult & { channelReach?: Record<string, ChannelReach> }) | null
+  >(null);
   const [crossPostLoading, setCrossPostLoading] = useState(true);
   const [repostData, setRepostData] = useState<RepostCandidatesResult | null>(
     null
@@ -809,6 +812,7 @@ export function QueueView({
             items={crossPostFiltered}
             brandAccounts={crossPostData?.brandAccounts ?? []}
             targetCommonality={crossPostData?.targetCommonality}
+            channelReach={crossPostData?.channelReach}
             brand={brand}
             emptyMessage={
               query ||

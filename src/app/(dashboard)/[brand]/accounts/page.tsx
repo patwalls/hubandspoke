@@ -8,6 +8,8 @@ import {
   platformSupportsLatest,
 } from "@/lib/services/account-content-sync";
 import { connectNotice } from "@/lib/services/tiktok-draft/connect-match";
+import { fetchChannelReach } from "@/lib/channel-reach-query";
+import { accountReachLines } from "@/lib/channel-reach";
 
 interface BrandAccountsPageProps {
   params: Promise<{ brand: string }>;
@@ -36,10 +38,11 @@ export default async function BrandAccountsPage({
   const brandConfig = await fetchBrandBySlug(brand);
   if (!brandConfig) notFound();
 
-  const [accounts, brands, contentCounts] = await Promise.all([
+  const [accounts, brands, contentCounts, reach] = await Promise.all([
     getAccounts(),
     getEnabledBrands(),
     getContentCountsByAccount(),
+    fetchChannelReach(brand),
   ]);
 
   // Result of the Zernio TikTok connect round-trip (callback/route.ts).
@@ -82,6 +85,7 @@ export default async function BrandAccountsPage({
         backfillSupported: platformSupportsBackfill(a.platform),
         contentCount: contentCounts.get(a.id) ?? 0,
         zernioAccountId: a.zernioAccountId,
+        reach: accountReachLines(reach, a.id),
       }))}
       brands={brands.map((b) => ({ slug: b.slug, label: b.label }))}
       scopeBrandSlug={brand}

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { channelReachLabel, compactViews, quietChannels } from "./channel-reach";
+import { accountReachLines, channelReachLabel, compactViews, quietChannels } from "./channel-reach";
 
 describe("compactViews", () => {
   it("keeps small numbers whole and shortens big ones", () => {
@@ -58,5 +58,30 @@ describe("quietChannels", () => {
       row("worst", 32, 20),
     ]);
     expect(out.map((r) => r.handle)).toEqual(["worst", "half"]);
+  });
+});
+
+describe("accountReachLines", () => {
+  const reach = {
+    "acc-1:instagram_post": { posts: 8, medianViews: 63, zeroLikes: 6 },
+    "acc-1:instagram_reel": { posts: 20, medianViews: 1500, zeroLikes: 0 },
+    "acc-1:instagram_story": { posts: 3, medianViews: 900, zeroLikes: 0 },
+    "acc-10:x": { posts: 40, medianViews: 70, zeroLikes: 30 },
+  };
+
+  it("lists only this account's types with enough history, busiest first", () => {
+    const lines = accountReachLines(reach, "acc-1");
+    expect(lines.map((l) => l.postType)).toEqual(["instagram_reel", "instagram_post"]);
+    expect(lines[0]).toMatchObject({ text: "~1.5K views", quiet: false });
+    expect(lines[1]).toMatchObject({ text: "~63 views · mostly no likes", quiet: true });
+  });
+
+  it("does not match an account whose id merely starts with this one", () => {
+    expect(accountReachLines(reach, "acc-1").some((l) => l.postType === "x")).toBe(false);
+    expect(accountReachLines(reach, "acc-10").map((l) => l.postType)).toEqual(["x"]);
+  });
+
+  it("is empty for an account with no recent posts", () => {
+    expect(accountReachLines(reach, "acc-2")).toEqual([]);
   });
 });

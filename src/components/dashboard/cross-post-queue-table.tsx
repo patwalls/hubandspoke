@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { AccountBadge } from "@/components/ui/account-badge";
 import { CrossPostTriageDialog } from "./cross-post-triage-dialog";
 import type { TargetCommonalityRow } from "@/lib/cross-post-usual";
+import type { ChannelReach } from "@/lib/channel-reach";
 import type {
   BrandAccount,
   CrossPostCandidate,
@@ -20,6 +21,8 @@ interface CrossPostQueueTableProps {
   brand: string;
   emptyMessage: string;
   targetCommonality?: Record<string, TargetCommonalityRow[]>;
+  /** What each target typically gets (30 d), keyed `<accountId>:<postType>`. */
+  channelReach?: Record<string, ChannelReach>;
   onMutate: () => void;
 }
 
@@ -47,6 +50,7 @@ export function CrossPostQueueTable({
   brand,
   emptyMessage,
   targetCommonality,
+  channelReach,
   onMutate,
 }: CrossPostQueueTableProps) {
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
@@ -195,6 +199,7 @@ export function CrossPostQueueTable({
                 brandAccounts={brandAccounts}
                 brand={brand}
                 targetCommonality={targetCommonality}
+                channelReach={channelReach}
                 onActioned={onMutate}
               />
             ))}
@@ -261,12 +266,14 @@ function CrossPostQueueRow({
   brandAccounts,
   brand,
   targetCommonality,
+  channelReach,
   onActioned,
 }: {
   item: CrossPostCandidate;
   brandAccounts: BrandAccount[];
   brand: string;
   targetCommonality?: Record<string, TargetCommonalityRow[]>;
+  channelReach?: Record<string, ChannelReach>;
   onActioned: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -371,6 +378,7 @@ function CrossPostQueueRow({
           brandAccounts={brandAccounts}
           brand={brand}
           targetCommonality={targetCommonality}
+          channelReach={channelReach}
           onActioned={onActioned}
         />
       </td>
