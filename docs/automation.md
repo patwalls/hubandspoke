@@ -330,6 +330,13 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
     retried after 1s then 3s (`SC_RETRY_DELAYS_MS`); 4xx is never retried.
     Same helper backs
     `scFetchJson`, so the per-post enrichers get the retry too.
+  - **A "content gone" 5xx is a 404** (2026-11-22, HUBANDSPOKE-84): SC answers
+    a deleted / private video with `500 {"message":"This video is unavailable"}`.
+    `isScContentGoneBody` spots that (SC's `message` naming the video/post as
+    unavailable/private/removed) and `scGetWithRetry` skips the retries and
+    answers as a 404: `null` for `scFetchJson`, else a status-404
+    `ScrapeCreatorsError`, so enrichment marks it permanent instead of paging
+    and retrying. `"Service Unavailable"` / `"Internal Server Error"` still retry.
   - **YouTube shorts / community failure is partial, not fatal:** if
     `/channel/shorts` or `/channel/community-posts` still 5xx after retries,
     the items already fetched are upserted
