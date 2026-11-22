@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { Loader2Icon, SparklesIcon } from "lucide-react";
+import { CheckIcon, CopyIcon, Loader2Icon, SparklesIcon } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { trackUsage } from "@/lib/usage/track";
 import { useCanEditBrand } from "@/components/brand-access";
 import { EditableField } from "./editable-field";
 import { SocialEmbedHeader } from "./social-embed-header";
@@ -102,14 +103,17 @@ export function CaptionPanel({
   // it a tweet, etc. The placeholder carries the affordance.
   return (
     <div className="flex min-w-0 flex-1 flex-col">
-      {showRegenerate && (
-        <div className="mb-1.5 flex items-center justify-end">
-          <RegenerateCaptionButton
-            itemId={itemId}
-            hasExisting={value.trim().length > 0}
-            hasDraft={editable}
-            onRegenerated={onRegenerated}
-          />
+      {(showRegenerate || value.trim().length > 0) && (
+        <div className="mb-1.5 flex items-center justify-end gap-1.5">
+          <CopyCaptionButton value={value} />
+          {showRegenerate && (
+            <RegenerateCaptionButton
+              itemId={itemId}
+              hasExisting={value.trim().length > 0}
+              hasDraft={editable}
+              onRegenerated={onRegenerated}
+            />
+          )}
         </div>
       )}
       {draftAlgorithmRunning && <DraftingIndicator />}
@@ -183,14 +187,17 @@ function IgEmbedCaption({
         verified={author.verified}
         monogramSeed={{ displayName: author.displayName, handle: author.handle }}
         actions={
-          showRegenerate ? (
-            <RegenerateCaptionButton
-              itemId={itemId}
-              hasExisting={value.trim().length > 0}
-              hasDraft={editable}
-              onRegenerated={onRegenerated}
-            />
-          ) : null
+          <div className="flex items-center gap-1.5">
+            <CopyCaptionButton value={value} />
+            {showRegenerate && (
+              <RegenerateCaptionButton
+                itemId={itemId}
+                hasExisting={value.trim().length > 0}
+                hasDraft={editable}
+                onRegenerated={onRegenerated}
+              />
+            )}
+          </div>
         }
       />
       {draftAlgorithmRunning && <DraftingIndicator />}
@@ -215,6 +222,40 @@ function IgEmbedCaption({
         />
       </div>
     </div>
+  );
+}
+
+/**
+ * Copies the caption exactly as it reads in the editor (local edits
+ * included) so whoever publishes can paste it into Instagram / TikTok /
+ * LinkedIn without hand-selecting a 1,000-character textarea. Publishing
+ * happens from the post page (the /publish kit has its own copy button,
+ * but nearly nobody opens that screen). Renders nothing for an empty
+ * caption. Mark: `content:caption-copied`.
+ */
+function CopyCaptionButton({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false);
+  if (value.trim().length === 0) return null;
+  async function handleClick() {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+      trackUsage("content:caption-copied");
+    } catch {
+      toast.error("Couldn't copy — select the caption and copy it by hand");
+    }
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => void handleClick()}
+      title="Copy the caption to paste where you publish"
+      className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1 text-[11px] font-medium text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+    >
+      {copied ? <CheckIcon className="h-3 w-3" /> : <CopyIcon className="h-3 w-3" />}
+      {copied ? "Copied" : "Copy caption"}
+    </button>
   );
 }
 
