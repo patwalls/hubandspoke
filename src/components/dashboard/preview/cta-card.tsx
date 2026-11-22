@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { MonogramAvatar } from "./avatar";
 import { EditableField } from "./editable-field";
+import { CopyTextButton } from "./copy-text-button";
 import { VerifiedBadge } from "./verified-badge";
 import type { PreviewData } from "./resolve-preview-data";
 import type { SimulatorProps } from "./simulator-types";
@@ -123,6 +124,7 @@ function XCta({ fieldKey, value, editable, onLocalEdit, onCommit, author, maxLen
           maxLength={maxLength}
         />
         <CharCounter value={value} maxLength={maxLength} />
+        <CopyTextButton value={value} label="Copy reply" mark="content:cta-copied" title="Copy the reply to post under the main one" className="mt-1" />
       </div>
     </div>
   );
@@ -179,6 +181,7 @@ function LinkedInCta({ fieldKey, value, editable, onLocalEdit, onCommit, author,
                 maxLength={maxLength}
               />
               <CharCounter value={value} maxLength={maxLength} />
+              <CopyTextButton value={value} label="Copy comment" mark="content:cta-copied" title="Copy the comment to pin under the post" className="mt-1" />
             </div>
           </div>
         </div>
@@ -234,6 +237,7 @@ function YouTubeCommunityCta({ fieldKey, value, editable, onLocalEdit, onCommit,
               maxLength={maxLength}
             />
             <CharCounter value={value} maxLength={maxLength} />
+            <CopyTextButton value={value} label="Copy comment" mark="content:cta-copied" title="Copy the comment to pin under the post" className="mt-1" />
           </div>
         </div>
       </div>
