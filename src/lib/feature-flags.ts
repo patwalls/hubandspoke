@@ -111,6 +111,17 @@ const FLAGS = {
    * covers the dialog. The allowlist stays so flipping back restores it.
    * See docs/features.md → "Cross-post queue".
    */
+  /**
+   * Queue "Age" pill: the triage tabs default to ideas from the last 30 days
+   * (thousands of untouched older clip ideas otherwise fill the counts), with
+   * "Older than 30 days" / "Any age" one click away. Pat-first 2026-11-22;
+   * client-only filter, so no route needs `requireFeature`. See
+   * docs/features.md → "Queue age filter" and src/lib/queue-age.ts.
+   */
+  queueAge: {
+    emails: ["patrickswalls@gmail.com", "e2e@local.test"],
+    envVar: "FEATURE_QUEUE_AGE_EMAILS",
+  },
   crossPostUsualEditor: {
     emails: ["patrickswalls@gmail.com", "e2e@local.test"],
     envVar: "FEATURE_CROSS_POST_USUAL_EDITOR_EMAILS",

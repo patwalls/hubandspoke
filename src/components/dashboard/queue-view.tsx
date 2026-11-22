@@ -29,6 +29,15 @@ import type { SpokeCandidatesResult } from "@/lib/services/spoke-candidates";
 import type { QueueHistoryEvent } from "@/app/api/queue/history/route";
 import { useUrlState } from "@/lib/hooks/use-url-state";
 import { useRememberListUrl } from "@/lib/hooks/use-remember-list-url";
+import { trackUsage } from "@/lib/usage/track";
+import {
+  QUEUE_AGE_DAYS,
+  QUEUE_AGE_OPTIONS,
+  isRecentIdea,
+  matchesQueueAge,
+  parseQueueAge,
+  type QueueAge,
+} from "@/lib/queue-age";
 
 /** Queue tab discriminator.
  *
@@ -203,12 +212,14 @@ export function QueueView({
     platform: { default: "all" },
     format: { default: "all" },
     pillar: { default: "all" },
+    age: { default: "recent" },
   });
   const {
     q: search,
     platform: selectedPlatform,
     format: selectedFormat,
     pillar: selectedPillar,
+    age: rawAge,
   } = filters.values;
   const [selectedSource, setSelectedSource] = useState<QueueSource>(
     initialSource
@@ -220,6 +231,10 @@ export function QueueView({
 
   useRememberListUrl({ brand, listKey: "queue" });
   const flags = useFeatureFlags();
+  // Age pill (flag `queueAge`, src/lib/queue-age.ts): off → every age, as before.
+  const ageFilterOn = flags?.queueAge === true;
+  const selectedAge: QueueAge = ageFilterOn ? parseQueueAge(rawAge) : "any";
+  const [ageNow] = useState(() => Date.now());
 
   const fetchQueue = useCallback(async () => {
     setLoading(true);
@@ -479,7 +494,7 @@ export function QueueView({
 
   const query = search.trim().toLowerCase();
 
-  const baseFiltered = ideaItems.filter((item) => {
+  const baseFilteredAnyAge = ideaItems.filter((item) => {
     if (!matchesChannel(item, selectedPlatform)) return false;
     if (selectedFormat !== "all") {
       if (item.format !== selectedFormat) return false;
@@ -497,6 +512,10 @@ export function QueueView({
     }
     return true;
   });
+  const baseFiltered =
+    selectedAge === "any"
+      ? baseFilteredAnyAge
+      : baseFilteredAnyAge.filter((item) => matchesQueueAge(item.createdAt, selectedAge, ageNow));
 
   // Cross-post candidates filtered by the same channel/format/search controls.
   const crossPostFiltered = useMemo(() => {
@@ -651,7 +670,7 @@ export function QueueView({
   ]);
 
   const clipFormatNames = new Set(clippableFormats.map((f) => f.name));
-  const filtered = baseFiltered.filter((item) => {
+  const inSelectedTab = (item: ProductionItem): boolean => {
     if (selectedSource === "all") return true;
     if (selectedSource === "newsletters") return item.postType === "newsletter";
     const source = item.sourceType ?? "original";
@@ -669,7 +688,18 @@ export function QueueView({
       );
     }
     return source === selectedSource;
-  });
+  };
+  const filtered = baseFiltered.filter(inSelectedTab);
+  // Older rows the default "Last 30 days" view leaves out of this tab — named
+  // in one quiet line under the table so nothing disappears silently.
+  const olderHidden =
+    selectedAge === "recent"
+      ? baseFilteredAnyAge.filter((item) => !isRecentIdea(item.createdAt, ageNow) && inSelectedTab(item)).length
+      : 0;
+  const setAge = (v: string) => {
+    filters.set("age", v);
+    trackUsage(`queue:age:${v}`, brand);
+  };
 
   const isCrossPostTab = selectedSource === "cross_post";
   const isHistoryTab = selectedSource === "history";
@@ -785,6 +815,14 @@ export function QueueView({
             options={formatOptions}
             onChange={(v) => filters.set("format", v)}
           />
+          {ageFilterOn && !isCrossPostTab && !isRepostTab && !isSpokeTab && (
+            <SelectPill
+              label="Age"
+              value={selectedAge}
+              options={QUEUE_AGE_OPTIONS}
+              onChange={setAge}
+            />
+          )}
           {isSpokeTab && (
             <SelectPill
               label="Pillar"
@@ -866,12 +904,15 @@ export function QueueView({
       ) : loading ? (
         <LoadingPanel label="Loading queue…" />
       ) : (
+        <>
         <IdeaQueueTable
           items={filtered}
           brand={brand}
           formatNameToId={formatNameToId}
           emptyMessage={
-            query ||
+            selectedAge === "recent" && olderHidden > 0 && !query
+              ? `No ideas from the last ${QUEUE_AGE_DAYS} days here.`
+              : query ||
             selectedPlatform !== "all" ||
             selectedFormat !== "all" ||
             selectedSource !== "all"
@@ -880,6 +921,19 @@ export function QueueView({
           }
           onMutate={fetchQueue}
         />
+        {olderHidden > 0 && (
+          <p className="text-xs text-muted-foreground">
+            {olderHidden.toLocaleString()} older idea{olderHidden === 1 ? "" : "s"} not shown ·{" "}
+            <button
+              type="button"
+              onClick={() => setAge("older")}
+              className="underline underline-offset-2 hover:text-foreground cursor-pointer"
+            >
+              Show older
+            </button>
+          </p>
+        )}
+        </>
       )}
     </div>
   );

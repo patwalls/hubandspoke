@@ -73,6 +73,7 @@ describe("resolveFeatureFlags", () => {
       designEditor: true,
       newsletterDrafter: true,
       newsletterTemplateAdmin: false,
+      queueAge: false,
       winnersEmail: false,
       myWorkDigest: true,
       crossPostUsualEditor: true,
@@ -82,6 +83,6 @@ describe("resolveFeatureFlags", () => {
     expect(resolveFeatureFlags({ email: "patrickswalls@gmail.com" }, {}).newsletterTemplateAdmin).toBe(false);
     expect(resolveFeatureFlags({ email: "patrickswalls@gmail.com" }, {}).newsletterDrafter).toBe(true);
     expect(resolveFeatureFlags({ email: "patrickswalls@gmail.com" }, {}).myWorkDigest).toBe(true);
-    expect(resolveFeatureFlags(null, {})).toEqual({ clipEditor: false, designEditor: false, newsletterDrafter: false, newsletterTemplateAdmin: false, myWorkDigest: false, winnersEmail: false, crossPostUsualEditor: false });
+    expect(resolveFeatureFlags(null, {})).toEqual({ clipEditor: false, designEditor: false, newsletterDrafter: false, newsletterTemplateAdmin: false, myWorkDigest: false, winnersEmail: false, queueAge: false, crossPostUsualEditor: false });
   });
 });
