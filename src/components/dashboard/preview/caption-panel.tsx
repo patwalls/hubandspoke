@@ -250,12 +250,11 @@ function CopyCaptionButton({ value }: { value: string }) {
     <button
       type="button"
       onClick={() => void handleClick()}
-      title="Copy the caption to paste where you publish"
-      aria-label={copied ? "Copied" : "Copy"}
-      className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md border border-border bg-background px-2 py-1 text-[11px] font-medium text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+      title={copied ? "Copied" : "Copy caption"}
+      aria-label={copied ? "Copied" : "Copy caption"}
+      className="inline-flex shrink-0 items-center justify-center rounded-md border border-border bg-background p-1.5 text-muted-foreground hover:bg-muted/40 hover:text-foreground"
     >
       {copied ? <CheckIcon className="h-3 w-3" /> : <CopyIcon className="h-3 w-3" />}
-      {copied ? "Copied" : "Copy"}
     </button>
   );
 }
@@ -330,7 +329,7 @@ function RegenerateCaptionButton({
       disabled={busy}
       title="Generate the caption from the pillar transcript + past captions for this format"
       className={cn(
-        "inline-flex shrink-0 items-center whitespace-nowrap gap-1 rounded-md border border-border bg-background px-2 py-1 text-[11px] font-medium text-muted-foreground hover:bg-muted/40 hover:text-foreground disabled:opacity-50",
+        "inline-flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1 text-[11px] font-medium text-muted-foreground hover:bg-muted/40 hover:text-foreground disabled:opacity-50",
       )}
     >
       <SparklesIcon className={cn("h-3 w-3", busy && "animate-pulse")} />

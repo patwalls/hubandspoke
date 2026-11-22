@@ -39,8 +39,11 @@ test("the post page copies the caption in one click", async ({ page, context }) 
     if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT, fullPage: false });
 
     await copy.click();
-    await expect(page.getByRole("button", { name: "Copied", exact: true })).toBeVisible();
-    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(caption);
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(caption);
+    await expect.poll(async () => {
+      const [r] = await sql`SELECT count(*)::int AS n FROM usage_events WHERE screen = 'content:caption-copied'`;
+      return r.n as number;
+    }).toBeGreaterThan(0);
   } finally {
     await sql.end();
   }
