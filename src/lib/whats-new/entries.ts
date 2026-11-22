@@ -43,6 +43,16 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-11-22-publish-kit-on-post",
+    shippedAt: "2026-11-22T05:18:47Z",
+    kind: "feature",
+    title: "Copy the caption and download every slide from the post page",
+    body: "Publishing a post natively? \"Copy caption\" sits under the caption, and on a carousel, hover the slides and press \"All\" to download every slide, numbered in post order, ready to pick in Instagram or LinkedIn.",
+    href: "/[brand]/production",
+    screen: "media:download-all",
+    audience: { usersOf: ["/[brand]/content/[id]"] },
+  },
+  {
     id: "2026-11-21-peek-approve",
     shippedAt: "2026-11-21T14:02:00Z",
     kind: "feature",
