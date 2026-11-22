@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractS3Key } from "./media-actions";
+import { extractS3Key, mediaFilename } from "./media-actions";
 
 describe("extractS3Key", () => {
   it("parses path-style URLs (s3.us-east-1.amazonaws.com/<bucket>/<key>)", () => {
@@ -39,5 +39,28 @@ describe("extractS3Key", () => {
     expect(
       extractS3Key("https://s3.us-east-1.amazonaws.com/bucket"),
     ).toBeNull();
+  });
+});
+
+describe("mediaFilename", () => {
+  it("names a single download by kind with the blob's extension", () => {
+    expect(mediaFilename("image/jpeg", "image")).toBe("image.jpeg");
+    expect(mediaFilename("video/mp4; codecs=avc1", "video")).toBe("video.mp4");
+  });
+
+  it("falls back to png / mp4 when the blob has no usable type", () => {
+    expect(mediaFilename("", "image")).toBe("image.png");
+    expect(mediaFilename("application/", "video")).toBe("video.mp4");
+  });
+
+  it("numbers carousel slides so they sort in post order", () => {
+    expect(mediaFilename("image/png", "image", { n: 1, total: 6 })).toBe("slide-01.png");
+    // Without padding "slide-10" would sort before "slide-2" in a file picker.
+    expect(mediaFilename("image/png", "image", { n: 10, total: 10 })).toBe("slide-10.png");
+    expect(mediaFilename("video/mp4", "video", { n: 3, total: 4 })).toBe("slide-03.mp4");
+  });
+
+  it("pads to the carousel's width past 99 slides", () => {
+    expect(mediaFilename("image/png", "image", { n: 7, total: 120 })).toBe("slide-007.png");
   });
 });
