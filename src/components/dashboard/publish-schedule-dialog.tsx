@@ -22,6 +22,12 @@ import {
 } from "@/lib/published-link-validation";
 import { useCanEditBrand } from "@/components/brand-access";
 import { StudioLinkOffer, useStudioLiveLink } from "./studio-live-link";
+import { postTypeDisplay } from "@/lib/platforms";
+import {
+  readOpenNextPref,
+  saveOpenNextPref,
+  type PublishNext,
+} from "@/lib/publish/next-after-publish";
 
 // The one and only path to status='Published' / status='Scheduled'. The
 // generic PUT /api/production-items route rejects those status values
@@ -71,6 +77,11 @@ interface Props {
   /** The item's brand slug, for the edit-access check. Defaults to the
    *  brand in the URL (pass it on /all, where the URL has none). */
   brand?: string | null;
+  /** A Ready post's next one (nextAfterPublish): "Then open next" under the
+   *  link, so paste + Enter publishes and goes straight there. */
+  openNext?: PublishNext | null;
+  /** Called instead of `onSuccess` when the box is on: the page navigates. */
+  onOpenNext?: (next: PublishNext) => void;
 }
 
 function todayIsoDate(): string {
@@ -103,6 +114,8 @@ export function PublishScheduleDialog({
   publishTab,
   pasteTip,
   brand,
+  openNext,
+  onOpenNext,
 }: Props) {
   const canEdit = useCanEditBrand(brand);
   const isAlreadyScheduled = currentStatus === "Scheduled";
@@ -120,6 +133,7 @@ export function PublishScheduleDialog({
   );
   const [noDate, setNoDate] = useState<boolean>(initialNoDate ?? false);
   const [submitting, setSubmitting] = useState(false);
+  const [openNextOn, setOpenNextOn] = useState(true);
 
   // Reset form state every time the dialog opens. Without this an edit
   // session on item A leaks its values into a subsequent edit on item B.
@@ -131,6 +145,7 @@ export function PublishScheduleDialog({
     setExpectedPublishAt(isoToLocalInput(initialExpectedPublishAt));
     setNoDate(initialNoDate ?? false);
     setSubmitting(false);
+    setOpenNextOn(readOpenNextPref());
   }, [
     open,
     isAlreadyScheduled,
@@ -202,6 +217,16 @@ export function PublishScheduleDialog({
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
         toast.error(json?.error || "Couldn't save publish info");
+        return;
+      }
+      const goNext =
+        mode === "publish" && !isAlreadyPublished && openNextOn && openNext && onOpenNext
+          ? openNext
+          : null;
+      if (goNext) {
+        toast.success(`Published. Next: ${nextLabel(goNext)}`);
+        onOpenChange(false);
+        onOpenNext!(goNext);
         return;
       }
       toast.success(
@@ -422,6 +447,28 @@ export function PublishScheduleDialog({
           </p>
         )}
 
+        {mode === "publish" && !isAlreadyPublished && openNext && onOpenNext && (
+          <label
+            data-testid="publish-open-next"
+            className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground"
+          >
+            <input
+              type="checkbox"
+              className="h-3.5 w-3.5 shrink-0 rounded border-border accent-foreground"
+              checked={openNextOn}
+              onChange={(e) => {
+                setOpenNextOn(e.target.checked);
+                saveOpenNextPref(e.target.checked);
+                trackUsage(e.target.checked ? "publish:open-next:on" : "publish:open-next:off", brand);
+              }}
+            />
+            <span className="min-w-0 truncate">
+              Then open {openNext.from === "same-post" ? "this post's next platform" : "the next Ready post"}:{" "}
+              <span className="font-medium text-foreground">{nextLabel(openNext)}</span>
+            </span>
+          </label>
+        )}
+
         <DialogFooter className="gap-2">
           <Button
             type="button"
@@ -443,4 +490,10 @@ export function PublishScheduleDialog({
       </DialogContent>
     </Dialog>
   );
+}
+
+/** "Threads · Title" (the platform first: cross-posts share one title). */
+function nextLabel(next: PublishNext): string {
+  const platform = postTypeDisplay(next.postType).label;
+  return platform ? `${platform} · ${next.title}` : next.title;
 }

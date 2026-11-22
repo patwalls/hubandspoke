@@ -5,6 +5,12 @@ import postgres from "postgres";
 // names what's left by platform and links each one: the curator kept going
 // back to the production list to pick the next platform because the card
 // showed only the (identical) title.
+// This spec covers staying on the post after Publish; the dialog's
+// "Then open next" box (publish-open-next.spec.ts) is turned off.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("hs:publish-open-next", "off"));
+});
+
 test("after a Publish, the card lists the post's other cross-posts by platform", async ({ page }) => {
   const sql = postgres(process.env.DATABASE_URL!, { max: 1 });
   try {

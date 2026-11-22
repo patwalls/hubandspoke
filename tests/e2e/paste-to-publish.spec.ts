@@ -16,6 +16,12 @@ async function pasteOn(page: Page, selector: string, text: string) {
   );
 }
 
+// This spec covers staying on the post after Publish; the dialog's
+// "Then open next" box (publish-open-next.spec.ts) is turned off.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("hs:publish-open-next", "off"));
+});
+
 test("a link pasted on the page opens Publish pre-filled; Enter publishes", async ({ page }) => {
   const sql = postgres(process.env.DATABASE_URL!, { max: 1 });
   try {

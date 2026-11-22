@@ -4,6 +4,12 @@ import postgres from "postgres";
 // After a Publish the curator goes straight back to the production list (by
 // habit, within a second) and scans it for the same post's next platform, so
 // the rows the next card offered are marked "Next · <platform>" there too.
+// This spec covers staying on the post after Publish; the dialog's
+// "Then open next" box (publish-open-next.spec.ts) is turned off.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("hs:publish-open-next", "off"));
+});
+
 test("back on the production list after a Publish, the remaining cross-posts are marked Next", async ({ page }) => {
   const sql = postgres(process.env.DATABASE_URL!, { max: 1 });
   try {

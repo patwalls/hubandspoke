@@ -135,6 +135,8 @@ import { recordVisit } from "@/lib/hooks/use-recent-items";
 import { startVisibleInterval } from "@/lib/visible-interval";
 import { validatePublishedLinkPlatform } from "@/lib/published-link-validation";
 import { trackUsage } from "@/lib/usage/track";
+import { leaveRun, readRun, saveRun } from "@/lib/production/run";
+import { nextAfterPublish, READY, type MyWorkNext, type PublishNext } from "@/lib/publish/next-after-publish";
 import { assignedNoticeText } from "@/lib/assigned-notice";
 import { ViewsAgainstUsual, WhyItWon } from "@/components/dashboard/views-against-usual";
 import type { AgainstUsual } from "@/lib/winners/pick";
@@ -1408,6 +1410,37 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
       cancelled = true;
     };
   }, [publishDialogOpen, readyPillarId, brand]);
+  // The post to open after publishing a Ready one (publish-one-trip M3),
+  // fetched when the dialog opens: the same post's next platform, else the
+  // In Production run's next Ready row, else your next Ready post.
+  const [openNext, setOpenNext] = useState<PublishNext | null>(null);
+  const isReadyItem = data?.item?.status === READY;
+  useEffect(() => {
+    setOpenNext(null);
+    if (!publishDialogOpen || !isReadyItem) return;
+    let cancelled = false;
+    fetch(`/api/my-work/next?current=${encodeURIComponent(contentId)}`)
+      .then((r) => (r.ok ? (r.json() as Promise<MyWorkNext>) : null))
+      .catch(() => null)
+      .then((myWork) => {
+        if (cancelled) return;
+        setOpenNext(nextAfterPublish({ itemId: contentId, brand, myWork, run: readRun(brand) }));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [publishDialogOpen, isReadyItem, contentId, brand]);
+  const goToNextAfterPublish = useCallback(
+    (next: PublishNext) => {
+      trackUsage(`publish:open-next:${next.from}`, brand);
+      // The published post leaves the run, so the next page counts the
+      // smaller Ready group (RunNextCard does this when you stay).
+      const left = leaveRun(readRun(brand), contentId);
+      if (left) saveRun({ ...left.run, current: next.id });
+      router.push(`/${next.brand}/content/${next.id}`);
+    },
+    [brand, contentId, router],
+  );
   // Paste-to-publish: a post link pasted anywhere on a not-yet-published
   // item (outside a text field or dialog) opens the Publish dialog with the
   // link filled in — the editor's next key is Enter.
@@ -4993,6 +5026,8 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
             : null
         }
         pasteTip={pasteReady && !pastedLink}
+        openNext={openNext}
+        onOpenNext={goToNextAfterPublish}
         onSuccess={() => {
           void load();
         }}
