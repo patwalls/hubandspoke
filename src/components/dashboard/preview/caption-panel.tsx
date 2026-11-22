@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { Loader2Icon, SparklesIcon } from "lucide-react";
+import { CheckIcon, CopyIcon, Loader2Icon, SparklesIcon } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { trackUsage } from "@/lib/usage/track";
 import { useCanEditBrand } from "@/components/brand-access";
 import { EditableField } from "./editable-field";
 import { SocialEmbedHeader } from "./social-embed-header";
@@ -126,6 +127,7 @@ export function CaptionPanel({
           draftAlgorithmRunning && "opacity-60",
         )}
       />
+      <CopyCaptionButton value={value} />
     </div>
   );
 }
@@ -214,6 +216,43 @@ function IgEmbedCaption({
           )}
         />
       </div>
+      <CopyCaptionButton value={value} />
+    </div>
+  );
+}
+
+/**
+ * Copies the caption exactly as it reads in the editor (local edits
+ * included) so whoever publishes can paste it into Instagram / TikTok /
+ * LinkedIn without hand-selecting a 1,000-character textarea. Publishing
+ * happens from the post page (the /publish kit has its own copy button,
+ * but nearly nobody opens that screen). Renders nothing for an empty
+ * caption. Mark: `content:caption-copied`.
+ */
+function CopyCaptionButton({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false);
+  if (value.trim().length === 0) return null;
+  async function handleClick() {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+      trackUsage("content:caption-copied");
+    } catch {
+      toast.error("Couldn't copy — select the caption and copy it by hand");
+    }
+  }
+  return (
+    <div className="mt-2 flex justify-end">
+      <button
+        type="button"
+        onClick={() => void handleClick()}
+        title="Copy the caption to paste where you publish"
+        className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+      >
+        {copied ? <CheckIcon className="h-3 w-3" /> : <CopyIcon className="h-3 w-3" />}
+        {copied ? "Copied" : "Copy caption"}
+      </button>
     </div>
   );
 }
