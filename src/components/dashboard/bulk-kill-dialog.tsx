@@ -23,6 +23,8 @@ interface BulkKillDialogProps {
   onConfirm: (reason: string) => void | Promise<void>;
   /** Singular noun for what's being killed. Defaults to "idea". */
   noun?: string;
+  /** Replaces the "selected" wording when the rows weren't picked by hand. */
+  scope?: string;
 }
 
 export function BulkKillDialog({
@@ -32,6 +34,7 @@ export function BulkKillDialog({
   saving = false,
   onConfirm,
   noun: singular = "idea",
+  scope = "selected",
 }: BulkKillDialogProps) {
   const [reason, setReason] = useState("");
 
@@ -53,9 +56,9 @@ export function BulkKillDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Kill {count} {noun}?</DialogTitle>
+          <DialogTitle>Kill {count.toLocaleString()} {noun}?</DialogTitle>
           <DialogDescription>
-            One reason will be applied to all {count} selected {noun}. Kill
+            One reason will be applied to all {count.toLocaleString()} {scope} {noun}. Kill
             reasons train future idea suggestions — past kills are fed back
             into the classifier.
           </DialogDescription>
@@ -89,7 +92,7 @@ export function BulkKillDialog({
             onClick={handleConfirm}
             disabled={!canConfirm}
           >
-            {saving ? `Killing ${count}…` : `Kill ${count} ${noun}`}
+            {saving ? `Killing ${count.toLocaleString()}…` : `Kill ${count.toLocaleString()} ${noun}`}
           </Button>
         </DialogFooter>
       </DialogContent>

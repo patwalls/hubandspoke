@@ -43,6 +43,16 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-11-22-queue-age",
+    shippedAt: "2026-11-22T23:02:52Z",
+    kind: "feature",
+    title: "The queue opens on the last 30 days of ideas",
+    body: "Thousands of old clip ideas no longer fill the queue's tabs and counts. It now shows ideas from the last 30 days; the Age filter (or \"Show older\" under the table) brings older ones back in one click.",
+    href: "/[brand]/queue",
+    screen: "queue:age:older",
+    audience: { usersOf: ["/[brand]/queue"] },
+  },
+  {
     id: "2026-11-22-publish-open-next",
     shippedAt: "2026-11-22T13:56:22Z",
     kind: "feature",

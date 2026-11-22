@@ -598,6 +598,8 @@ export interface CreateTestProductionItemOptions {
   youtubeDownloadAttempts?: number;
   /** Soft-delete marker — set to prove deleted rows are excluded. */
   deletedAt?: Date | null;
+  /** Backdate the row (e.g. an Idea older than the queue's 30-day window). */
+  createdAt?: Date;
 }
 
 /**
@@ -669,6 +671,7 @@ export async function createTestProductionItem(
       deletedAt: opts.deletedAt ?? null,
       createdVia: opts.createdVia ?? null,
       winNote: opts.winNote ?? null,
+      ...(opts.createdAt ? { createdAt: opts.createdAt } : {}),
     })
     .returning();
   trackCleanup("productionItems", row.id);

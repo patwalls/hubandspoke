@@ -95,6 +95,9 @@ export async function GET(request: NextRequest) {
         // movements. status_change events from other transitions (Assigned →
         // Review, etc.) are noise for this view.
         sql`${contentEvents.payload}->>'from' = 'Idea'`,
+        // A one-pass "Kill all older ideas" writes thousands of these; they
+        // stay on each item's activity but would bury this 100-row list.
+        sql`${contentEvents.payload}->>'bulk' IS NULL`,
       ),
     )
     .orderBy(desc(contentEvents.createdAt))
