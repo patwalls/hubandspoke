@@ -6,6 +6,12 @@ import postgres from "postgres";
 // doesn't go back to the production list to find each one. (Before, the
 // page's refetch after Publish swapped in "Loading…", which unmounted the
 // card's memory, so it never showed after a Publish at all.)
+// This spec covers staying on the post after Publish; the dialog's
+// "Then open next" box (publish-open-next.spec.ts) is turned off.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("hs:publish-open-next", "off"));
+});
+
 test("publishing a cross-post offers the next one from the same post", async ({ page }) => {
   const sql = postgres(process.env.DATABASE_URL!, { max: 1 });
   try {

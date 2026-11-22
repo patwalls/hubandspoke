@@ -7,6 +7,12 @@ import postgres from "postgres";
 // top; a ready cross-post's Publish dialog offers the same when siblings wait.
 // Account, media and cross-post links are seeded straight into the DB (the
 // real cross-post route needs S3 media to copy).
+// This spec covers staying on the post after Publish; the dialog's
+// "Then open next" box (publish-open-next.spec.ts) is turned off.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("hs:publish-open-next", "off"));
+});
+
 test("cross-post tab and publish dialog lead to the Publish tab, focused on the video", async ({
   page,
 }) => {

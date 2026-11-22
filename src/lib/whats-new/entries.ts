@@ -43,6 +43,16 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-11-22-publish-open-next",
+    shippedAt: "2026-11-22T13:56:22Z",
+    kind: "feature",
+    title: "Publish, and the next Ready post opens",
+    body: "Paste the live link on a Ready To Publish post and press Enter: it's published and the next one opens (the same post's next platform first), so there's no trip back to In Production. The Publish box names it; untick \"Then open\" to stay on the post.",
+    href: "/[brand]/production",
+    screen: "publish:open-next:same-post",
+    audience: { usersOf: ["/[brand]/content/[id]"] },
+  },
+  {
     id: "2026-11-22-publish-kit-on-post",
     shippedAt: "2026-11-22T05:18:47Z",
     kind: "feature",
