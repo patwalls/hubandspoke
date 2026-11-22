@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 
 // The dashboard records which filter people change (dashboard:filter:<key>:<value>)
 // so a later lap can tell "re-picks the same view every visit" from "explores".
-// Landing on the dashboard records no filter mark; picking a platform does.
+// Landing on the dashboard records no filter mark; picking Monthly does.
 test("changing a dashboard filter records one mark, landing records none", async ({ page }) => {
   const marks: string[] = [];
   page.on("request", (req) => {
@@ -19,16 +19,16 @@ test("changing a dashboard filter records one mark, landing records none", async
   await page.waitForLoadState("networkidle");
   expect(marks.filter((m) => m.startsWith("dashboard:filter:"))).toEqual([]);
 
-  await page.getByText(/^Platform/).first().click();
+  await page.getByRole("button", { name: /^Weekly/ }).first().click();
   await page
     .locator("[role=menu], [role=listbox], [role=dialog]")
-    .getByText(/^YouTube$/i)
+    .getByText(/^Monthly$/)
     .first()
     .click();
-  await expect(page).toHaveURL(/[?&]platform=youtube/);
+  await expect(page).toHaveURL(/[?&]viewType=monthly/);
   await expect
     .poll(() => marks.filter((m) => m.startsWith("dashboard:filter:")))
-    .toEqual(["dashboard:filter:platform:youtube"]);
+    .toEqual(["dashboard:filter:viewType:monthly"]);
 
   await page.keyboard.press("Escape");
   if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT, fullPage: true });
