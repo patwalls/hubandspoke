@@ -4,7 +4,7 @@ import postgres from "postgres";
 // Publishing happens from the post page: open the post, copy its caption,
 // post it natively, paste the live link back. The caption used to be
 // hand-selected out of a long textarea every time; the post page now has a
-// quiet "Copy caption" button beside it.
+// quiet "Copy caption" link under it.
 
 test("the post page copies the caption in one click", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);

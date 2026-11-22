@@ -103,17 +103,14 @@ export function CaptionPanel({
   // it a tweet, etc. The placeholder carries the affordance.
   return (
     <div className="flex min-w-0 flex-1 flex-col">
-      {(showRegenerate || value.trim().length > 0) && (
-        <div className="mb-1.5 flex items-center justify-end gap-1.5">
-          <CopyCaptionButton value={value} />
-          {showRegenerate && (
-            <RegenerateCaptionButton
-              itemId={itemId}
-              hasExisting={value.trim().length > 0}
-              hasDraft={editable}
-              onRegenerated={onRegenerated}
-            />
-          )}
+      {showRegenerate && (
+        <div className="mb-1.5 flex items-center justify-end">
+          <RegenerateCaptionButton
+            itemId={itemId}
+            hasExisting={value.trim().length > 0}
+            hasDraft={editable}
+            onRegenerated={onRegenerated}
+          />
         </div>
       )}
       {draftAlgorithmRunning && <DraftingIndicator />}
@@ -130,6 +127,7 @@ export function CaptionPanel({
           draftAlgorithmRunning && "opacity-60",
         )}
       />
+      <CopyCaptionButton value={value} />
     </div>
   );
 }
@@ -187,17 +185,14 @@ function IgEmbedCaption({
         verified={author.verified}
         monogramSeed={{ displayName: author.displayName, handle: author.handle }}
         actions={
-          <div className="flex items-center gap-1.5">
-            <CopyCaptionButton value={value} />
-            {showRegenerate && (
-              <RegenerateCaptionButton
-                itemId={itemId}
-                hasExisting={value.trim().length > 0}
-                hasDraft={editable}
-                onRegenerated={onRegenerated}
-              />
-            )}
-          </div>
+          showRegenerate ? (
+            <RegenerateCaptionButton
+              itemId={itemId}
+              hasExisting={value.trim().length > 0}
+              hasDraft={editable}
+              onRegenerated={onRegenerated}
+            />
+          ) : null
         }
       />
       {draftAlgorithmRunning && <DraftingIndicator />}
@@ -221,6 +216,7 @@ function IgEmbedCaption({
           )}
         />
       </div>
+      <CopyCaptionButton value={value} />
     </div>
   );
 }
@@ -247,15 +243,17 @@ function CopyCaptionButton({ value }: { value: string }) {
     }
   }
   return (
-    <button
-      type="button"
-      onClick={() => void handleClick()}
-      title={copied ? "Copied" : "Copy caption"}
-      aria-label={copied ? "Copied" : "Copy caption"}
-      className="inline-flex shrink-0 items-center justify-center rounded-md border border-border bg-background p-1.5 text-muted-foreground hover:bg-muted/40 hover:text-foreground"
-    >
-      {copied ? <CheckIcon className="h-3 w-3" /> : <CopyIcon className="h-3 w-3" />}
-    </button>
+    <div className="mt-2 flex justify-end">
+      <button
+        type="button"
+        onClick={() => void handleClick()}
+        title="Copy the caption to paste where you publish"
+        className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+      >
+        {copied ? <CheckIcon className="h-3 w-3" /> : <CopyIcon className="h-3 w-3" />}
+        {copied ? "Copied" : "Copy caption"}
+      </button>
+    </div>
   );
 }
 
