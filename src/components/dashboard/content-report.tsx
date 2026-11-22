@@ -12,6 +12,9 @@ import { rehydrateReportAccounts, type HydratedContentReportData } from "@/lib/r
 import { useUrlState } from "@/lib/hooks/use-url-state";
 import { downloadChannelSummaryCsv } from "@/lib/export-csv";
 import { useRememberListUrl } from "@/lib/hooks/use-remember-list-url";
+import { useSearchParams } from "next/navigation";
+import { trackUsage } from "@/lib/usage/track";
+import { dashboardFilterMarks } from "@/lib/usage/dashboard-filter-marks";
 
 const PLATFORM_TABS = [
   { key: "production" as const, label: "Production" },
@@ -81,6 +84,19 @@ export function ContentReport({ brand }: { brand: string }) {
     !isAll && groupByRaw === "brand" ? "platform" : (groupByRaw as GroupDim);
 
   useRememberListUrl({ brand, listKey: "dashboard" });
+
+  // Which filter people change, and to what (dashboard-filter-marks.ts).
+  // Keyed on the URL, not on `filters.values`: the date defaults move on
+  // hydration (useToday) without anyone touching a filter.
+  const search = useSearchParams().toString();
+  const lastFilters = useRef<{ search: string; values: Record<string, string> } | null>(null);
+  useEffect(() => {
+    const values = filters.values as Record<string, string>;
+    const prev = lastFilters.current;
+    lastFilters.current = { search, values };
+    if (!prev || prev.search === search) return;
+    for (const mark of dashboardFilterMarks(prev.values, values)) trackUsage(mark, brand);
+  }, [search, filters.values, brand]);
 
   const [data, setData] = useState<HydratedContentReportData | null>(null);
   const [loading, setLoading] = useState(true);
