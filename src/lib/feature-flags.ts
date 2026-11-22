@@ -121,6 +121,19 @@ const FLAGS = {
   queueAge: {
     emails: ["patrickswalls@gmail.com", "e2e@local.test"],
     envVar: "FEATURE_QUEUE_AGE_EMAILS",
+    // Graduated 2026-11-22 (no errors, one click back to "Any age").
+    everyone: true,
+  },
+  /**
+   * "Kill all N older ideas" on the queue's Older view: one server-side pass
+   * kills a brand's (or one format's) Idea rows older than 30 days, with one
+   * reason. Pat-first 2026-11-22 — it changes thousands of rows at once.
+   * `POST /api/queue/clear-older` calls `requireFeature`. See
+   * docs/features.md → "Queue age filter" and src/lib/queue-clear-older.ts.
+   */
+  queueClearOlder: {
+    emails: ["patrickswalls@gmail.com", "e2e@local.test"],
+    envVar: "FEATURE_QUEUE_CLEAR_OLDER_EMAILS",
   },
   crossPostUsualEditor: {
     emails: ["patrickswalls@gmail.com", "e2e@local.test"],

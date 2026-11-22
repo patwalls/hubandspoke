@@ -20,6 +20,7 @@ const CrossPostQueueTable = dynamic(() => import("./cross-post-queue-table").the
 // cannot paint content before hydration. The other four tables stay lazy;
 // they only render behind tab clicks.
 import { IdeaQueueTable } from "./idea-queue-table";
+const ClearOlderIdeas = dynamic(() => import("./clear-older-ideas").then((m) => m.ClearOlderIdeas), { ssr: false });
 import { buildChannelOptions, matchesChannel } from "@/lib/channel-options";
 import type { ProductionItem } from "@/types";
 import type { CrossPostCandidatesResult } from "@/lib/services/cross-post-candidates";
@@ -696,6 +697,20 @@ export function QueueView({
     selectedAge === "recent"
       ? baseFilteredAnyAge.filter((item) => !isRecentIdea(item.createdAt, ageNow) && inSelectedTab(item)).length
       : 0;
+  // "Kill all older ideas" (flag `queueClearOlder`, src/lib/queue-clear-older.ts):
+  // only on the Older view of one brand, on the All tab or a clip-format tab,
+  // with no channel/search filter — so the server's scope (brand + format,
+  // older than 30 days) is exactly what the table shows.
+  const clearOlderFormat =
+    currentClipFormatName(selectedSource) ?? (selectedFormat !== "all" ? selectedFormat : null);
+  const showClearOlder =
+    flags?.queueClearOlder === true &&
+    selectedAge === "older" &&
+    brand !== "all" &&
+    selectedPlatform === "all" &&
+    !query &&
+    (selectedSource === "all" || !!currentClipFormatName(selectedSource)) &&
+    filtered.length > 0;
   const setAge = (v: string) => {
     filters.set("age", v);
     trackUsage(`queue:age:${v}`, brand);
@@ -931,6 +946,11 @@ export function QueueView({
             >
               Show older
             </button>
+          </p>
+        )}
+        {showClearOlder && (
+          <p className="text-xs text-muted-foreground">
+            <ClearOlderIdeas brand={brand} format={clearOlderFormat} onDone={fetchQueue} />
           </p>
         )}
         </>
