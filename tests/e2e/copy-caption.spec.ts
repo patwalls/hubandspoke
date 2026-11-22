@@ -13,7 +13,7 @@ test("the post page copies the caption in one click", async ({ page, context }) 
     const stamp = Date.now();
     const res = await page.request.post("/api/production-items", {
       data: {
-        title: `E2E copy caption ${stamp}`,
+        title: `E2E publish kit ${stamp}`,
         platform: ["instagram_reel"],
         postType: "instagram_reel",
         publishedDate: new Date().toISOString().slice(0, 10),
@@ -34,12 +34,12 @@ test("the post page copies the caption in one click", async ({ page, context }) 
     });
     await page.goto(`/starter-story/content/${id}`);
 
-    const copy = page.getByRole("button", { name: "Copy caption" });
+    const copy = page.getByRole("button", { name: "Copy caption", exact: true });
     await expect(copy).toBeVisible({ timeout: 15_000 });
     if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT, fullPage: false });
 
     await copy.click();
-    await expect(page.getByRole("button", { name: "Copied" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Copied", exact: true })).toBeVisible();
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(caption);
   } finally {
     await sql.end();
