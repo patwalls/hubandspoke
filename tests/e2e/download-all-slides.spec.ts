@@ -42,6 +42,10 @@ test("a carousel downloads every slide, numbered in post order", async ({ page }
     if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT.replace(/\.png$/, "-rest.png") });
     await page.locator(`img[src="/brands/matg.jpg"]`).hover();
     await expect(all).toBeVisible();
+    await expect
+      .poll(() => page.locator(`img[src="/brands/matg.jpg"]`).evaluate((el) => (el as HTMLImageElement).naturalWidth))
+      .toBeGreaterThan(0);
+    await page.waitForTimeout(400); // let the hover fade finish before the shot
     if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT });
 
     const downloads: Download[] = [];
