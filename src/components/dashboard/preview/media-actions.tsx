@@ -11,6 +11,7 @@ import {
 import { toast } from "sonner";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { useCanEditBrand } from "@/components/brand-access";
+import { trackUsage } from "@/lib/usage/track";
 
 /**
  * Hover overlay with download / copy / (optional) resync buttons for an
@@ -57,49 +58,15 @@ export function MediaActions({
   const canEdit = useCanEditBrand();
   const [error, setError] = useState<string | null>(null);
 
-  const fetchBlob = async (): Promise<Blob> => {
-    // Try the direct presigned S3 URL first. If the browser's fetch fails
-    // (CORS mismatch on the bucket, or networks that block direct
-    // s3.amazonaws.com — hotel/airport WiFi, some corp proxies), fall
-    // back to /api/media-proxy which streams the bytes through the app's
-    // own origin. The page itself loaded over that origin, so this hop
-    // is guaranteed-reachable wherever the rest of the UI works.
-    try {
-      const res = await fetch(src);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return res.blob();
-    } catch (directErr) {
-      const key = extractS3Key(src);
-      if (!key) throw directErr;
-      const proxyUrl = `/api/media-proxy?key=${encodeURIComponent(key)}`;
-      const res = await fetch(proxyUrl);
-      if (!res.ok) {
-        throw new Error(
-          `Proxy fallback failed: HTTP ${res.status}${
-            directErr instanceof Error ? ` (direct: ${directErr.message})` : ""
-          }`,
-        );
-      }
-      return res.blob();
-    }
-  };
+  const fetchBlob = () => fetchMediaBlob(src);
 
   const onDownload = async (e: React.MouseEvent) => {
     e.stopPropagation();
     setError(null);
     try {
       const blob = await fetchBlob();
-      const objectUrl = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = objectUrl;
-      const fallbackExt = kind === "video" ? "mp4" : "png";
-      const ext = (blob.type.split("/")[1] || fallbackExt).split(";")[0];
-      const fallbackName = kind === "video" ? `video.${ext}` : `image.${ext}`;
-      a.download = filename || fallbackName;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(objectUrl);
+      saveBlob(blob, filename || mediaFilename(blob.type, kind));
+      trackUsage("media:download");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Download failed");
       setTimeout(() => setError(null), 2500);
@@ -130,6 +97,7 @@ export function MediaActions({
       }
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
+      trackUsage("media:copy");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Copy failed");
       setTimeout(() => setError(null), 2500);
@@ -214,6 +182,69 @@ export function MediaActions({
       )}
     </div>
   );
+}
+
+/**
+ * Fetch a media URL's bytes. Tries the direct presigned S3 URL first; if
+ * the browser's fetch fails (CORS mismatch on the bucket, or networks that
+ * block direct s3.amazonaws.com — hotel/airport WiFi, some corp proxies),
+ * falls back to /api/media-proxy, which streams the bytes through the
+ * app's own origin (guaranteed-reachable wherever the rest of the UI works).
+ */
+export async function fetchMediaBlob(src: string): Promise<Blob> {
+  try {
+    const res = await fetch(src);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.blob();
+  } catch (directErr) {
+    const key = extractS3Key(src);
+    if (!key) throw directErr;
+    const proxyUrl = `/api/media-proxy?key=${encodeURIComponent(key)}`;
+    const res = await fetch(proxyUrl);
+    if (!res.ok) {
+      throw new Error(
+        `Proxy fallback failed: HTTP ${res.status}${
+          directErr instanceof Error ? ` (direct: ${directErr.message})` : ""
+        }`,
+      );
+    }
+    return res.blob();
+  }
+}
+
+/** Save a blob as a file download (the `<a download>` attribute only works
+ *  same-origin, so we blob first). */
+export function saveBlob(blob: Blob, filename: string) {
+  const objectUrl = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = objectUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // Revoke on the next tick: some browsers start the download async and a
+  // synchronous revoke cancels it when several downloads fire in a row.
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+}
+
+/**
+ * Filename for a downloaded slide. Extension comes from the blob's MIME
+ * type (`image/jpeg` → `jpeg`, `video/mp4; codecs=…` → `mp4`), falling back
+ * to png / mp4 by kind. With `slide` set (1-based) the name is numbered
+ * and zero-padded to the carousel's size so the files sort in post order
+ * in a file picker (`slide-01.png` … `slide-10.png`). Exported for tests.
+ */
+export function mediaFilename(
+  mimeType: string,
+  kind: "image" | "video",
+  slide?: { n: number; total: number },
+): string {
+  const fallbackExt = kind === "video" ? "mp4" : "png";
+  const sub = (mimeType.split("/")[1] ?? "").split(";")[0].trim();
+  const ext = sub && /^[a-z0-9.+-]+$/i.test(sub) ? sub : fallbackExt;
+  if (!slide) return `${kind}.${ext}`;
+  const width = Math.max(2, String(slide.total).length);
+  return `slide-${String(slide.n).padStart(width, "0")}.${ext}`;
 }
 
 /** Parse the bucket-relative S3 key out of a presigned GetObject URL. Used

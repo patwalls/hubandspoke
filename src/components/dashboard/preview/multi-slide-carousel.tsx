@@ -1,9 +1,22 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { ChevronLeftIcon, ChevronRightIcon, PlayIcon } from "lucide-react";
+import {
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  DownloadIcon,
+  Loader2Icon,
+  PlayIcon,
+} from "lucide-react";
+import { toast } from "sonner";
+import { trackUsage } from "@/lib/usage/track";
 import { PlaceholderSlideRender } from "./draft-media-dropzone";
-import { MediaActions } from "./media-actions";
+import {
+  fetchMediaBlob,
+  mediaFilename,
+  MediaActions,
+  saveBlob,
+} from "./media-actions";
 
 /**
  * Shared multi-slide carousel for preview simulators.
@@ -78,7 +91,7 @@ export function MultiSlideCarousel({
   }
 
   return (
-    <div className="relative h-full w-full">
+    <div className="group/carousel relative h-full w-full">
       <div
         ref={scrollerRef}
         tabIndex={total > 1 ? 0 : -1}
@@ -140,8 +153,11 @@ export function MultiSlideCarousel({
 
       {total > 1 && (
         <>
-          <div className="pointer-events-none absolute right-2 top-2 rounded-full bg-black/60 px-2 py-0.5 text-[11px] font-medium text-white tabular-nums">
-            {index + 1}/{total}
+          <div className="absolute right-2 top-2 z-10 flex items-center gap-1">
+            <DownloadAllSlides slides={enrichedSlides} />
+            <div className="pointer-events-none rounded-full bg-black/60 px-2 py-0.5 text-[11px] font-medium text-white tabular-nums">
+              {index + 1}/{total}
+            </div>
           </div>
           {/* IG-style prev / next chevrons — small white-glassy pill,
            *  always visible (Instagram web shows them this way too).
@@ -183,6 +199,69 @@ export function MultiSlideCarousel({
         </>
       )}
     </div>
+  );
+}
+
+/**
+ * "Download all" for a carousel: saves every slide as its own numbered file
+ * (`slide-01.png` …) so whoever publishes natively can multi-select them in
+ * Instagram's / LinkedIn's upload picker in post order, instead of hovering
+ * and downloading slide by slide. Separate files, not a zip — upload pickers
+ * take files, and a zip is one more step. Downloads run one after another
+ * (Chrome asks once per site to allow several downloads). Revealed on hover
+ * like the per-slide buttons; renders nothing under two ready slides.
+ * Mark: `media:download-all`.
+ */
+function DownloadAllSlides({ slides }: { slides: CarouselSlide[] }) {
+  const [busy, setBusy] = useState(false);
+  const ready = slides.flatMap((s) =>
+    s.slide.url ? [{ url: s.slide.url, kind: s.slide.kind }] : [],
+  );
+  if (ready.length < 2) return null;
+
+  async function handleClick(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (busy) return;
+    setBusy(true);
+    trackUsage("media:download-all");
+    let failed = 0;
+    for (const [i, s] of ready.entries()) {
+      try {
+        const blob = await fetchMediaBlob(s.url);
+        saveBlob(
+          blob,
+          mediaFilename(blob.type, s.kind, { n: i + 1, total: ready.length }),
+        );
+      } catch {
+        failed += 1;
+      }
+    }
+    setBusy(false);
+    if (failed > 0) {
+      toast.error(
+        `${failed} of ${ready.length} slides didn't download — try those one at a time`,
+      );
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={(e) => void handleClick(e)}
+      disabled={busy}
+      title="Download every slide, numbered in post order"
+      aria-label={`Download all ${ready.length} slides`}
+      className={`inline-flex items-center gap-1 rounded-full bg-black/60 px-2 py-0.5 text-[11px] font-medium text-white transition-opacity hover:bg-black/75 focus-visible:opacity-100 group-hover/carousel:opacity-100 ${
+        busy ? "opacity-100" : "opacity-0"
+      }`}
+    >
+      {busy ? (
+        <Loader2Icon className="h-3 w-3 animate-spin" />
+      ) : (
+        <DownloadIcon className="h-3 w-3" />
+      )}
+      All {ready.length}
+    </button>
   );
 }
 
