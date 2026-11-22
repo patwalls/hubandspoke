@@ -3,6 +3,7 @@
 import { ImagePlusIcon } from "lucide-react";
 import { MonogramAvatar } from "../avatar";
 import { EditableField } from "../editable-field";
+import { CopyTextButton } from "../copy-text-button";
 import { readLive, type SimulatorProps } from "../simulator-types";
 import { formatFeedTime } from "../resolve-preview-data";
 import { PLATFORM_FONT } from "../platform-tokens";
@@ -100,6 +101,7 @@ export function YouTubeCommunitySimulator({
                 className="text-[14px] leading-[1.45]"
               />
             </div>
+            <CopyTextButton value={body} label="Copy post" title="Copy the post to paste into the Community tab" className="mt-0" />
 
             {showMediaSlot && totalSlides > 1 ? (
               // 2-4 photos. Multi-image Community posts swipe horizontally

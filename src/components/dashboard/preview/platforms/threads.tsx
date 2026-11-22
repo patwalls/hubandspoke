@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { MonogramAvatar } from "../avatar";
 import { VerifiedBadge } from "../verified-badge";
 import { EditableField } from "../editable-field";
+import { CopyTextButton } from "../copy-text-button";
 import { readLive, type SimulatorProps } from "../simulator-types";
 import { formatFeedTime } from "../resolve-preview-data";
 import { PLATFORM_FONT } from "../platform-tokens";
@@ -79,6 +80,7 @@ export function ThreadsSimulator({
               className="text-[15px] leading-[1.4]"
             />
           </div>
+          <CopyTextButton value={post} label="Copy post" title="Copy the post to paste into Threads" />
 
           {firstSlide && firstSlide.url && (
             <div className="group relative mt-3 overflow-hidden rounded-[12px] border border-[#e5e5e5] bg-black">

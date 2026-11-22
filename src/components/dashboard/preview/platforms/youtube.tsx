@@ -3,6 +3,7 @@
 import { PlayIcon } from "lucide-react";
 import { MonogramAvatar } from "../avatar";
 import { EditableField } from "../editable-field";
+import { CopyTextButton } from "../copy-text-button";
 import { readLive, type SimulatorProps } from "../simulator-types";
 
 export function YouTubeSimulator({
@@ -69,6 +70,7 @@ export function YouTubeSimulator({
               className="text-base font-semibold leading-snug"
             />
           </div>
+          <CopyTextButton value={title} label="Copy title" mark="content:title-copied" title="Copy the title to paste into YouTube Studio" className="mt-0.5" />
           <div className="mt-1 text-xs text-muted-foreground">
             {displayName}
             {data.author.followerCount != null && (
@@ -90,6 +92,7 @@ export function YouTubeSimulator({
               className="text-xs leading-snug text-foreground"
             />
           </div>
+          <CopyTextButton value={description} label="Copy description" title="Copy the description to paste into YouTube Studio" />
         </div>
       </div>
     </div>
