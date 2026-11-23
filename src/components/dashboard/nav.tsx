@@ -8,6 +8,8 @@ import { OPEN_WHATS_NEW_EVENT } from "@/components/dashboard/whats-new-dialog";
 import { READY_CHANGED_EVENT } from "@/lib/publish/events";
 import { Check, ChevronDown, LayoutGrid, GraduationCap, SearchIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { brandSwitchHref } from "@/lib/brand-switch-href";
+import { trackUsage } from "@/lib/usage/track";
 import { NotificationBell } from "@/components/notifications/notification-bell";
 import { MyWorkButton } from "@/components/my-work/my-work-button";
 import { GlobalSearch } from "@/components/dashboard/global-search";
@@ -133,6 +135,8 @@ type NavProps = {
   userAvatarUrl?: string | null;
   brands: Brand[];
   defaultBrand: string;
+  /** Flag `brandSwitchKeepsSection`: a brand chip keeps you on the same list page. */
+  keepSectionOnBrandSwitch?: boolean;
 };
 
 export function DashboardNav({
@@ -141,11 +145,20 @@ export function DashboardNav({
   userAvatarUrl = null,
   brands,
   defaultBrand,
+  keepSectionOnBrandSwitch = false,
 }: NavProps) {
   const pathname = usePathname();
   const router = useRouter();
   const currentBrand = getBrandFromPath(pathname, brands, defaultBrand);
-  const isOnFormats = pathname.endsWith("/formats");
+  const brandHref = (slug: string) =>
+    brandSwitchHref(pathname, slug, keepSectionOnBrandSwitch);
+  // Measure the carried-over switches (flag on, landing somewhere other than
+  // the dashboard): nav:brand-switch:<section>.
+  const markBrandSwitch = (href: string) => {
+    if (!keepSectionOnBrandSwitch) return;
+    const section = href.split("/")[2];
+    if (section) trackUsage(`nav:brand-switch:${section}`);
+  };
   const [searchOpen, setSearchOpen] = useState(false);
 
   useEffect(() => {
@@ -201,8 +214,6 @@ export function DashboardNav({
             <div className="flex items-center gap-1 min-w-0 overflow-x-auto thin-scrollbar">
               {brands.filter((b) => !b.parent).map((brand) => {
                 const isActive = currentBrand === brand.slug;
-                const hrefFor = (slug: string) =>
-                  isOnFormats ? `/${slug}/formats` : `/${slug}`;
                 const family = brands.filter(
                   (b) => b.parent === brand.slug && !b.disabled
                 );
@@ -231,7 +242,11 @@ export function DashboardNav({
                         {members.map((m) => (
                           <DropdownMenuItem
                             key={m.slug}
-                            onClick={() => router.push(hrefFor(m.slug))}
+                            onClick={() => {
+                              const to = brandHref(m.slug);
+                              markBrandSwitch(to);
+                              router.push(to);
+                            }}
                             className="cursor-pointer gap-2"
                           >
                             <BrandAvatar brand={m} />
@@ -247,12 +262,7 @@ export function DashboardNav({
                 }
                 // "all" only has a home — Formats/Accounts/etc. don't exist
                 // there, so collapse any cross-section navigation back to /all.
-                const href =
-                  brand.slug === "all"
-                    ? "/all"
-                    : isOnFormats
-                      ? `/${brand.slug}/formats`
-                      : `/${brand.slug}`;
+                const href = brandHref(brand.slug);
 
                 if (brand.disabled) {
                   return (
@@ -274,6 +284,7 @@ export function DashboardNav({
                   <Link
                     key={brand.slug}
                     href={href}
+                    onClick={() => markBrandSwitch(href)}
                     title={brand.label}
                     aria-current={isActive ? "page" : undefined}
                     className={cn(
