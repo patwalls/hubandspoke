@@ -36,9 +36,10 @@ export async function GET(request: NextRequest) {
   const brands = await getEnabledBrands();
 
   // `?only=production` — the after-edit re-warm (src/lib/report-rewarm.ts):
-  // rebuild both production-report keys — In Production's (excludeIdea=true)
-  // and the queue's (excludeIdea=false; until 2026-11-17 only the first, so
-  // every queue open after an edit computed it cold, p95 4.8 s) — for the
+  // rebuild both production-report keys — In Production's (`no-ideas`)
+  // and the queue's default view (`recent-ideas`; until 2026-11-17 only the
+  // first, so every queue open after an edit computed it cold, p95 4.8 s;
+  // until 2026-11-23 the queue key was the full `all` report) — for the
   // brands the edits expired (`&brands=a,b`; without it, every brand).
   // Sequential, one connection; In Production first (the busier screen).
   if (request.nextUrl.searchParams.get("only") === "production") {
@@ -48,12 +49,12 @@ export async function GET(request: NextRequest) {
     const only = request.nextUrl.searchParams.get("brands");
     const wanted = only ? new Set(only.split(",")) : null;
     const slugs = brands.map((x) => x.slug).filter((b) => !wanted || wanted.has(b));
-    for (const excludeIdea of [true, false]) {
+    for (const scope of ["no-ideas", "recent-ideas"] as const) {
       for (const b of slugs) {
-        const key = `production${excludeIdea ? "-no-ideas" : ""}:${b}`;
+        const key = `production:${scope}:${b}`;
         const t = Date.now();
         try {
-          await getProductionReportCached(b, excludeIdea);
+          await getProductionReportCached(b, scope);
           timings[key] = Date.now() - t;
         } catch {
           timings[key] = -1;
@@ -90,18 +91,19 @@ export async function GET(request: NextRequest) {
       timings[`report:${b}`] = -1;
     }
   }
-  // Production-pipeline report, both keys people load: the queue page SSRs
-  // the full one (excludeIdea=false), the In Production list fetches it
-  // without Ideas (excludeIdea=true). 1.5-2.7s cold each.
+  // Production-pipeline report, both keys people load by default: the queue
+  // page's "Last 30 days" view SSRs `recent-ideas` (since 2026-11-23; the
+  // full `all` report is now only for its Older / Any age views, built on
+  // demand), the In Production list fetches `no-ideas`. 1.5-2.7s cold each.
   for (const b of brands.map((x) => x.slug)) {
-    for (const excludeIdea of [false, true]) {
-      const key = `production${excludeIdea ? "-no-ideas" : ""}:${b}`;
+    for (const scope of ["recent-ideas", "no-ideas"] as const) {
+      const key = `production:${scope}:${b}`;
       const t = Date.now();
       try {
         const { getProductionReportCached } = await import(
           "@/lib/services/production-report"
         );
-        await getProductionReportCached(b, excludeIdea);
+        await getProductionReportCached(b, scope);
         timings[key] = Date.now() - t;
       } catch {
         timings[key] = -1;

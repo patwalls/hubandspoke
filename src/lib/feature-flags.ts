@@ -146,6 +146,10 @@ const FLAGS = {
   queueRecentOnly: {
     emails: ["patrickswalls@gmail.com", "e2e@local.test"],
     envVar: "FEATURE_QUEUE_RECENT_ONLY_EMAILS",
+    // Graduated 2026-11-23: no errors since #235, and the default view shows
+    // the same rows either way (the queue page was the top wait in sentry-tx,
+    // p95 6 s). /api/warm now warms `recent-ideas` instead of `all`.
+    everyone: true,
   },
   /**
    * Nav brand chips keep you on the same list page: switching brand from
