@@ -450,7 +450,7 @@ export function PublishScheduleDialog({
         {mode === "publish" && !isAlreadyPublished && openNext && onOpenNext && (
           <label
             data-testid="publish-open-next"
-            className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground"
+            className="flex min-w-0 cursor-pointer items-center gap-2 text-xs text-muted-foreground"
           >
             <input
               type="checkbox"
