@@ -497,8 +497,17 @@ change pool sizes.
 
 ## CI & Dependabot
 
-`.github/workflows/ci.yml` runs one job, **`build`**: `npm ci` → `tsc --noEmit`
+`.forgejo/workflows/ci.yml` runs one job, **`build`**: `npm ci` → `tsc --noEmit`
 → `npm run test:unit` → `npm run build`, on every PR and every push to `main`.
+
+- **It runs on our own forge, not GitHub** (2026-11-23). GitHub locked Actions
+  over billing on 2026-11-19 and we are not unlocking it
+  (`~/code/cockpit/docs/forge.md`). GitHub only reads `.github/workflows/`, so
+  nothing CI-shaped lives there anymore and a push no longer sends "CI failed"
+  emails. Forgejo reads `.forgejo/workflows/` (and ignores `.github/` once that
+  folder exists). Never add a workflow under `.github/workflows/`.
+  `loop-auto-merge.yml` stays there only because the forge bridge reads its
+  gate (prefixes, cap, held paths) from that path; it never runs anywhere.
 It needs no secrets (source-map upload is disabled in `next.config.ts` —
 errors go to the self-hosted GlitchTip), so Dependabot and fork PRs run it too.
 
@@ -535,21 +544,21 @@ errors go to the self-hosted GlitchTip), so Dependabot and fork PRs run it too.
   ecosystem (npm minor+patch, github-actions minor+patch), with a 7-day
   release cooldown on npm version updates. Security updates are grouped too
   and skip the cooldown. Majors come as individual PRs.
-- **Auto-merge** (`dependabot-auto-merge.yml`) arms `gh pr merge --auto
-  --squash` on grouped, non-major Dependabot PRs. GitHub only merges once
-  `build` passes; the merge to `main` then deploys through Heroku's GitHub
-  integration like any other push. A red build leaves the PR open for a human.
+- **No Dependabot auto-merge** since 2026-11-23: `dependabot-auto-merge.yml`
+  was GitHub Actions and is deleted. A Dependabot PR is a human merge (test it
+  locally, then `gh pr merge --squash`).
 - **Loop PRs auto-merge** (`loop-auto-merge.yml`, 2026-10-14). Two ways code
   reaches `main`:
   - *Interactive session, Pat asking for a fix* → push straight to `main`.
   - *Autonomous loop* → never pushes `main`. It commits on an `app-loop/<slug>`
     branch and runs `ship web hubandspoke` (the ship broker pushes the branch
-    and opens the PR). The workflow arms `gh pr merge --auto --squash` pinned to
-    the head SHA; GitHub merges once `build` is green, and the merge deploys.
-    Red = the PR stays open. Veto: close it or label it `hold` (disarms).
-  It runs on `pull_request_target`, i.e. from `main`'s copy of the file, so a
-  PR can't loosen its own gate; it never checks out PR code. Any PR touching
-  `.github/` is left for a human, since it could rewrite what `build` checks.
+    and opens the PR). The forge bridge (`loops forge bridge`) runs `build` on
+    the forge and merges the GitHub PR, pinned to the head SHA, once it is
+    green; the merge deploys. Red = the PR stays open. Veto: close it or label
+    it `hold`.
+  The bridge reads the gate from `main`'s copy of `loop-auto-merge.yml`, so a
+  PR can't loosen its own gate. Any PR touching `.github/` or `.forgejo/` is
+  left for a human, since it could rewrite what `build` checks.
   So is one over 600 changed lines — counted without `drizzle/meta/*.json`
   (drizzle's generated snapshot + journal, ~7k lines per schema change), so a
   loop PR with a migration still merges itself; the `drizzle/*.sql` counts.

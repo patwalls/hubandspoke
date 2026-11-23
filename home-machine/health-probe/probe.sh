@@ -16,7 +16,7 @@
 # requires two consecutive red ticks (10 min) before firing, tracked in
 # $STATE_DIR. Network failure on this Mac is treated as "unknown", not red.
 #
-# Companion: .github/workflows/health-monitor.yml runs the same checks from
+# Companion: .forgejo/workflows/health-monitor.yml runs the same checks from
 # GitHub so an outage of this Mac doesn't blind us. Install/verify with
 # home-machine/health-probe/install.sh; home-machine/up.sh reports on it.
 # ─────────────────────────────────────────────────────────────────────────────

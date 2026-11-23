@@ -1,7 +1,10 @@
-# The `build` job is the required status check on `main` (repository ruleset
-# "main: require build"). Renaming the job renames the check — update the
-# ruleset in the same change or every PR blocks forever. See docs/conventions.md
-# → CI & Dependabot.
+# Runs on our own forge (Forgejo on closet-cloud), never on GitHub: GitHub
+# Actions is locked and only reads .github/workflows. Forgejo prefers
+# .forgejo/workflows, so this file is the one it runs. The forge bridge
+# (cockpit lib/loopsctl/forge.py) posts the result to GitHub as the `build`
+# status the repo ruleset "main: require build" and loop-auto-merge.yml wait
+# on. Renaming the job renames the check — update both in the same change.
+# See docs/conventions.md → CI & Dependabot.
 name: CI
 
 on:

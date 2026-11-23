@@ -7,7 +7,7 @@ import { evaluateQueueHealth, loadQueueHealthRows } from "@/lib/services/queue-h
  * actually flowing": no due job waiting > 15 min, no lock held by a dead
  * pool > 5 min, no clip render stalled. 503 + `reasons` otherwise.
  *
- * Polled by `.github/workflows/health-monitor.yml` (every 5 min, off
+ * Polled by `.forgejo/workflows/health-monitor.yml` (every 5 min, off
  * Heroku) and the home-Mac probe (`home-machine/health-probe/`), and read
  * by the ops lap. Unauthenticated by design — middleware.ts `isHealthApi`
  * bypass; the body names queues, pool ids and render ids, nothing secret.

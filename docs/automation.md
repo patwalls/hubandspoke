@@ -2602,12 +2602,12 @@ A live worker's own long lock (a 20-minute render) is *not* red.
 
 **External monitors (both poll `/api/health/worker` + `/api/health/queue`):**
 
-- **`.github/workflows/health-monitor.yml`** — every 5 min from GitHub (so it
-  survives anything on Heroku or at home). A red probe fails the run (GitHub
-  emails the repo owner) and opens/updates one issue labelled
-  `health-monitor` with the response bodies; it closes the issue itself when
-  green. GitHub's cron can slip 10–20 min — this is the independent path,
-  not the fast one.
+- **`.forgejo/workflows/health-monitor.yml`** — every 5 min on our forge
+  (closet-cloud, so it survives anything on Heroku or at home; moved off
+  GitHub Actions 2026-11-23). A red probe fails the run; its step that
+  opens/updates the `health-monitor` GitHub issue can't reach GitHub from the
+  forge, so the run's red/green is the signal (`~/code/cockpit/docs/forge.md`
+  → Known gaps). This is the independent path, not the fast one.
 - **Home-Mac probe** — `home-machine/health-probe/probe.sh`, launchd
   `com.hubandspoke.health-probe` every 300 s (install/verify:
   `home-machine/health-probe/install.sh`; log

@@ -28,9 +28,9 @@ Standalone content reporting dashboard carved out from the Starter Story Rails a
 - HubSpot transactional SMTP for email (smtp.hubapi.com, same token pair as Starter Story)
 - Graphile Worker (Postgres-backed background job queue)
 - Deployed on Heroku (auto-deploy on push to `main` via Heroku's GitHub integration)
-  - CI (`.github/workflows/ci.yml`): `build` = typecheck + unit tests + `next build`; required to merge PRs, bypassed by direct pushes. Grouped Dependabot minor/patch PRs and loop `app-loop/*` PRs (opened via `ship web hubandspoke`) auto-merge when green; interactive fixes Pat asks for push straight to `main`, typechecked first by `.githooks/pre-push` (installed by `npm install`) — see `docs/conventions.md` → CI & Dependabot
+  - CI runs on our own forge, never GitHub Actions (locked since 2026-11-19; `~/code/cockpit/docs/forge.md`). `.forgejo/workflows/ci.yml`: `build` = typecheck + unit tests + `next build`; required to merge PRs, bypassed by direct pushes. Loop `app-loop/*` PRs (opened via `ship web hubandspoke`) are tested on the forge and merged by the forge bridge when green; interactive fixes Pat asks for push straight to `main`, typechecked first by `.githooks/pre-push` (installed by `npm install`) — see `docs/conventions.md` → CI & Dependabot
   - Two dynos: `web` (Standard-1X, 512 MB) + `worker` (Standard-2X, 1 GB) — see `Procfile`
-  - Health: `GET /api/health/worker` (process alive) and `GET /api/health/queue` (work moving); both public, both polled every 5 min by `.github/workflows/health-monitor.yml` and the home-Mac launchd probe. Logs drain to the Papertrail add-on (free plan). See `docs/automation.md` → Queue health and lock reconciliation
+  - Health: `GET /api/health/worker` (process alive) and `GET /api/health/queue` (work moving); both public, both polled every 5 min by `.forgejo/workflows/health-monitor.yml` (on the forge) and the home-Mac launchd probe. Logs drain to the Papertrail add-on (free plan). See `docs/automation.md` → Queue health and lock reconciliation
 
 ## Development
 - `npm run dev` - Start dev server (main worktree uses port 3000)
