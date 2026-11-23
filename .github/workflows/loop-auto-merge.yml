@@ -35,7 +35,7 @@ concurrency:
 jobs:
   auto-merge:
     if: github.repository == 'patwalls/hubandspoke'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, merge]
     timeout-minutes: 40
     steps:
       - name: Find the loop PR behind this event
