@@ -14,6 +14,7 @@ import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { getBrands, getDefaultBrandSlug } from "@/lib/db/brands";
 import { editableBrandSlugs } from "@/lib/brand-access";
+import { isFeatureEnabled } from "@/lib/feature-flags";
 import { BrandAccessProvider } from "@/components/brand-access";
 import { ServerTodayProvider } from "@/lib/hooks/use-today";
 import { hrefFor, needsOpenedScreens, popupFor, visibleTo, type WhatsNewEntry, type WhatsNewViewer } from "@/lib/whats-new";
@@ -126,6 +127,7 @@ export default async function DashboardLayout({
         userAvatarUrl={userRow?.avatarUrl ?? null}
         brands={brands}
         defaultBrand={defaultBrand}
+        keepSectionOnBrandSwitch={isFeatureEnabled("brandSwitchKeepsSection", session.user)}
       />
       <main className="max-w-[1600px] mx-auto px-4 sm:px-6 py-4 sm:py-6">
         <div className="mb-4 sm:mb-6">

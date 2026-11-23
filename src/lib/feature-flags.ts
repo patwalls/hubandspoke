@@ -135,6 +135,17 @@ const FLAGS = {
     emails: ["patrickswalls@gmail.com", "e2e@local.test"],
     envVar: "FEATURE_QUEUE_CLEAR_OLDER_EMAILS",
   },
+  /**
+   * Nav brand chips keep you on the same list page: switching brand from
+   * In Production lands on the other brand's In Production (Content, Queue,
+   * Scheduled, Publish, Formats, Accounts likewise) instead of its dashboard.
+   * Pat-first 2026-11-23 — it changes where a daily click lands. Nav-only, so
+   * no route needs `requireFeature`. See src/lib/brand-switch-href.ts.
+   */
+  brandSwitchKeepsSection: {
+    emails: ["patrickswalls@gmail.com", "e2e@local.test"],
+    envVar: "FEATURE_BRAND_SWITCH_KEEPS_SECTION_EMAILS",
+  },
   crossPostUsualEditor: {
     emails: ["patrickswalls@gmail.com", "e2e@local.test"],
     envVar: "FEATURE_CROSS_POST_USUAL_EDITOR_EMAILS",
