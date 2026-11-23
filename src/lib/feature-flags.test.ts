@@ -76,7 +76,7 @@ describe("resolveFeatureFlags", () => {
       queueAge: true,
       queueClearOlder: false,
       queueRecentOnly: false,
-      brandSwitchKeepsSection: false,
+      brandSwitchKeepsSection: true,
       winnersEmail: false,
       myWorkDigest: true,
       crossPostUsualEditor: true,

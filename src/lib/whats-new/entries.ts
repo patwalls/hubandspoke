@@ -43,6 +43,16 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-11-23-brand-switch-keeps-section",
+    shippedAt: "2026-11-23T11:57:33Z",
+    kind: "feature",
+    title: "Switching brand keeps you on the same page",
+    body: "On In Production, Content, the Queue or Accounts, picking another brand at the top now opens that brand's same page instead of its dashboard. From a post or the dashboard it still goes to the brand's dashboard.",
+    href: "/[brand]/production",
+    screen: "nav:brand-switch:production",
+    audience: { usersOf: ["/[brand]/production", "/[brand]/content", "/[brand]/queue", "/[brand]/accounts"] },
+  },
+  {
     id: "2026-11-22-queue-age",
     shippedAt: "2026-11-22T23:02:52Z",
     kind: "feature",

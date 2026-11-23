@@ -157,6 +157,10 @@ const FLAGS = {
   brandSwitchKeepsSection: {
     emails: ["patrickswalls@gmail.com", "e2e@local.test"],
     envVar: "FEATURE_BRAND_SWITCH_KEEPS_SECTION_EMAILS",
+    // Graduated 2026-11-23 (no errors; in 21 d of brand switches from a list
+    // page, the next click went back to the same section 22 times vs 2 stays
+    // on the dashboard). The allowlist stays so flipping back restores it.
+    everyone: true,
   },
   crossPostUsualEditor: {
     emails: ["patrickswalls@gmail.com", "e2e@local.test"],
