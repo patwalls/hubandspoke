@@ -1,14 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
-// The boot warmer must fill every production-report key a person loads:
-// the queue page SSRs excludeIdea=false, the In Production list fetches
-// excludeIdea=true. Only the first was warmed, so the busier screen paid the
-// cold report (1.5-6 s) after every deploy.
-const productionReport = vi.fn(async (_brand: string, _excludeIdea: boolean) => ({ items: [] }));
+// The boot warmer must fill every production-report key a person loads by
+// default: the queue page's "Last 30 days" view SSRs `recent-ideas`, the In
+// Production list fetches `no-ideas`. Only the first was warmed once, so the
+// busier screen paid the cold report (1.5-6 s) after every deploy; and until
+// queueRecentOnly graduated (2026-11-23) the queue key warmed was the full
+// `all` report, which nobody's default view loads any more.
+const productionReport = vi.fn(async (_brand: string, _scope: unknown) => ({ items: [] }));
 
 vi.mock("@/lib/services/production-report", () => ({
-  getProductionReportCached: (brand: string, excludeIdea: boolean) => productionReport(brand, excludeIdea),
+  getProductionReportCached: (brand: string, scope: unknown) => productionReport(brand, scope),
 }));
 vi.mock("@/lib/db/queries-cached", () => ({ getContentReportCached: async () => ({}) }));
 vi.mock("@/lib/services/sc-credits-watch", () => ({ getScCreditsExhaustionState: async () => ({}) }));
@@ -35,10 +37,10 @@ describe("GET /api/warm", () => {
     expect(res.status).toBe(200);
     const calls = productionReport.mock.calls.map(([b, x]) => `${b}:${x}`).sort();
     expect(calls).toEqual([
-      "my-first-million:false",
-      "my-first-million:true",
-      "starter-story:false",
-      "starter-story:true",
+      "my-first-million:no-ideas",
+      "my-first-million:recent-ideas",
+      "starter-story:no-ideas",
+      "starter-story:recent-ideas",
     ]);
   });
 
@@ -52,10 +54,10 @@ describe("GET /api/warm", () => {
     expect(res.status).toBe(200);
     const calls = productionReport.mock.calls.map(([b, x]) => `${b}:${x}`).sort();
     expect(calls).toEqual([
-      "my-first-million:false",
-      "my-first-million:true",
-      "starter-story:false",
-      "starter-story:true",
+      "my-first-million:no-ideas",
+      "my-first-million:recent-ideas",
+      "starter-story:no-ideas",
+      "starter-story:recent-ideas",
     ]);
   });
 
@@ -69,7 +71,7 @@ describe("GET /api/warm", () => {
     expect(res.status).toBe(200);
     const calls = productionReport.mock.calls.map(([b, x]) => `${b}:${x}`);
     // In Production's key first (the busier screen), then the queue's.
-    expect(calls).toEqual(["my-first-million:true", "my-first-million:false"]);
+    expect(calls).toEqual(["my-first-million:no-ideas", "my-first-million:recent-ideas"]);
   });
 
   it("?only=production without the secret is a 401 noop", async () => {

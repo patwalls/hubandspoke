@@ -75,7 +75,7 @@ describe("resolveFeatureFlags", () => {
       newsletterTemplateAdmin: false,
       queueAge: true,
       queueClearOlder: false,
-      queueRecentOnly: false,
+      queueRecentOnly: true,
       brandSwitchKeepsSection: true,
       winnersEmail: false,
       myWorkDigest: true,
