@@ -51,6 +51,7 @@ import {
   clipSections,
   contentComments,
   contentDrafts,
+  contentEvents,
   descriptLayoutPacks,
   designDocs,
   designFrames,
@@ -1016,4 +1017,26 @@ export async function createTestApiKey(opts: {
     .returning();
   trackCleanup("apiKeys", row.id);
   return { key, row };
+}
+
+/**
+ * A content_events row on a test item (cascade-deleted with the item, so no
+ * cleanup tracking). Defaults to a `content_changed` edit made now.
+ */
+export async function createTestContentEvent(opts: {
+  contentItemId: string;
+  eventType?: string;
+  payload?: Record<string, unknown>;
+  createdAt?: Date;
+}) {
+  const [row] = await db
+    .insert(contentEvents)
+    .values({
+      contentItemId: opts.contentItemId,
+      eventType: opts.eventType ?? "content_changed",
+      payload: (opts.payload ?? { type: "content_changed", field: "title" }) as never,
+      ...(opts.createdAt ? { createdAt: opts.createdAt } : {}),
+    })
+    .returning();
+  return row;
 }

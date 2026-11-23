@@ -1,6 +1,7 @@
 import { compressedCacheParts } from "@/lib/compressed-cache";
 import { createLastGood } from "@/lib/last-good";
-import { getProductionPipeline } from "@/lib/db/queries";
+import { countOlderIdeasByFormat, getProductionPipeline, type OlderIdeaCounts } from "@/lib/db/queries";
+import { queueAgeCutoff } from "@/lib/queue-age";
 import {
   buildViewPredictorContext,
   predictViews,
@@ -46,9 +47,32 @@ function timed<T>(name: string, fn: () => Promise<T>): Promise<T> {
  * brand outgrew Next's 2 MB ceiling on 2026-11-07 (2.4 MB raw, see
  * lib/compressed-cache.ts).
  */
-export async function computeProductionReport(brand: string, excludeIdea: boolean) {
-    const [items, ctx, odds] = await Promise.all([
-      timed("pipeline", () => getProductionPipeline(brand, { excludeIdea })),
+/**
+ * Which rows a report holds. `all` = every in-flight row (the queue's Older /
+ * Any age views); `no-ideas` = In Production (`excludeIdea`); `recent-ideas` =
+ * the queue's default "Last 30 days" view (flag `queueRecentOnly`): Idea rows
+ * older than 30 days stay in the DB and arrive only as counts — the busiest
+ * brand had ~3,200 of them in a ~3,400-row payload (clip-ideas-backlog M3).
+ * `false`/`true` are the old `excludeIdea` booleans.
+ */
+export type ProductionReportScope = "all" | "no-ideas" | "recent-ideas";
+
+export function reportScope(scope: ProductionReportScope | boolean): ProductionReportScope {
+  if (scope === true) return "no-ideas";
+  if (scope === false) return "all";
+  return scope;
+}
+
+export async function computeProductionReport(
+  brand: string,
+  scopeIn: ProductionReportScope | boolean,
+  now: number = Date.now(),
+): Promise<{ items: Awaited<ReturnType<typeof getProductionPipeline>>; olderIdeas?: OlderIdeaCounts }> {
+    const scope = reportScope(scopeIn);
+    const excludeIdea = scope === "no-ideas";
+    const ideasSince = scope === "recent-ideas" ? queueAgeCutoff(now) : undefined;
+    const [items, ctx, odds, olderIdeas] = await Promise.all([
+      timed("pipeline", () => getProductionPipeline(brand, { excludeIdea, ideasSince })),
       predictorMemo.get(brand, () => timed("view-predictor", () => buildViewPredictorContext(brand))),
       // Fail-soft: the queue still renders without the odds chip.
       oddsMemo
@@ -57,6 +81,7 @@ export async function computeProductionReport(brand: string, excludeIdea: boolea
           console.warn(`[production-report] clip odds failed: ${err instanceof Error ? err.message : err}`);
           return new Map<string, FormatOdds>();
         }),
+      ideasSince ? timed("older-ideas", () => countOlderIdeasByFormat(brand, ideasSince)) : undefined,
     ]);
     // Every unpublished row shows the history-based prediction (medians of
     // real views: same pillar, same format + platform, … with a p25–p75
@@ -88,7 +113,7 @@ export async function computeProductionReport(brand: string, excludeIdea: boolea
           : undefined;
       return clipOdds === undefined ? { ...item, prediction } : { ...item, prediction, clipOdds };
     });
-    return { items: withPredictions };
+    return olderIdeas ? { items: withPredictions, olderIdeas } : { items: withPredictions };
 }
 
 type ProductionReport = Awaited<ReturnType<typeof computeProductionReport>>;
@@ -99,7 +124,7 @@ type ProductionReport = Awaited<ReturnType<typeof computeProductionReport>>;
 // the after-edit re-warm rebuilt them one by one, so most brands sat cold
 // for most of a minute after any edit (sentry-tx p95 6 s, p50 59 ms).
 type BrandCache = ReturnType<
-  typeof compressedCacheParts<[excludeIdea: boolean], ProductionReport>
+  typeof compressedCacheParts<[scope: ProductionReportScope], ProductionReport>
 >;
 const perBrand = new Map<string, BrandCache>();
 // `brand` comes from the URL; don't let junk values grow the map forever.
@@ -109,8 +134,8 @@ function brandCache(brand: string): BrandCache {
   const hit = perBrand.get(brand);
   if (hit) return hit;
   const parts = compressedCacheParts(
-    async (excludeIdea: boolean) =>
-      timed("compute", () => computeProductionReport(brand, excludeIdea)),
+    async (scope: ProductionReportScope) =>
+      timed("compute", () => computeProductionReport(brand, scope)),
     ["production-report", brand],
     // The shared tag still expires every brand at once (writes that don't
     // say which brands they touched) — src/lib/production-report-tags.ts.
@@ -122,16 +147,17 @@ function brandCache(brand: string): BrandCache {
 
 export async function getProductionReportCached(
   brand: string,
-  excludeIdea: boolean,
+  scopeIn: ProductionReportScope | boolean,
 ): Promise<ProductionReport> {
+  const scope = reportScope(scopeIn);
   const { raw, decode } = brandCache(brand);
   // Through the last-good copy too, so /api/warm's rebuilds are what the
   // next slow read falls back to.
-  return decode(await lastGood.fresh(lastGoodKey(brand, excludeIdea), () => raw(excludeIdea)));
+  return decode(await lastGood.fresh(lastGoodKey(brand, scope), () => raw(scope)));
 }
 
-function lastGoodKey(brand: string, excludeIdea: boolean): string {
-  return `${brand}:${excludeIdea ? 1 : 0}`;
+function lastGoodKey(brand: string, scope: ProductionReportScope): string {
+  return `${brand}:${scope}`;
 }
 
 /**
@@ -151,14 +177,15 @@ const lastGood = createLastGood<string>({
 
 export async function getProductionReportFast(
   brand: string,
-  excludeIdea: boolean,
+  scopeIn: ProductionReportScope | boolean,
 ): Promise<ProductionReport & { stale?: true }> {
+  const scope = reportScope(scopeIn);
   const { raw, decode } = brandCache(brand);
-  const got = await lastGood.get(lastGoodKey(brand, excludeIdea), () => raw(excludeIdea));
+  const got = await lastGood.get(lastGoodKey(brand, scope), () => raw(scope));
   const report = await decode(got.value);
   if (!got.stale) return report;
   console.log(
-    `[production-report] served last-good brand=${brand} excludeIdea=${excludeIdea} age_s=${Math.round(got.ageMs / 1000)}`,
+    `[production-report] served last-good brand=${brand} scope=${scope} age_s=${Math.round(got.ageMs / 1000)}`,
   );
   return { ...report, stale: true };
 }
