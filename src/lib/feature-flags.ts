@@ -136,6 +136,18 @@ const FLAGS = {
     envVar: "FEATURE_QUEUE_CLEAR_OLDER_EMAILS",
   },
   /**
+   * The queue's default "Last 30 days" view loads only recent Idea rows (plus
+   * counts of the older ones) instead of every Idea row ever generated;
+   * Older / Any age fetch the full report on demand. Pat-first 2026-11-23
+   * (clip-ideas-backlog M3). Read by the queue page's SSR and the report API
+   * (`?ideas=recent` is ignored without it). See docs/features.md → "Queue
+   * age filter" and services/production-report.ts.
+   */
+  queueRecentOnly: {
+    emails: ["patrickswalls@gmail.com", "e2e@local.test"],
+    envVar: "FEATURE_QUEUE_RECENT_ONLY_EMAILS",
+  },
+  /**
    * Nav brand chips keep you on the same list page: switching brand from
    * In Production lands on the other brand's In Production (Content, Queue,
    * Scheduled, Publish, Formats, Accounts likewise) instead of its dashboard.

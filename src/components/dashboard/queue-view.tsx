@@ -35,6 +35,8 @@ import {
   QUEUE_AGE_DAYS,
   QUEUE_AGE_OPTIONS,
   isRecentIdea,
+  olderHiddenFromCounts,
+  type OlderIdeaCountsLike,
   matchesQueueAge,
   parseQueueAge,
   type QueueAge,
@@ -75,6 +77,12 @@ interface QueueViewProps {
   /** The SSR'd items are the server's last report while a rebuild runs
    *  (getProductionReportFast): swap in the fresh one a few seconds later. */
   initialStale?: boolean;
+  /** The SSR'd report is recent-only (flag `queueRecentOnly`): Idea rows from
+   *  the last 30 days, with the older ones as these counts. */
+  initialOlderIdeas?: OlderIdeaCountsLike | null;
+  /** The page resolved `queueRecentOnly` on the server — used until the
+   *  client's flags load. */
+  recentOnly?: boolean;
   initialSource: QueueSource;
   /** When initialSource is a `clip:<formatId>` value, this is the human-
    *  readable format name to filter rows by (matches `production_items.format`).
@@ -131,6 +139,8 @@ export function QueueView({
   brand,
   initialItems,
   initialStale,
+  initialOlderIdeas,
+  recentOnly,
   initialSource,
   initialClipFormatFilter = null,
   clippableFormats = [],
@@ -236,13 +246,23 @@ export function QueueView({
   const ageFilterOn = flags?.queueAge === true;
   const selectedAge: QueueAge = ageFilterOn ? parseQueueAge(rawAge) : "any";
   const [ageNow] = useState(() => Date.now());
+  // Recent-only report (flag `queueRecentOnly`, clip-ideas-backlog M3): the
+  // default "Last 30 days" view loads only recent Idea rows; Older / Any age
+  // fetch the full report. `olderIdeas` non-null = the rows on hand are
+  // recent-only and these are the counts of the rest.
+  const recentFlag = flags
+    ? flags.queueAge === true && flags.queueRecentOnly === true
+    : recentOnly === true;
+  const wantRecent = recentFlag && parseQueueAge(rawAge) === "recent";
+  const [olderIdeas, setOlderIdeas] = useState<OlderIdeaCountsLike | null>(
+    initialItems && initialOlderIdeas ? initialOlderIdeas : null
+  );
+  const reportUrl = `/api/reports/production?brand=${encodeURIComponent(brand)}${wantRecent ? "&ideas=recent" : ""}`;
 
   const fetchQueue = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(
-        `/api/reports/production?brand=${encodeURIComponent(brand)}`
-      );
+      const res = await fetch(reportUrl);
       if (!res.ok) {
         console.error(`Queue API returned HTTP ${res.status}`);
         setItems([]);
@@ -250,13 +270,24 @@ export function QueueView({
       }
       const json = await res.json();
       setItems(json.items ?? []);
+      setOlderIdeas(json.olderIdeas ?? null);
     } catch (err) {
       console.error("Failed to fetch queue:", err);
       setItems([]);
     } finally {
       setLoading(false);
     }
-  }, [brand]);
+  }, [reportUrl]);
+
+  // Rows on hand are recent-only but the view now needs every age (Older /
+  // Any age, or the flag turned off): load the full report. The other way
+  // round needs nothing — the full report is a superset.
+  const needFull = !wantRecent && olderIdeas !== null;
+  useEffect(() => {
+    // (Without SSR rows the mount effect already refetches on every URL change.)
+    if (needFull && initialItems) void fetchQueue();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [needFull]);
 
   // The three candidate lists are served from a 2-minute server cache; after
   // an action here we ask for a fresh run (`fresh=1` also resets the cache).
@@ -312,10 +343,13 @@ export function QueueView({
     let cancelled = false;
     const timer = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/reports/production?brand=${encodeURIComponent(brand)}`);
+        const res = await fetch(reportUrl);
         if (!res.ok || cancelled) return;
         const json = await res.json();
-        if (!cancelled && Array.isArray(json.items)) setItems(json.items);
+        if (!cancelled && Array.isArray(json.items)) {
+          setItems(json.items);
+          setOlderIdeas(json.olderIdeas ?? null);
+        }
       } catch {
         // keep the rows we have
       }
@@ -694,9 +728,20 @@ export function QueueView({
   // Older rows the default "Last 30 days" view leaves out of this tab — named
   // in one quiet line under the table so nothing disappears silently.
   const olderHidden =
-    selectedAge === "recent"
-      ? baseFilteredAnyAge.filter((item) => !isRecentIdea(item.createdAt, ageNow) && inSelectedTab(item)).length
-      : 0;
+    selectedAge !== "recent"
+      ? 0
+      : olderIdeas
+        ? (olderHiddenFromCounts(olderIdeas, {
+            tab:
+              selectedSource === "all"
+                ? "all"
+                : currentClipFormatName(selectedSource)
+                  ? { clipFormat: currentClipFormatName(selectedSource)! }
+                  : "other",
+            format: selectedFormat,
+            filtered: selectedPlatform !== "all" || !!query,
+          }) ?? 0)
+        : baseFilteredAnyAge.filter((item) => !isRecentIdea(item.createdAt, ageNow) && inSelectedTab(item)).length;
   // "Kill all older ideas" (flag `queueClearOlder`, src/lib/queue-clear-older.ts):
   // only on the Older view of one brand, on the All tab or a clip-format tab,
   // with no channel/search filter — so the server's scope (brand + format,

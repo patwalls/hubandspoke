@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isRecentIdea, matchesQueueAge, parseQueueAge } from "./queue-age";
+import { isRecentIdea, matchesQueueAge, olderHiddenFromCounts, parseQueueAge, queueAgeCutoff } from "./queue-age";
 
 const NOW = Date.parse("2026-11-22T12:00:00Z");
 const DAY = 24 * 60 * 60 * 1000;
@@ -31,5 +31,38 @@ describe("queue age filter", () => {
     expect(parseQueueAge("bogus")).toBe("recent");
     expect(parseQueueAge("older")).toBe("older");
     expect(parseQueueAge("any")).toBe("any");
+  });
+});
+
+describe("olderHiddenFromCounts — the recent-only report's 'N older ideas not shown'", () => {
+  const counts = {
+    total: 120,
+    byFormat: { "Podcast clip": 100, "Hot take": 15 },
+    clipByFormat: { "Podcast clip": 90 },
+  };
+
+  it("All tab: every older idea, or the filtered format's", () => {
+    expect(olderHiddenFromCounts(counts, { tab: "all", format: "all", filtered: false })).toBe(120);
+    expect(olderHiddenFromCounts(counts, { tab: "all", format: "Hot take", filtered: false })).toBe(15);
+    expect(olderHiddenFromCounts(counts, { tab: "all", format: "Nope", filtered: false })).toBe(0);
+  });
+
+  it("a clip-format tab counts only that format's clip ideas, not originals of the same format", () => {
+    const tab = { clipFormat: "Podcast clip" };
+    expect(olderHiddenFromCounts(counts, { tab, format: "all", filtered: false })).toBe(90);
+    expect(olderHiddenFromCounts(counts, { tab, format: "Hot take", filtered: false })).toBe(0);
+  });
+
+  it("names no number it can't know (channel/search filter, other tabs)", () => {
+    expect(olderHiddenFromCounts(counts, { tab: "all", format: "all", filtered: true })).toBeNull();
+    expect(olderHiddenFromCounts(counts, { tab: "other", format: "all", filtered: false })).toBeNull();
+  });
+});
+
+describe("queueAgeCutoff", () => {
+  it("is 30 days before now, the same line isRecentIdea draws", () => {
+    const cutoff = queueAgeCutoff(NOW).getTime();
+    expect(isRecentIdea(new Date(cutoff + 1000).toISOString(), NOW)).toBe(true);
+    expect(isRecentIdea(new Date(cutoff - 1000).toISOString(), NOW)).toBe(false);
   });
 });

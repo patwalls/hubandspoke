@@ -1070,11 +1070,70 @@ export async function getContentReport(
   };
 }
 
+/**
+ * An Idea row the queue's "Last 30 days" view can show: created since the
+ * cutoff, or first edited since it (the client's age is `firstEditAt ??
+ * createdAt`, lib/queue-age.ts) — a superset, so the client filter still has
+ * the final say.
+ */
+function ideaEditedSince(cutoff: Date): SQL {
+  return sql`exists (select 1 from ${contentEvents} where ${contentEvents.contentItemId} = ${productionItems.id} and ${contentEvents.eventType} = 'content_changed' and ${contentEvents.createdAt} >= ${cutoff.toISOString()}::timestamptz)`;
+}
+
+/** Older Idea rows a recent-only report left out, counted the way the queue's
+ *  tabs slice them (lib/queue-age.ts → olderHiddenFromCounts). */
+export interface OlderIdeaCounts {
+  total: number;
+  /** Every older triage Idea row, by `format` (the All tab's format filter). */
+  byFormat: Record<string, number>;
+  /** Older clip-idea rows (repurposed + source_clip_idea_id), by format (the clip tabs). */
+  clipByFormat: Record<string, number>;
+}
+
+export async function countOlderIdeasByFormat(brand: string, cutoff: Date): Promise<OlderIdeaCounts> {
+  const isClip = sql<boolean>`(${productionItems.sourceType} = 'repurposed' and ${productionItems.sourceClipIdeaId} is not null)`;
+  const rows = await db
+    .select({
+      format: productionItems.format,
+      clip: isClip,
+      n: sql<number>`count(*)::int`,
+    })
+    .from(productionItems)
+    .where(
+      and(
+        ...(brand === "all" ? [] : [eq(productionItems.brand, brand)]),
+        eq(productionItems.status, "Idea"),
+        isNull(productionItems.deletedAt),
+        // Same rows the queue's triage tabs hold (queue-view.tsx → ideaItems).
+        sql`coalesce(${productionItems.sourceType}, '') not in ('cross_post', 'repost')`,
+        sql`coalesce(${productionItems.postType}, '') <> 'youtube_long'`,
+        sql`${productionItems.createdAt} < ${cutoff.toISOString()}::timestamptz`,
+        sql`not ${ideaEditedSince(cutoff)}`
+      )
+    )
+    .groupBy(productionItems.format, isClip);
+  const out: OlderIdeaCounts = { total: 0, byFormat: {}, clipByFormat: {} };
+  for (const r of rows) {
+    const n = Number(r.n);
+    out.total += n;
+    if (!r.format) continue;
+    out.byFormat[r.format] = (out.byFormat[r.format] ?? 0) + n;
+    if (r.clip) out.clipByFormat[r.format] = (out.clipByFormat[r.format] ?? 0) + n;
+  }
+  return out;
+}
+
 export async function getProductionPipeline(
   brand: string,
-  options?: { excludeIdea?: boolean }
+  options?: {
+    excludeIdea?: boolean;
+    /** Leave out Idea rows the queue's "Last 30 days" view can't show
+     *  (created and first edited before this instant). Non-Idea rows stay. */
+    ideasSince?: Date;
+  }
 ): Promise<ProductionItem[]> {
   const editors = aliasedTable(users, "editor_user");
+  const ideasSince = options?.ideasSince;
 
   let inFlightStatuses = await resolveInFlightStatuses(brand);
   if (options?.excludeIdea) {
@@ -1155,7 +1214,16 @@ export async function getProductionPipeline(
         // entirely so /all/queue and /all/production aggregate everything.
         ...(brand === "all" ? [] : [eq(productionItems.brand, brand)]),
         inArray(productionItems.status, inFlightStatuses),
-        isNull(productionItems.deletedAt)
+        isNull(productionItems.deletedAt),
+        ...(ideasSince
+          ? [
+              or(
+                sql`${productionItems.status} <> 'Idea'`,
+                gte(productionItems.createdAt, ideasSince),
+                ideaEditedSince(ideasSince)
+              ),
+            ]
+          : [])
       )
     );
 
