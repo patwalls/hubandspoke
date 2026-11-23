@@ -4,7 +4,7 @@
 # opened from Pat's MacBook Pro. Pat vetoes by closing the PR or labelling it `hold`.
 #
 # Guard rails (Pat, 2026-10-14: "someone can't do something crazy"): a PR is left for a human when
-# it touches the gate or the supply chain (.github/, Dockerfile*, docker-compose*, deploy/,
+# it touches the gate or the supply chain (.github/, .forgejo/, Dockerfile*, docker-compose*, deploy/,
 # package.json, package-lock.json, any *.sh under scripts/ or deploy/), when it is large
 # (> 600 changed lines, not counting drizzle/meta/*.json: a schema change's generated snapshot is
 # ~7k lines, retro 2026-10-23; the migration SQL still counts), when it was not opened by Pat's
@@ -14,13 +14,15 @@
 # the next lap — .claude/settings*, hooks/, skills/, agents/, launch.json and .mcp.json. A lap can
 # commit them with git plumbing without writing the denied file; .claude/commands/ (lap.md) still
 # merges. The ship broker labels such a PR `hold` too, so this list is the second gate, not the only one.
+#
+# 2026-11-23: this file no longer RUNS anywhere. GitHub Actions is locked (and stays off), so every
+# trigger here just failed and emailed. The forge bridge (cockpit lib/loopsctl/forge.py) reads this
+# file's TEXT from main as the gate (prefixes, base, cap, held paths, the `build` check) and does the
+# merge itself. Keep the path and the shell below as they are: that is what the bridge parses.
 name: Loop auto-merge
 
 on:
-  pull_request_target:
-    types: [opened, reopened, synchronize, labeled, unlabeled]
-  check_suite:
-    types: [completed]
+  workflow_dispatch:
 
 permissions:
   contents: write

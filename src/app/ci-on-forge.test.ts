@@ -38,4 +38,11 @@ describe("CI lives on the forge, not GitHub Actions", () => {
     expect(re.test(".github/workflows/loop-auto-merge.yml")).toBe(true);
     expect(re.test("src/app/page.tsx")).toBe(false);
   });
+
+  it("the gate file never runs on GitHub by itself", () => {
+    // pull_request_target / check_suite fired on every loop PR and failed on the lock.
+    const gate = readFileSync(join(ghDir, "loop-auto-merge.yml"), "utf8");
+    const on = /^on:\n((?: {2}.*\n)+)/m.exec(gate)?.[1] ?? "";
+    expect(on.trim()).toBe("workflow_dispatch:");
+  });
 });
