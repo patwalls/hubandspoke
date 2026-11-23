@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { createContext, useContext, useState } from "react";
 import {
   CheckIcon,
   CopyIcon,
@@ -59,13 +59,14 @@ export function MediaActions({
   const [error, setError] = useState<string | null>(null);
 
   const fetchBlob = () => fetchMediaBlob(src);
+  const base = useContext(MediaFilenameBase);
 
   const onDownload = async (e: React.MouseEvent) => {
     e.stopPropagation();
     setError(null);
     try {
       const blob = await fetchBlob();
-      saveBlob(blob, filename || mediaFilename(blob.type, kind));
+      saveBlob(blob, filename || mediaFilename(blob.type, kind, undefined, base));
       trackUsage("media:download");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Download failed");
@@ -238,14 +239,51 @@ export function mediaFilename(
   mimeType: string,
   kind: "image" | "video",
   slide?: { n: number; total: number },
+  base?: string | null,
 ): string {
   const fallbackExt = kind === "video" ? "mp4" : "png";
   const sub = (mimeType.split("/")[1] ?? "").split(";")[0].trim();
   const ext = sub && /^[a-z0-9.+-]+$/i.test(sub) ? sub : fallbackExt;
-  if (!slide) return `${kind}.${ext}`;
+  if (!slide) return `${base || kind}.${ext}`;
   const width = Math.max(2, String(slide.total).length);
-  return `slide-${String(slide.n).padStart(width, "0")}.${ext}`;
+  const n = `slide-${String(slide.n).padStart(width, "0")}`;
+  return `${base ? `${base}-` : ""}${n}.${ext}`;
 }
+
+/**
+ * The file-name stem downloads from one post's preview share, so a day of
+ * native publishing doesn't leave ~/Downloads full of `video (7).mp4`:
+ * `<post-title>-<platform>` → `how-we-hit-10k-instagram-reel.mp4`,
+ * `…-slide-01.png`. Lowercase letters/digits (any script) joined by single
+ * hyphens, cut at a word boundary to stay under ~60 characters. Null when
+ * the post has no usable title — callers fall back to `video.mp4`.
+ * Exported for unit testing.
+ */
+export function mediaFilenameBase(
+  title: string | null | undefined,
+  platform?: string | null,
+): string | null {
+  const slug = (s: string) =>
+    s
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, "-")
+      .replace(/^-+|-+$/g, "");
+  let stem = slug(title ?? "");
+  if (!stem) return null;
+  if (stem.length > 60) {
+    const cut = stem.slice(0, 60);
+    const lastHyphen = cut.lastIndexOf("-");
+    stem = lastHyphen >= 20 ? cut.slice(0, lastHyphen) : cut;
+  }
+  const tail = platform ? slug(platform) : "";
+  return tail ? `${stem}-${tail}` : stem;
+}
+
+/** Set by `ContentPreview` around a post's simulator so every
+ *  `MediaActions` / "Download all" inside names its files after the post. */
+export const MediaFilenameBase = createContext<string | null>(null);
 
 /** Parse the bucket-relative S3 key out of a presigned GetObject URL. Used
  *  by the proxy fallback so MediaActions can route around CORS / blocked-

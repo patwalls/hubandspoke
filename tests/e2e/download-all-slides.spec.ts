@@ -4,9 +4,12 @@ import postgres from "postgres";
 // Publishing a carousel natively means getting every slide onto your machine
 // in post order. The post page's carousel used to offer only a per-slide
 // download on hover; it now has "All N", which saves each slide as its own
-// numbered file (slide-01, slide-02, …).
+// numbered file. Files are named after the post (2026-11-23):
+// `<post-title>-<platform>-slide-01.jpeg`, a single download
+// `<post-title>-<platform>.jpeg`, so a day of publishing doesn't fill
+// Downloads with `video (7).mp4`.
 
-test("a carousel downloads every slide, numbered in post order", async ({ page }) => {
+test("a carousel downloads every slide, named after the post and numbered in post order", async ({ page }) => {
   const sql = postgres(process.env.DATABASE_URL!, { max: 1 });
   try {
     const stamp = Date.now();
@@ -52,11 +55,20 @@ test("a carousel downloads every slide, numbered in post order", async ({ page }
     page.on("download", (d) => downloads.push(d));
     await all.click();
     await expect.poll(() => downloads.length, { timeout: 15_000 }).toBe(3);
+    const stem = `e2e-carousel-${stamp}-instagram-post`;
     expect(downloads.map((d) => d.suggestedFilename())).toEqual([
-      "slide-01.jpeg",
-      "slide-02.jpeg",
-      "slide-03.jpeg",
+      `${stem}-slide-01.jpeg`,
+      `${stem}-slide-02.jpeg`,
+      `${stem}-slide-03.jpeg`,
     ]);
+
+    // One slide on its own carries the post's name too.
+    await page.locator(`img[src="/brands/matg.jpg"]`).hover();
+    const [single] = await Promise.all([
+      page.waitForEvent("download"),
+      page.getByRole("button", { name: "Download image" }).first().click(),
+    ]);
+    expect(single.suggestedFilename()).toBe(`${stem}.jpeg`);
     await expect.poll(async () => {
       const [r] = await sql`SELECT count(*)::int AS n FROM usage_events WHERE screen = 'media:download-all'`;
       return r.n as number;

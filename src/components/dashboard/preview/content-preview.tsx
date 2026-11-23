@@ -17,6 +17,7 @@ import {
   resolvePreviewData,
 } from "./resolve-preview-data";
 import type { SimulatorProps } from "./simulator-types";
+import { MediaFilenameBase, mediaFilenameBase } from "./media-actions";
 import { InstagramPostSimulator } from "./platforms/instagram-post";
 import { InstagramReelSimulator } from "./platforms/instagram-reel";
 import { InstagramStorySimulator } from "./platforms/instagram-story";
@@ -170,23 +171,25 @@ export function ContentPreview({
       </div>
 
       <div className="border-t border-border px-4 py-4 sm:px-5">
-        <Simulator
-          data={data}
-          fieldMap={fieldMap}
-          editable={editable}
-          liveContent={liveContent}
-          onLocalEdit={onLocalEdit}
-          onCommit={onCommit}
-          itemId={item.id}
-          onMediaMutated={onMediaMutated}
-          onDraftMutated={onDraftMutated}
-          descriptRenderState={descriptRenderState}
-          descriptProcessingLabel={descriptProcessingLabel}
-          descriptProcessingDetail={descriptProcessingDetail}
-          descriptProjectUrl={item.descriptProjectUrl ?? null}
-          draftAlgorithmRunning={draftAlgorithmRunning}
-          mediaOverride={mediaOverride}
-        />
+        <MediaFilenameBase.Provider value={mediaFilenameBase(item.title, platform)}>
+          <Simulator
+            data={data}
+            fieldMap={fieldMap}
+            editable={editable}
+            liveContent={liveContent}
+            onLocalEdit={onLocalEdit}
+            onCommit={onCommit}
+            itemId={item.id}
+            onMediaMutated={onMediaMutated}
+            onDraftMutated={onDraftMutated}
+            descriptRenderState={descriptRenderState}
+            descriptProcessingLabel={descriptProcessingLabel}
+            descriptProcessingDetail={descriptProcessingDetail}
+            descriptProjectUrl={item.descriptProjectUrl ?? null}
+            draftAlgorithmRunning={draftAlgorithmRunning}
+            mediaOverride={mediaOverride}
+          />
+        </MediaFilenameBase.Provider>
       </div>
     </div>
   );

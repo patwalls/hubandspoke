@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useContext, useRef, useState } from "react";
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -15,6 +15,7 @@ import {
   fetchMediaBlob,
   mediaFilename,
   MediaActions,
+  MediaFilenameBase,
   saveBlob,
 } from "./media-actions";
 
@@ -214,6 +215,7 @@ export function MultiSlideCarousel({
  */
 function DownloadAllSlides({ slides }: { slides: CarouselSlide[] }) {
   const [busy, setBusy] = useState(false);
+  const base = useContext(MediaFilenameBase);
   const ready = slides.flatMap((s) =>
     s.slide.url ? [{ url: s.slide.url, kind: s.slide.kind }] : [],
   );
@@ -230,7 +232,7 @@ function DownloadAllSlides({ slides }: { slides: CarouselSlide[] }) {
         const blob = await fetchMediaBlob(s.url);
         saveBlob(
           blob,
-          mediaFilename(blob.type, s.kind, { n: i + 1, total: ready.length }),
+          mediaFilename(blob.type, s.kind, { n: i + 1, total: ready.length }, base),
         );
       } catch {
         failed += 1;
