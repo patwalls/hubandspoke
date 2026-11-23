@@ -41,6 +41,7 @@ CRON ENTRIES (src/jobs/crontab.ts, UTC)
   */15 min   descript-credits-watch → email Pat + Sam when Descript jobs hit "Insufficient AI credits" (deduped 4h)
   *:45       yt-archive-watch       → Sentry issue + email Pat + Sam when YouTube items sit unarchived >12h (home-machine cron down; email deduped 6h)
   15:30 UTC  clip-idea-drought-watch → Sentry warning + email Pat + Sam when a freshly-published, transcribed, sectioned video routes to a clippable format but produced 0 clip ideas (deduped per pillar+format, never repeats)
+  Mon 11:00  idea-auto-close        → close clip-idea Idea rows nobody touched in 60 days (Killed + `killed` event `bulk: "auto-close"`, `run: <date>`; one tx per brand); Undo per run on the queue's History tab. Off: IDEA_AUTO_CLOSE=off
   14:00 UTC  format-editor-rules    → Haiku (~10 calls/week): per format with ≥ 4 draft → published rewrites in 60d and rules older than 6.5 days, write 3–5 "what editors keep changing" rules to formats.editor_rules (shown on the format page; people add them to the Skill)
   */3h :40   winner-notes           → Haiku (one call per NEW winner, ≤ 20 per brand): for each of the week's posts that beat their usual (strip + post page) with no note, write one "why it won" sentence (winner vs. the account's 5 posts nearest its median) to production_items.win_note
   Mon 13:00  winners-email          → per `winnersEmail`-flagged user: last week's strip winners (with win_note) + top formats from the 4-week scoreboard + quiet channels (30 d, mostly no likes), every enabled brand; no winners → no email
@@ -1371,6 +1372,37 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
     on the machine to starve under memory pressure.
 
 ---
+
+### `idea-auto-close` — weekly close of untouched clip ideas (Mon 11:00 UTC)
+
+clip-ideas-backlog M4 (Pat's yes 2026-11-23, Cockpit idea 4ead9b). ~170 clip
+ideas a week are written and ~75% are never decided; the queue had ~5,000 open
+ideas over 30 days old. Opus Clip expires unpicked clips at ~30 days.
+
+- **Code:** `src/lib/services/idea-auto-close.ts` (+ unit + integration
+  tests), task `ideaAutoCloseTask` in `src/jobs/tasks/scheduled.ts`.
+- **Scope:** production_items status `Idea`, not deleted, `source_type =
+  'repurposed'` with `source_clip_idea_id` (clip ideas only — never hand-made
+  ideas, cross-posts or reposts), created > 60 days ago, and **no
+  content_events in the last 60 days other than `editor_change`**. Editor
+  changes don't count as a touch: on Idea rows they're the automatic
+  "to self" on create or a bulk sweep (2026-10-23 one unassign pass stamped
+  1,296 of the 1,711 ideas in scope).
+- **Effect:** one transaction per brand: item → `Killed`, one `killed` event
+  per item (`reason` "Closed itself: nobody touched it for 60 days", `bulk:
+  "auto-close"`, `run: <YYYY-MM-DD>`, no user), its `suggested` clip idea →
+  `killed` with the same reason. Same end state as "Kill all older ideas";
+  the History tab skips bulk events. Idempotent — a retry finds nothing.
+  First prod run (2026-11-30) ≈ 1,711 ideas (matg ~1,100 of them).
+- **Undo:** `GET/POST /api/queue/auto-close` — the History tab shows the
+  brand's latest run (last 30 days) as one line with **Undo**, which puts
+  that run's still-Killed items back to `Idea` (clip idea → `suggested`) and
+  writes a `status_change` Killed → Idea event. That event is a touch, so an
+  undone idea is safe for the next 60 days of runs. Marks
+  `queue:auto-close:undo`.
+- **Off switch:** `heroku config:set IDEA_AUTO_CLOSE=off --app hubandspoke`
+  (the task logs "skipped" and returns).
+- **Log line:** `idea-auto-close run=… total=… byBrand={…}`.
 
 ### `webhook-dispatch-sweep` — outgoing webhooks (every minute)
 

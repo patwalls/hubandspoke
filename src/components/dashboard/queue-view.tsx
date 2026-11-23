@@ -28,6 +28,7 @@ import type { ChannelReach } from "@/lib/channel-reach";
 import type { RepostCandidatesResult } from "@/lib/services/repost-candidates";
 import type { SpokeCandidatesResult } from "@/lib/services/spoke-candidates";
 import type { QueueHistoryEvent } from "@/app/api/queue/history/route";
+import { AutoCloseNotice } from "./auto-close-notice";
 import { useUrlState } from "@/lib/hooks/use-url-state";
 import { useRememberListUrl } from "@/lib/hooks/use-remember-list-url";
 import { trackUsage } from "@/lib/usage/track";
@@ -896,12 +897,15 @@ export function QueueView({
       )}
 
       {isHistoryTab ? (
+        <>
+        <AutoCloseNotice brand={brand} onUndone={() => { void fetchHistory(); void fetchQueue(); }} />
         <HistoryQueueTable
           events={historyEvents}
           brand={brand}
           loading={historyLoading}
           emptyMessage="Nothing has moved through the queue in the last 30 days."
         />
+        </>
       ) : isCrossPostTab ? (
         crossPostLoading ? (
           <LoadingPanel label="Loading hot posts…" />

@@ -20,6 +20,7 @@ import { maybeAlertScCreditsExhausted } from "@/lib/services/sc-credits-watch";
 import { maybeAlertDescriptCreditsExhausted } from "@/lib/services/descript-credits-watch";
 import { maybeAlertYtArchiveBehind } from "@/lib/services/yt-archive-watch";
 import { maybeAlertClipIdeaDrought } from "@/lib/services/clip-idea-drought-watch";
+import { autoCloseDisabled, autoCloseUntouchedIdeas } from "@/lib/services/idea-auto-close";
 import { refreshEditorRules } from "@/lib/services/draft-algorithm/editor-rules";
 import { refreshWinNotes } from "@/lib/services/winners/why-it-won";
 import { platformSupportsLatest } from "@/lib/services/account-content-sync";
@@ -603,6 +604,23 @@ export const clipIdeaDroughtWatchTask: Task = async (_payload, helpers) => {
     );
     throw err;
   }
+};
+
+/**
+ * Mondays 11:00 UTC: close clip ideas nobody touched in 60 days (one
+ * transaction per brand, undoable from the queue's History tab). Off with
+ * IDEA_AUTO_CLOSE=off. See services/idea-auto-close.ts.
+ */
+export const ideaAutoCloseTask: Task = async (_payload, helpers) => {
+  if (autoCloseDisabled()) {
+    helpers.logger.info("idea-auto-close skipped (IDEA_AUTO_CLOSE=off)");
+    return;
+  }
+  const start = Date.now();
+  const result = await autoCloseUntouchedIdeas();
+  helpers.logger.info(
+    `idea-auto-close run=${result.run} total=${result.total} byBrand=${JSON.stringify(result.byBrand)} (${Date.now() - start}ms)`,
+  );
 };
 
 /**
