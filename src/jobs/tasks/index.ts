@@ -105,6 +105,7 @@ import {
   descriptCreditsWatchTask,
   ytArchiveWatchTask,
   clipIdeaDroughtWatchTask,
+  ideaAutoCloseTask,
   formatEditorRulesTask,
   winnerNotesTask,
 } from "./scheduled";
@@ -221,6 +222,7 @@ export interface TaskPayloads {
   "descript-credits-watch": Record<string, never>;
   "yt-archive-watch": Record<string, never>;
   "clip-idea-drought-watch": Record<string, never>;
+  "idea-auto-close": Record<string, never>;
   "format-editor-rules": Record<string, never>;
   "winner-notes": Record<string, never>;
   "worker-heartbeat": Record<string, never>;
@@ -306,6 +308,7 @@ export const taskList: Record<keyof TaskPayloads, Task> = {
   "descript-credits-watch": descriptCreditsWatchTask,
   "yt-archive-watch": ytArchiveWatchTask,
   "clip-idea-drought-watch": clipIdeaDroughtWatchTask,
+  "idea-auto-close": ideaAutoCloseTask,
   "format-editor-rules": formatEditorRulesTask,
   "winner-notes": winnerNotesTask,
   "worker-heartbeat": workerHeartbeatTask,

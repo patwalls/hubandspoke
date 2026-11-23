@@ -43,6 +43,16 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-11-23-idea-auto-close",
+    shippedAt: "2026-11-23T15:09:50Z",
+    kind: "feature",
+    title: "Old clip ideas now close themselves each week",
+    body: "Every Monday, clip ideas nobody has touched in 60 days close on their own, so the queue stays short. Nothing is deleted: the queue's History tab shows how many closed, with an Undo that brings them all back.",
+    href: "/[brand]/queue/history",
+    screen: "/[brand]/queue",
+    audience: { usersOf: ["/[brand]/queue"] },
+  },
+  {
     id: "2026-11-23-brand-switch-keeps-section",
     shippedAt: "2026-11-23T11:57:33Z",
     kind: "feature",

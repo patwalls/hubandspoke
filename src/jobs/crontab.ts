@@ -25,6 +25,9 @@
 // `winners-email` at 13:00 UTC Mondays = 9am EDT / 8am EST, after
 // `winner-notes` (every 3h at :40) has written last week's "why" notes.
 //
+// `idea-auto-close` at 11:00 UTC Mondays = 6am EST / 7am EDT, before the
+// team opens the queue, so the week starts on a trimmed list.
+//
 // `performance-decay` runs on its own named queue so hourly runs never
 // overlap. On 2026-10-21 four deploys in an hour kept interrupting it; the
 // retried 21:00 run and the 22:00 run then ran side by side, held both
@@ -65,6 +68,7 @@ export const CRONTAB = `
 10 */2 * * * newsletter-slots-sweep
 20 * * * * newsletter-send-sweep
 30 15 * * * clip-idea-drought-watch
+0 11 * * 1 idea-auto-close
 0 14 * * * format-editor-rules
 40 */3 * * * winner-notes
 0 13 * * 1 winners-email

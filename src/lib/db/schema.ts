@@ -2245,8 +2245,9 @@ export const contentComments = pgTable(
 // payload shape + a new renderer branch — no schema migration per event.
 export type ContentEventPayload =
   | { type: "status_change"; from: string | null; to: string | null }
-  // `bulk` names a one-pass clear (e.g. "clear-older", src/lib/queue-clear-older.ts).
-  | { type: "killed"; from: string | null; reason: string | null; bulk?: string }
+  // `bulk` names a one-pass clear (e.g. "clear-older", src/lib/queue-clear-older.ts;
+  // "auto-close", services/idea-auto-close.ts, whose `run` is the run's UTC date).
+  | { type: "killed"; from: string | null; reason: string | null; bulk?: string; run?: string }
   | { type: "accepted"; from: string | null; reason: string | null }
   | { type: "editor_change"; from: string | null; to: string | null }
   | { type: "cross_post_dismissed"; reason: string | null }
