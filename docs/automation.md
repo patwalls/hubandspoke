@@ -1387,7 +1387,12 @@ ideas over 30 days old. Opus Clip expires unpicked clips at ~30 days.
   content_events in the last 60 days other than `editor_change`**. Editor
   changes don't count as a touch: on Idea rows they're the automatic
   "to self" on create or a bulk sweep (2026-10-23 one unassign pass stamped
-  1,296 of the 1,711 ideas in scope).
+  1,296 of the 1,711 ideas in scope). **A clip-editor draft saved in the
+  last 60 days is a touch** (`clip_edits.updated_at`): the editor autosaves
+  there and writes no content_event — before 2026-11-24 the first run would
+  have closed 49 ideas an editor had a draft on (73 over the next weeks).
+  "Kill all older ideas" still kills drafted rows: it is a person's choice on
+  a list they can see.
 - **Effect:** one transaction per brand: item → `Killed`, one `killed` event
   per item (`reason` "Closed itself: nobody touched it for 60 days", `bulk:
   "auto-close"`, `run: <YYYY-MM-DD>`, no user), its `suggested` clip idea →
