@@ -7,7 +7,10 @@
  * Small removals (fillers, pauses, a manual snip of a few words) don't split
  * a part: pieces closer than `MERGE_GAP_SEC` in the source, played back to
  * back, read as one. Parts come in play order; uploaded clips (no source
- * time) are skipped. Pure.
+ * time) are skipped. Parts shorter than `MIN_LISTED_PART_SEC` (a few frames
+ * left between two cuts, e.g. a removal stored as 1502.3999 next to a split
+ * at 1502.303) aren't a place anyone looks for — they read as "25:02–25:02" —
+ * so they're left out unless nothing else plays. Pure.
  */
 import { isSourceSection, type ClipEditDoc } from "./doc";
 import type { TimeRange } from "./doc";
@@ -15,6 +18,9 @@ import { keptRanges } from "./removals";
 
 /** Gaps shorter than this (seconds of source skipped) don't start a new part. */
 export const MERGE_GAP_SEC = 3;
+
+/** Parts shorter than this (seconds) aren't listed. */
+export const MIN_LISTED_PART_SEC = 1;
 
 /** More parts than this collapse into "+ N more". */
 export const MAX_LISTED_PARTS = 4;
@@ -33,7 +39,8 @@ export function sourceParts(doc: ClipEditDoc): TimeRange[] {
       }
     }
   }
-  return parts;
+  const listed = parts.filter((p) => p.endSec - p.startSec >= MIN_LISTED_PART_SEC);
+  return listed.length > 0 ? listed : parts;
 }
 
 function mmss(sec: number): string {
