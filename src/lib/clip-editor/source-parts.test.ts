@@ -51,6 +51,19 @@ describe("sourceParts", () => {
     expect(formatSourceParts(parts)).toBe("03:20–03:50");
   });
 
+  it("a sliver left between two cuts (a tenth of a second) isn't listed", () => {
+    // Prod, 11-24: a removal stored as float32 (1502.3999938964844) left 0.1 s
+    // kept at 25:02 (a 3-frame flash); the comment said "25:02–25:02 + …".
+    const a = addRemoval(sec("a", 1497.26, 1502.303), { startSec: 1497.260009765625, endSec: 1502.303 }, "manual");
+    const b = addRemoval(sec("b", 1502.303, 1516.703), { startSec: 1502.3999938964844, endSec: 1514.260009765625 }, "manual");
+    const c = sec("c", 1516.703, 1583);
+    expect(formatSourceParts(sourceParts(docWith([a, b, c])))).toBe("25:14–26:23");
+  });
+
+  it("a clip that is only slivers still says where it is", () => {
+    expect(formatSourceParts(sourceParts(docWith([sec("a", 62, 62.5)])))).toBe("01:02–01:02");
+  });
+
   it("collapses past four parts into '+ N more'", () => {
     const many = [0, 100, 200, 300, 400, 500].map((t, i) => sec(`s${i}`, t, t + 10));
     expect(formatSourceParts(sourceParts(docWith(many)))).toBe(
