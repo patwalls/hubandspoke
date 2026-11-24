@@ -54,6 +54,7 @@ import { buildTranscriptView } from "@/lib/clip-editor/transcript-view";
 import { findSilences, mediaEditorWords, rangeForWordRun } from "@/lib/clip-editor/words";
 import { runUpSkip } from "@/lib/clip-editor/trim-habits";
 import { addRemoval } from "@/lib/clip-editor/removals";
+import { editorEscapeStep, editorIgnoresClose, isTypingTarget } from "@/lib/clip-editor/dismiss";
 import type { ClipEditorSession } from "@/lib/services/clip-editor/session";
 import { Inspector } from "./inspector";
 import { clearBackup, takeBackup, writeBackup } from "./local-backup";
@@ -131,8 +132,27 @@ export function ClipEditorDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, clipIdeaId]);
 
+  // Esc inside the editor lets go of a selection before it closes anything;
+  // the workspace answers "did Esc have something to let go of?" here.
+  // See src/lib/clip-editor/dismiss.ts.
+  const escapeRef = useRef<(() => boolean) | null>(null);
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(next, details) => {
+        if (!next && editorIgnoresClose(details.reason)) {
+          details.cancel();
+          trackUsage("clip-editor:kept-open:outside", brand);
+          return;
+        }
+        if (!next && details.reason === "escape-key" && escapeRef.current?.()) {
+          details.cancel();
+          return;
+        }
+        onOpenChange(next);
+      }}
+    >
       <DialogContent className="flex h-[94vh] w-[97vw] max-w-[97vw] flex-col gap-0 overflow-hidden p-0 sm:max-w-[min(1560px,97vw)]">
         {session ? (
           <EditorRoot
@@ -142,6 +162,7 @@ export function ClipEditorDialog({
             onDone={onDone}
             onClose={() => onOpenChange(false)}
             nav={nav}
+            escapeRef={escapeRef}
           />
         ) : (
           <div className="flex flex-1 flex-col items-center justify-center gap-3 text-muted-foreground">
@@ -161,6 +182,7 @@ function EditorRoot(props: {
   onDone: () => void;
   onClose: () => void;
   nav?: IdeaNav;
+  escapeRef?: React.MutableRefObject<(() => boolean) | null>;
 }) {
   const [{ store, recovered }] = useState(() => {
     const { clipIdea, edit } = props.session;
@@ -200,15 +222,37 @@ function EditorWorkspace({
   onDone,
   onClose,
   nav,
+  escapeRef,
 }: {
   session: ClipEditorSession;
   brand: string;
   onDone: () => void;
   onClose: () => void;
   nav?: IdeaNav;
+  escapeRef?: React.MutableRefObject<(() => boolean) | null>;
 }) {
   const router = useRouter();
   const storeApi = useEditorStoreApi();
+
+  // Esc: leave the field, then drop highlighted words, then the stage pick;
+  // only with nothing left does it close the editor (returns false).
+  useEffect(() => {
+    if (!escapeRef) return;
+    escapeRef.current = () => {
+      const active = document.activeElement;
+      const { wordSelection, stageSelection } = storeApi.getState();
+      const step = editorEscapeStep({ typing: isTypingTarget(active), wordSelection: !!wordSelection, stageSelection: !!stageSelection });
+      if (step === "close") return false;
+      if (step === "leave-field") (active as HTMLElement | null)?.blur?.();
+      else if (step === "drop-words") storeApi.getState().setWordSelection(null);
+      else storeApi.getState().setStageSelection(null);
+      trackUsage("clip-editor:kept-open:escape", brand);
+      return true;
+    };
+    return () => {
+      escapeRef.current = null;
+    };
+  }, [escapeRef, storeApi, brand]);
   // View-only (no edit access to this brand): the editor opens like a
   // conflicted copy — everything plays and reads, nothing edits or saves.
   const viewOnly = !useCanEditBrand(brand);

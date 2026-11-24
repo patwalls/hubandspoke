@@ -46,6 +46,7 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { EstimatedProgressBar } from "@/components/ui/estimated-progress-bar";
 import { cn } from "@/lib/utils";
+import { editorIgnoresClose } from "@/lib/clip-editor/dismiss";
 import { CANVAS_SIZES, DEFAULT_CROP, PHOTO_PLACEHOLDER, newElementId, pageDurationSec, pageVideo, resizeCanvas, shadeElement, type DesignDoc, type DesignElement, type DesignImageElement, type DesignImageSource, type DesignVideoElement } from "@/lib/design-editor/doc";
 import { applyPhotoPick, hasEmptyCutoutSlot } from "@/lib/design-editor/template-fill";
 import { arrow, statCard } from "@/lib/design-editor/shared";
@@ -168,7 +169,7 @@ export function DesignEditorDialog({ open, onOpenChange, productionItemId, brand
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={(next, details) => (!next && editorIgnoresClose(details.reason) ? details.cancel() : onOpenChange(next))}>
       <DialogContent className="flex h-[94vh] w-[97vw] max-w-[97vw] flex-col gap-0 overflow-hidden p-0 sm:max-w-[min(1600px,97vw)]">
         {session ? (
           <Workspace key={session.design.id} session={session} brand={brand} onDone={onDone} onClose={() => onOpenChange(false)} />
@@ -255,7 +256,7 @@ export function DesignTemplateDialog({ open, onOpenChange, formatId, formatName,
     return { ok: true, revision: revision + 1 };
   }, [formatId, onSaved]);
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={(next, details) => (!next && editorIgnoresClose(details.reason) ? details.cancel() : onOpenChange(next))}>
       <DialogContent className="flex h-[94vh] w-[97vw] max-w-[97vw] flex-col gap-0 overflow-hidden p-0 sm:max-w-[min(1600px,97vw)]">
         {session ? (
           <Workspace key={formatId} session={session} brand={brand} mode="template" saveDoc={saveDoc} onDone={() => onOpenChange(false)} onClose={() => onOpenChange(false)} />
