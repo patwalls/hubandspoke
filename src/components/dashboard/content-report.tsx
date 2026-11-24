@@ -5,6 +5,7 @@ import { useToday } from "@/lib/hooks/use-today";
 import { format, subDays } from "date-fns";
 import { FilterPills, type FilterAccount } from "./filter-pills";
 import { MetricTiles } from "./metric-tiles";
+import { BrandPaceStrip } from "./brand-pace-strip";
 import { WinnersStrip } from "./winners-strip";
 import { PeriodTable, type GroupDim } from "./period-table";
 import type { ContentReportData } from "@/types";
@@ -264,6 +265,7 @@ export function ContentReport({ brand }: { brand: string }) {
       ) : null}
 
       <WinnersStrip brand={brand} />
+      <BrandPaceStrip brand={brand} />
 
       <FilterPills
         startDate={startDate}

@@ -43,6 +43,16 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-11-24-brands-this-week",
+    shippedAt: "2026-11-24T00:40:44Z",
+    kind: "feature",
+    title: "Every brand's week in one look",
+    body: "Check several brands? The All brands dashboard now has a \"Brands this week\" line: open it to see each brand's posts so far against its goal (or last week), the ones behind pace first. Click a brand to jump to its dashboard.",
+    href: "/all",
+    screen: "all:brand-pace:open",
+    audience: { usersOf: ["/[brand]"] },
+  },
+  {
     id: "2026-11-23-idea-auto-close",
     shippedAt: "2026-11-23T15:09:50Z",
     kind: "feature",
