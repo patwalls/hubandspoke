@@ -98,6 +98,7 @@ test("stray clicks and Esc on a selection keep the clip editor open; Esc with no
 
     // 2. Esc with words highlighted drops the highlight, not the editor.
     await page.locator("[data-pos].text-foreground").nth(3).click();
+    await page.locator("[data-pos].text-foreground").nth(6).click({ modifiers: ["Shift"] });
     const toolbar = page.getByRole("toolbar", { name: "Selected words" });
     await expect(toolbar).toBeVisible();
     await page.keyboard.press("Escape");
