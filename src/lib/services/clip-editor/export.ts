@@ -32,7 +32,8 @@ import {
   loadAndGuardClipIdea,
   loadClipProductionItemId,
 } from "@/lib/services/promote-clip-idea";
-import { findHookLayer, isSourceSection, parseDoc, type ClipEditDoc } from "@/lib/clip-editor/doc";
+import { findHookLayer, parseDoc, type ClipEditDoc } from "@/lib/clip-editor/doc";
+import { formatSourceParts, sourceParts } from "@/lib/clip-editor/source-parts";
 import { compileRenderPlan } from "@/lib/clip-editor/plan";
 import { titleAfterHookChange } from "@/lib/services/title-after-hook-change";
 
@@ -217,16 +218,20 @@ function escapeHtml(text: string): string {
 
 /** The activity-feed comment body for a clip made in the editor. Exported
  *  for the test; the feed prefixes the author's name, so this reads as
- *  "Pat Walls: Created a clip from the queue · 04:22–05:07 (40s)". */
+ *  "Pat Walls: Created a clip from the queue · 04:22–05:07 (40s)", or with
+ *  a big cut inside "· 01:38–01:52 + 06:48–07:12 (38s)" — the parts that
+ *  play, not the span they were taken from (`sourceParts`). */
 export function buildClipCreatedComment(doc: ClipEditDoc, hook: string): string {
-  const fromSource = doc.sections.filter(isSourceSection);
-  const span = fromSource.length > 0 ? fromSource : doc.sections;
-  const startSec = Math.min(...span.map((s) => s.startSec));
-  const endSec = Math.max(...span.map((s) => s.endSec));
+  const parts = sourceParts(doc);
+  // Only uploaded clips: no source time to point at — keep the old span.
+  const where =
+    parts.length > 0
+      ? formatSourceParts(parts)
+      : `${mmss(Math.min(...doc.sections.map((s) => s.startSec)))}–${mmss(Math.max(...doc.sections.map((s) => s.endSec)))}`;
   // What actually plays, after cuts — not the span it was taken from.
   const durationSec = Math.round(compileRenderPlan(doc, []).durationSec);
   return [
-    `<p>Created a clip from the queue · <strong>${mmss(startSec)}–${mmss(endSec)}</strong> (${durationSec}s)</p>`,
+    `<p>Created a clip from the queue · <strong>${where}</strong> (${durationSec}s)</p>`,
     `<blockquote>${escapeHtml(hook)}</blockquote>`,
   ].join("\n");
 }

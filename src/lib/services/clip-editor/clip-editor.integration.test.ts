@@ -113,7 +113,8 @@ describe("exportClipEdit", () => {
     const d = createDefaultDoc({ startSec: 100, endSec: 130, hook: "x" });
     d.sections[0] = addRemoval(d.sections[0], { startSec: 110, endSec: 120 }, "manual");
     const body = buildClipCreatedComment(d, `5 < 6 & "quotes"`);
-    expect(body).toContain("01:40–02:10</strong> (20s)");
+    // A 10 s cut splits it: the parts that play, not the hull.
+    expect(body).toContain("01:40–01:50 + 02:00–02:10</strong> (20s)");
     expect(body).toContain("5 &lt; 6 &amp; &quot;quotes&quot;");
   });
 
