@@ -220,10 +220,13 @@ export function ProductionPeek({
     !!live && canEdit && peekStaleReview(live.status, live.statusSince?.at, live.comments.at(-1)?.at);
 
   return (
+    // z-50, above the assistant bubble (fixed bottom-right, z-40): at z-40
+    // the bubble, mounted later, sat on top of "Open post" in the footer.
+    // Dialogs opened from the peek (Kill…) portal in later and still cover it.
     <aside
       aria-label="Peek"
       data-testid="production-peek"
-      className="fixed inset-y-0 right-0 z-40 flex w-full max-w-md flex-col border-l bg-background shadow-xl"
+      className="fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col border-l bg-background shadow-xl"
     >
       <div className="flex items-center gap-2 border-b px-4 py-3">
         {shown?.status && (

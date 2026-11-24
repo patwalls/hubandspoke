@@ -88,7 +88,7 @@ test("j / k move over the list, Space peeks, Enter opens, and back lands on the 
     // The row's eye button peeks with the mouse too.
     const first = page.locator(`[data-production-row="${order[0]}"]`);
     await first.hover();
-    await first.getByRole("button", { name: "Peek" }).click();
+    await first.getByRole("button", { name: /^(Peek|Quick review)$/ }).click();
     await expect(page.getByTestId("production-peek-title")).toHaveText(title(order[0]));
     await peek.getByRole("button", { name: /Open post/ }).click();
     await expect(page).toHaveURL(new RegExp(`/starter-story/content/${order[0]}$`));

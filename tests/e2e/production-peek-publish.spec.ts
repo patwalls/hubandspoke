@@ -30,7 +30,7 @@ test("paste the live link in the peek: the post goes Published and the peek move
 
     const first = page.locator(`[data-production-row="${order[0]}"]`);
     await first.hover();
-    await first.getByRole("button", { name: "Peek" }).click();
+    await first.getByRole("button", { name: /^(Peek|Quick review)$/ }).click();
     await expect(page.getByTestId("production-peek-title")).toHaveText(title(order[0]));
     const box = page.getByTestId("production-peek-publish");
     await expect(box).toBeVisible();
@@ -72,7 +72,7 @@ test("no link box on a post still being edited", async ({ page }) => {
     await popup.getByRole("button", { name: "Got it" }).click({ timeout: 15_000 }).catch(() => {});
     const row = page.locator(`[data-production-row="${id}"]`);
     await row.hover();
-    await row.getByRole("button", { name: "Peek" }).click();
+    await row.getByRole("button", { name: /^(Peek|Quick review)$/ }).click();
     await expect(page.getByTestId("production-peek-title")).toHaveText(`${tag} part 1`);
     await expect(page.getByTestId("production-peek-publish")).toHaveCount(0);
   } finally {
