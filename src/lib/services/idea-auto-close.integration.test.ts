@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { contentEvents } from "@/lib/db/schema";
-import { clipIdeas, createTestClipIdea, createTestProductionItem, productionItems } from "@/test/factories";
+import { clipEdits, contentEvents } from "@/lib/db/schema";
+import { clipIdeas, createTestClipEdit, createTestClipIdea, createTestProductionItem, productionItems } from "@/test/factories";
 import {
   AUTO_CLOSE_REASON,
   autoCloseUntouchedIdeas,
@@ -95,5 +95,27 @@ describe("autoCloseUntouchedIdeas", () => {
     const nextWeek = await autoCloseUntouchedIdeas({ format, now: Date.now() + 7 * DAY });
     expect(nextWeek.total).toBe(0);
     expect(await statusOf(stale.item.id)).toBe("Idea");
+  });
+
+  // 2026-11-24: the clip editor autosaves to clip_edits and writes no
+  // content_event, so 73 ideas with a draft an editor had been working on
+  // (one at revision 21) would have closed as "nobody touched it".
+  it("leaves an idea alone when its clip-editor draft was saved inside the 60 days", async () => {
+    const format = `vitest-autoclose-draft-${Date.now()}`;
+    const drafted = await clipIdeaRow(format, 90);
+    const draft = await createTestClipEdit({ clipIdeaId: drafted.idea.id, revision: 21 });
+    await db.update(clipEdits).set({ updatedAt: new Date(Date.now() - 10 * DAY) }).where(eq(clipEdits.id, draft.id));
+    const abandoned = await clipIdeaRow(format, 120);
+    const oldDraft = await createTestClipEdit({ clipIdeaId: abandoned.idea.id });
+    await db
+      .update(clipEdits)
+      .set({ createdAt: new Date(Date.now() - 100 * DAY), updatedAt: new Date(Date.now() - 100 * DAY) })
+      .where(eq(clipEdits.id, oldDraft.id));
+
+    const result = await autoCloseUntouchedIdeas({ format });
+    expect(result.byBrand).toEqual({ [brand]: 1 });
+    expect(await statusOf(drafted.item.id)).toBe("Idea");
+    expect((await ideaOf(drafted.idea.id)).status).toBe("suggested");
+    expect(await statusOf(abandoned.item.id)).toBe("Killed");
   });
 });

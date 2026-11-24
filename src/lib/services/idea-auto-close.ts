@@ -1,6 +1,6 @@
 import { and, eq, inArray, isNull, lt, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { clipIdeas, contentEvents, productionItems } from "@/lib/db/schema";
+import { clipEdits, clipIdeas, contentEvents, productionItems } from "@/lib/db/schema";
 
 /**
  * Weekly auto-close of clip ideas nobody touched (cron `idea-auto-close`,
@@ -17,8 +17,12 @@ import { clipIdeas, contentEvents, productionItems } from "@/lib/db/schema";
  *     `editor_change`: on an Idea row those are the automatic "to self" on
  *     create or a bulk sweep (2026-10-23 20:20 Pat unassigned himself from
  *     2,242 items in one pass, which would otherwise have "touched" 1,296 of
- *     the 1,711 ideas this exists to close). Hand-made ideas, cross-posts and
- *     reposts are never auto-closed.
+ *     the 1,711 ideas this exists to close). A clip-editor draft saved in that
+ *     window is a touch too: the editor autosaves to `clip_edits`, which
+ *     writes no content_event, and on 2026-11-24 73 ideas with a draft saved
+ *     since 09-30 (one at revision 21) would otherwise have closed as
+ *     "nobody touched it". Hand-made ideas, cross-posts and reposts are never
+ *     auto-closed.
  *   - Effect: the same end state as "Kill all older ideas" (M2,
  *     queue-clear-older.server.ts): item → Killed, one `killed` event per item
  *     tagged `bulk: "auto-close"` + `run: <YYYY-MM-DD>` (the History tab
@@ -61,6 +65,7 @@ function untouchedClipIdeasWhere(now: number, format: string | null) {
     sql`${productionItems.sourceClipIdeaId} is not null`,
     lt(productionItems.createdAt, cutoff),
     sql`not exists (select 1 from ${contentEvents} where ${contentEvents.contentItemId} = ${productionItems.id} and ${contentEvents.createdAt} >= ${cutoff.toISOString()}::timestamptz and ${contentEvents.eventType} <> 'editor_change')`,
+    sql`not exists (select 1 from ${clipEdits} where ${clipEdits.clipIdeaId} = ${productionItems.sourceClipIdeaId} and ${clipEdits.updatedAt} >= ${cutoff.toISOString()}::timestamptz)`,
     ...(format ? [eq(productionItems.format, format)] : []),
   );
 }
