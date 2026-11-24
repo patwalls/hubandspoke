@@ -39,7 +39,7 @@ async function peek(page: Page, tag: string, id: string) {
   await popup.getByRole("button", { name: "Got it" }).click({ timeout: 15_000 }).catch(() => {});
   const row = page.locator(`[data-production-row="${id}"]`);
   await row.hover();
-  await row.getByRole("button", { name: "Peek" }).click();
+  await row.getByRole("button", { name: /^(Peek|Quick review)$/ }).click();
   await expect(page.getByTestId("production-peek-title")).toBeVisible({ timeout: 20_000 });
 }
 
@@ -58,7 +58,7 @@ test("Approve in the peek moves a Review post to Ready To Publish and steps on",
 
     const first = page.locator(`[data-production-row="${order[0]}"]`);
     await first.hover();
-    await first.getByRole("button", { name: "Peek" }).click();
+    await first.getByRole("button", { name: /^(Peek|Quick review)$/ }).click();
     // First peek of the run compiles the route on a dev server: give it time.
     await expect(page.getByTestId("production-peek-title")).toHaveText(title(order[0]), { timeout: 20_000 });
     // A fresh Review post: Approve, no "still needed?".
@@ -136,6 +136,35 @@ test("a Review post with a recent comment is not asked 'still needed?'", async (
     await peek(page, tag, id);
     await expect(page.getByRole("button", { name: "Approve → Ready To Publish" })).toBeVisible();
     await expect(page.getByTestId("production-peek-stale")).toHaveCount(0);
+  } finally {
+    await sql`DELETE FROM production_items WHERE title LIKE ${tag + "%"}`;
+    await sql.end();
+  }
+});
+
+test("Review rows show a visible 'Quick review' that opens the peek; other rows keep the hover eye", async ({ page }) => {
+  const sql = postgres(process.env.DATABASE_URL!, { max: 1 });
+  const tag = `E2E QuickReview ${Date.now()}`;
+  try {
+    const [review, ready] = await makePosts(page, sql, tag, 2);
+    await sql`UPDATE production_items SET status = 'Ready To Publish' WHERE id = ${ready}`;
+    await page.goto(`/starter-story/production?q=${encodeURIComponent(tag)}`);
+    const popup = page.getByRole("dialog", { name: "What's new" });
+    await popup.getByRole("button", { name: "Got it" }).click({ timeout: 15_000 }).catch(() => {});
+
+    const reviewRow = page.locator(`[data-production-row="${review}"]`);
+    const readyRow = page.locator(`[data-production-row="${ready}"]`);
+    // Visible without hovering — the whole point.
+    await expect(reviewRow.getByRole("button", { name: "Quick review" })).toBeVisible({ timeout: 20_000 });
+    await expect(readyRow.getByRole("button", { name: "Quick review" })).toHaveCount(0);
+    await expect(readyRow.getByRole("button", { name: "Peek" })).toHaveCount(1);
+    // The whole list in its default state (nothing hovered, no peek open).
+    await page.mouse.move(0, 0);
+    if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT, fullPage: true });
+
+    await reviewRow.getByRole("button", { name: "Quick review" }).click();
+    await expect(page.getByTestId("production-peek-title")).toHaveText(`${tag} part 1`, { timeout: 20_000 });
+    await expect(page.getByRole("button", { name: "Approve → Ready To Publish" })).toBeVisible();
   } finally {
     await sql`DELETE FROM production_items WHERE title LIKE ${tag + "%"}`;
     await sql.end();

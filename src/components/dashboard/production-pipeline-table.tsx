@@ -12,6 +12,8 @@ import { trackUsage } from "@/lib/usage/track";
 import { rememberRun } from "@/lib/production/run";
 import { waitingInStatus } from "@/lib/production/waiting";
 import { newCommentsFor } from "@/lib/production/new-comments";
+import { peekCanApprove } from "@/lib/production/peek";
+import { useCanEditBrand } from "@/components/brand-access";
 
 export type SortKey =
   | "editor"
@@ -225,6 +227,7 @@ export function ProductionPipelineTable({
   focusedId,
   viewerId,
 }: ProductionPipelineTableProps) {
+  const canEdit = useCanEditBrand(brand);
   const sortedItems = useMemo(() => {
     if (!sortKey) return items;
     const dir = sortDir === "asc" ? 1 : -1;
@@ -478,7 +481,26 @@ export function ProductionPipelineTable({
                           ↗
                         </a>
                       )}
-                      {onPeek && (
+                      {onPeek && peekCanApprove(item.status, canEdit) ? (
+                        // Review rows: the peek approves or publishes without
+                        // opening the post, but behind a hover-only eye it was
+                        // opened twice in a month. A quiet always-visible
+                        // label is the way in for whoever clears Review.
+                        <button
+                          type="button"
+                          data-testid="quick-review"
+                          onClick={() => {
+                            trackUsage("production:peek", brand);
+                            trackUsage("production:peek:quick-review", brand);
+                            onPeek(item.id);
+                          }}
+                          title="Approve or publish without opening the post (Space)"
+                          className="ml-auto shrink-0 inline-flex items-center gap-1 rounded px-1 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+                        >
+                          <EyeIcon className="size-3" aria-hidden />
+                          Quick review
+                        </button>
+                      ) : onPeek && (
                         <button
                           type="button"
                           onClick={() => {

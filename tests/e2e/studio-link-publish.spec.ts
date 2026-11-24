@@ -42,7 +42,7 @@ test("a Short handed back as a Studio link offers its live link when publishing"
     await page.goto(`/starter-story/production?q=${encodeURIComponent(tag)}`);
     const row = page.locator(`[data-production-row="${id}"]`);
     await row.hover();
-    await row.getByRole("button", { name: "Peek" }).click();
+    await row.getByRole("button", { name: /^(Peek|Quick review)$/ }).click();
     const box = page.getByTestId("production-peek-publish");
     const offer = box.getByTestId("publish-studio-link");
     await expect(offer).toContainText("From Noa's YouTube Studio link");
