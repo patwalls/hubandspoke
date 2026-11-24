@@ -105,13 +105,16 @@ test("stray clicks and Esc on a selection keep the clip editor open; Esc with no
     await expect(toolbar).toBeHidden();
     await expect(editor).toBeVisible();
 
-    // 3. Esc with a text layer picked on the stage drops the pick.
-    await page.getByRole("button", { name: "Text", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "Text 1" })).toBeVisible();
+    // 3. Esc with a text layer picked on the stage drops the pick (its
+    //    inspector panel loses the blue ring), not the editor.
+    await page.getByRole("button", { name: "Text", exact: true }).first().click();
+    await page.getByRole("button", { name: "Text", exact: true }).last().click();
+    const panel = page.locator("section").filter({ has: page.getByRole("heading", { name: "Text 1" }) });
+    await expect(panel).toHaveClass(/border-sky-400/);
     if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT });
     await page.keyboard.press("Escape");
     await expect(editor).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Text 1" })).toHaveCount(0);
+    await expect(panel).not.toHaveClass(/border-sky-400/);
 
     // 4. Nothing left to drop: Esc closes the editor, as it always did.
     await page.keyboard.press("Escape");
