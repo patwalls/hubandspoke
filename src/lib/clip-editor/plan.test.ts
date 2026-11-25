@@ -73,6 +73,29 @@ describe("compileRenderPlan — timeline", () => {
     expect(plan.segments[1].frameStart).toBe(120);
   });
 
+  it("drops the ~0.1 s sliver a float32 removal leaves after a scene split (no 3-frame flash)", () => {
+    // From a rendered clip: the scene starts at the split (1502.303) and the
+    // cut after it was stored as float32 1502.3999938964844 — 0.097 s kept,
+    // which rounded to 3 frames and flashed before the next scene.
+    const doc = createDefaultDoc({ startSec: 1502.303, endSec: 1600, hook: "" });
+    let s = addRemoval(doc.sections[0], { startSec: 1502.3999938964844, endSec: 1514 }, "manual");
+    s = addRemoval(s, { startSec: 1599.911, endSec: 1600 }, "manual"); // 0.089 s tail sliver
+    doc.sections[0] = s;
+    const plan = compileRenderPlan(doc, []);
+    expect(plan.segments).toHaveLength(1);
+    expect(plan.segments[0].sourceStartSec).toBeCloseTo(1514, 1);
+    expect(plan.segments[0].sourceEndSec).toBeCloseTo(1599.9, 1);
+  });
+
+  it("keeps a short real word (0.15 s) left between two removals", () => {
+    const doc = baseDoc();
+    let s = addRemoval(doc.sections[0], { startSec: 102, endSec: 103 }, "filler");
+    s = addRemoval(s, { startSec: 103.15, endSec: 104 }, "filler");
+    doc.sections[0] = s;
+    const plan = compileRenderPlan(doc, []);
+    expect(plan.segments.map((seg) => seg.frameEnd - seg.frameStart)).toEqual([60, 5, 180]);
+  });
+
   it("seeks to the first KEPT frame when the head of a section is removed", () => {
     const doc = baseDoc();
     doc.sections[0] = addRemoval(doc.sections[0], { startSec: 100, endSec: 103 }, "manual");

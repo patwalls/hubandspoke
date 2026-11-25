@@ -27,9 +27,13 @@ import { keptRanges } from "./removals";
 import { mediaEditorWords, type EditorWord } from "./words";
 import { endsClause, endsSentence, stripCaptionPunctuation } from "@/lib/transcripts/punctuate-words";
 
-/** A kept run shorter than this is an artifact between two removals (a
- *  sliver of breath), not footage anyone chose. ~100ms at 30fps. */
-const MIN_SEGMENT_FRAMES = 3;
+/** A kept run shorter than this is an artifact, not footage anyone chose: a
+ *  sliver of breath between two removals, or the ~0.09 s a float32-stored
+ *  removal leaves between a scene split and the cut right after it. Those
+ *  slivers round to 3 frames at 30 fps and flashed on screen, so the floor is
+ *  0.12 s (4 frames at 30 fps). The shortest real kept word seen in renders is
+ *  ~0.15 s; the longest edge sliver ~0.097 s. */
+const MIN_SEGMENT_SEC = 0.12;
 
 /** Start a new caption cue when the speaker pauses this long. */
 const CUE_BREAK_GAP_SEC = 0.7;
@@ -100,6 +104,7 @@ export function compileRenderPlan(
   words: EditorWord[],
 ): RenderPlan {
   const fps = doc.canvas.fps;
+  const minSegmentFrames = Math.ceil(MIN_SEGMENT_SEC * fps);
   const inputs: PlanInput[] = [];
   const segments: PlanSegment[] = [];
   let outFrame = 0;
@@ -122,7 +127,7 @@ export function compileRenderPlan(
         continue;
       }
       if (prev) frameStart = Math.max(frameStart, prev.frameEnd);
-      if (frameEnd - frameStart < MIN_SEGMENT_FRAMES) continue;
+      if (frameEnd - frameStart < minSegmentFrames) continue;
       sectionSegments.push({
         sectionId: section.id,
         inputIndex,
