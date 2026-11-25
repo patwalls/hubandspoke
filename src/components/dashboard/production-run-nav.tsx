@@ -18,6 +18,7 @@ import {
   type RunPosition,
   type RunRow,
 } from "@/lib/production/run";
+import { applyTrail, onPostOpened, readLanded } from "@/lib/publish/open-next-trail";
 
 const BACK_CLASS =
   "inline-flex shrink-0 items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground";
@@ -35,6 +36,13 @@ const BACK_CLASS =
 export function ContentBackNav({ brand, contentId }: { brand: string; contentId: string }) {
   const router = useRouter();
   const [pos, setPos] = useState<RunPosition | null>(null);
+
+  // After "Then open next": did they come back to this post from the list,
+  // or pick another one there? (publish-one-trip M5, open-next-trail.ts)
+  useEffect(() => {
+    const mark = applyTrail(onPostOpened(readLanded(), contentId, Date.now()));
+    if (mark) trackUsage(mark, brand);
+  }, [brand, contentId]);
 
   useEffect(() => {
     const run = readRun(brand);

@@ -130,6 +130,7 @@ import { DerivativesAssignAll } from "./derivatives-assign-all";
 import { assignAllIds } from "@/lib/derivatives/assign-all";
 import { UpNext } from "@/components/my-work/up-next";
 import { RunNextCard } from "@/components/dashboard/production-run-nav";
+import { writeLanded } from "@/lib/publish/open-next-trail";
 import { renderInstructions } from "@/lib/utils/markdown";
 import { recordVisit } from "@/lib/hooks/use-recent-items";
 import { startVisibleInterval } from "@/lib/visible-interval";
@@ -1433,6 +1434,8 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
   const goToNextAfterPublish = useCallback(
     (next: PublishNext) => {
       trackUsage(`publish:open-next:${next.from}`, brand);
+      // Where they go from the landing says which fix is next (M5).
+      writeLanded({ id: next.id, from: next.from, at: Date.now() });
       // The published post leaves the run, so the next page counts the
       // smaller Ready group (RunNextCard does this when you stay).
       const left = leaveRun(readRun(brand), contentId);

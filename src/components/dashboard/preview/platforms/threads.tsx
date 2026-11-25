@@ -75,7 +75,7 @@ export function ThreadsSimulator({
               onLocalEdit={onLocalEdit}
               onCommit={onCommit}
               value={post}
-              placeholder="Start a thread\u2026"
+              placeholder="Start a thread…"
               multiline
               className="text-[15px] leading-[1.4]"
             />
