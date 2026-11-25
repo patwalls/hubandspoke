@@ -100,7 +100,7 @@ import {
 } from "@/components/ui/table";
 import type { FormatChannelWithAccount } from "@/lib/format-channels";
 import { PLATFORM_FIELD_MAP, type PostType } from "@/lib/platform-field-schemas";
-import { followKeywordInCaption } from "@/lib/dm-keyword-text";
+import { followKeywordForBrand } from "@/lib/dm-keyword-text";
 import { CaptionKeywordCheck } from "@/components/dashboard/caption-keyword-check";
 import { PLATFORM_META, toPlatform } from "@/lib/platforms";
 import { ContentPreview } from "./preview/content-preview";
@@ -5063,12 +5063,12 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
           const captionKey = item.postType ? PLATFORM_FIELD_MAP[item.postType as PostType]?.caption ?? null : null;
           const caption = captionKey && typeof liveContent?.[captionKey] === "string" ? (liveContent[captionKey] as string) : null;
           if (!canEdit || !draft || !captionKey || caption == null) return;
-          const rewritten = followKeywordInCaption(caption, { prev: prevSlug, next: nextSlug, pool });
+          const { caption: rewritten, word } = followKeywordForBrand(caption, item.brand, { prev: prevSlug, next: nextSlug, pool });
           if (rewritten === caption) return;
           onLocalEdit(captionKey, rewritten);
           await onCommit(captionKey, rewritten);
           trackUsage("dm-keyword:caption-followed");
-          toast.success(`Caption now says ${nextSlug!.toUpperCase()}`);
+          toast.success(`Caption now says ${word}`);
         }}
       />
 

@@ -20,7 +20,7 @@ import { ContentPreview } from "@/components/dashboard/preview/content-preview";
 import type { EnrichmentMedia } from "@/components/dashboard/enrichment-dialog";
 import { AttachDmKeywordDialog } from "@/components/dashboard/attach-dm-keyword-dialog";
 import { PLATFORM_FIELD_MAP, type PostType } from "@/lib/platform-field-schemas";
-import { captionMentionsKeyword, followKeywordInCaption, keywordCtaLine, replaceKeywordInCaption } from "@/lib/dm-keyword-text";
+import { captionMentionsKeyword, dmCommentWord, followKeywordForBrand, keywordCtaLine, replaceKeywordInCaption } from "@/lib/dm-keyword-text";
 import { useCanEditBrand } from "@/components/brand-access";
 
 interface DraftRow {
@@ -134,7 +134,10 @@ export function PostPane({
   const currentKeyword = keyword.value ?? detail?.item.shortLinkSlug ?? null;
   const captionKey = post.postType ? PLATFORM_FIELD_MAP[post.postType as PostType]?.caption ?? null : null;
   const caption = captionKey && typeof liveContent?.[captionKey] === "string" ? (liveContent[captionKey] as string) : "";
-  const mentionsKeyword = !!currentKeyword && captionMentionsKeyword(caption, currentKeyword);
+  // What people comment: the slug itself, or on a Rebrandly brand the word
+  // after its "<short>-" prefix ("mfm-ideasheet" → IDEASHEET).
+  const currentWord = dmCommentWord(brand, currentKeyword);
+  const mentionsKeyword = !!currentWord && captionMentionsKeyword(caption, currentWord);
 
   const drafting = running === true || redrafting;
   useEffect(() => {
@@ -174,11 +177,11 @@ export function PostPane({
     setKeywordState({ base: dmKeywordProp, value: slug });
     onDmKeywordChange?.(slug);
     if (!captionKey || !slug) return;
-    const rewritten = followKeywordInCaption(caption, { prev: from, next: slug, pool });
+    const { caption: rewritten, word } = followKeywordForBrand(caption, brand, { prev: from, next: slug, pool });
     if (rewritten !== caption) {
       onLocalEdit(captionKey, rewritten);
       await onCommit(captionKey, rewritten);
-      toast.success(`Caption now says ${slug.toUpperCase()}`);
+      toast.success(`Caption now says ${word}`);
     }
   };
   // The parent changed the keyword (design CTA panel): follow it in the caption.
@@ -188,7 +191,7 @@ export function PostPane({
     const from = lastFollowed.current ?? null;
     lastFollowed.current = dmKeywordProp;
     if (!captionKey || !dmKeywordProp || !from) return;
-    const rewritten = replaceKeywordInCaption(caption, from, dmKeywordProp);
+    const rewritten = replaceKeywordInCaption(caption, dmCommentWord(brand, from), dmCommentWord(brand, dmKeywordProp));
     if (rewritten !== caption) {
       onLocalEdit(captionKey, rewritten);
       void onCommit(captionKey, rewritten);
@@ -199,8 +202,8 @@ export function PostPane({
   }, [dmKeywordProp]);
 
   const addKeywordToCaption = async () => {
-    if (!captionKey || !currentKeyword) return;
-    const next = `${caption.trimEnd()}\n\n${keywordCtaLine(currentKeyword)}`.trimStart();
+    if (!captionKey || !currentWord) return;
+    const next = `${caption.trimEnd()}\n\n${keywordCtaLine(currentWord)}`.trimStart();
     onLocalEdit(captionKey, next);
     await onCommit(captionKey, next);
   };
@@ -270,20 +273,20 @@ export function PostPane({
         <div className="mb-2 flex flex-wrap items-center gap-2 rounded-md border border-border bg-muted/40 px-2.5 py-1.5 text-xs">
           <MessageSquareTextIcon className="size-3.5 text-muted-foreground" />
           <span className="text-muted-foreground">DM keyword</span>
-          {currentKeyword ? (
-            <span className="rounded bg-background px-1.5 py-0.5 font-mono font-semibold">{currentKeyword.toUpperCase()}</span>
+          {currentWord ? (
+            <span className="rounded bg-background px-1.5 py-0.5 font-mono font-semibold">{currentWord.toUpperCase()}</span>
           ) : (
             <span className="text-muted-foreground">none — comments won&apos;t trigger a DM</span>
           )}
           <button type="button" onClick={() => setKeywordOpen(true)} disabled={!canEdit} title={canEdit ? undefined : "View only — you don't have edit access to this brand"} className="rounded-md border border-border bg-background px-2 py-0.5 hover:bg-muted disabled:opacity-50">
             {currentKeyword ? "Change…" : "Attach…"}
           </button>
-          {canEdit && currentKeyword && draft && !mentionsKeyword && (
-            <button type="button" onClick={() => void addKeywordToCaption()} className="ml-auto text-sky-700 hover:underline" title={`The caption doesn't say ${currentKeyword.toUpperCase()} yet`}>
-              Add &ldquo;comment {currentKeyword.toUpperCase()}&rdquo; to the caption
+          {canEdit && currentWord && draft && !mentionsKeyword && (
+            <button type="button" onClick={() => void addKeywordToCaption()} className="ml-auto text-sky-700 hover:underline" title={`The caption doesn't say ${currentWord.toUpperCase()} yet`}>
+              Add &ldquo;comment {currentWord.toUpperCase()}&rdquo; to the caption
             </button>
           )}
-          {currentKeyword && mentionsKeyword && <span className="ml-auto text-muted-foreground">in the caption ✓</span>}
+          {currentWord && mentionsKeyword && <span className="ml-auto text-muted-foreground">in the caption ✓</span>}
         </div>
       )}
       <AttachDmKeywordDialog

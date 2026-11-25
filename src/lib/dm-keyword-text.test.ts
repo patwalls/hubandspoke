@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { KEYWORD_PLACEHOLDER, captionKeywordMismatch, captionMentionsKeyword, followKeywordInCaption, keywordCtaLine, quotedUpperWords, replaceKeywordInCaption } from "./dm-keyword-text";
+import { KEYWORD_PLACEHOLDER, captionKeywordMismatch, dmCommentWord, captionMentionsKeyword, followKeywordForBrand, followKeywordInCaption, keywordCtaLine, quotedUpperWords, replaceKeywordInCaption } from "./dm-keyword-text";
 
 describe("the DM keyword in a caption", () => {
   it("replaces the old keyword wherever it appears, whole-word and any case, always upper-cased", () => {
@@ -79,5 +79,29 @@ describe("the post page checks the caption against the post's keyword", () => {
   it("finds the quoted upper-case words worth checking against the pool", () => {
     expect(quotedUpperWords('Comment "BRAINROT" — not "ok" — “AI” or “GROWTHHACK”', "growthhack")).toEqual(["BRAINROT"]);
     expect(quotedUpperWords("plain caption", null)).toEqual([]);
+  });
+});
+
+describe("the caption follows a keyword on a Rebrandly brand (slugs are \"<short>-<word>\")", () => {
+  // MFM/MATG keyword slugs carry the brand prefix ("mfm-ideasheet"), but
+  // people comment the word ("IDEASHEET"). The caption used to get the slug.
+  const pool = ["mfm-ideasheet", "mfm-ideavault", "mfm-p-1a2b3c4d"];
+  it("fills the placeholder with the word people comment, not the slug", () => {
+    const out = followKeywordForBrand('Comment "KEYWORD" and I\'ll DM you.', "my-first-million", { prev: null, next: "mfm-ideasheet", pool });
+    expect(out).toEqual({ caption: 'Comment "IDEASHEET" and I\'ll DM you.', word: "IDEASHEET" });
+  });
+  it("swaps the previous keyword's word and another pool word the caption copied", () => {
+    expect(followKeywordForBrand('DM me "IDEAVAULT" now', "my-first-million", { prev: "mfm-ideavault", next: "mfm-ideasheet", pool }).caption).toBe('DM me "IDEASHEET" now');
+    expect(followKeywordForBrand('DM me "IDEAVAULT" now', "my-first-million", { prev: null, next: "mfm-ideasheet", pool }).caption).toBe('DM me "IDEASHEET" now');
+  });
+  it("accepts the word as well as the slug (the design editor passes words)", () => {
+    expect(dmCommentWord("my-first-million", "ideasheet")).toBe("ideasheet");
+    expect(dmCommentWord("my-first-million", "mfm-ideasheet")).toBe("ideasheet");
+    expect(dmCommentWord("matg", "matg-p-1a2b3c4d")).toBeNull();
+    expect(followKeywordForBrand('DM me "IDEAVAULT"', "my-first-million", { prev: "ideavault", next: "ideasheet" }).caption).toBe('DM me "IDEASHEET"');
+  });
+  it("never writes a per-post link into the caption, and leaves other brands' slugs as they are", () => {
+    expect(followKeywordForBrand('Comment "KEYWORD"', "my-first-million", { prev: null, next: "mfm-p-1a2b3c4d", pool })).toEqual({ caption: 'Comment "KEYWORD"', word: null });
+    expect(followKeywordForBrand('Comment "KEYWORD"', "starter-story", { prev: null, next: "traction", pool: [] })).toEqual({ caption: 'Comment "TRACTION"', word: "TRACTION" });
   });
 });

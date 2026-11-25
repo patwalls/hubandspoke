@@ -11,6 +11,8 @@
  * Same conventions as the clip editor: immutable doc + undo, autosave with
  * cross-tab conflicts, URL-independent (the queue's dialog owns open state).
  */
+import { REBRANDLY_DM_BASE_URL, usesRebrandlyDm } from "@/lib/cta-offer-brands";
+import { dmCommentWord } from "@/lib/dm-keyword-text";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -1121,11 +1123,14 @@ function Editor({ session, brand, mode, saveDoc, onDone, onClose }: { session: D
             onOpenChange={setKeywordOpen}
             itemId={session.item.id}
             currentSlug={dmKeyword}
-            baseUrl="https://go.starterstory.com"
+            baseUrl={usesRebrandlyDm(brand) ? REBRANDLY_DM_BASE_URL : "https://go.starterstory.com"}
+            brand={brand}
             onSaved={async (slug) => {
-              setDmKeyword(slug);
-              apply(() => applyDmKeyword(storeApi.getState().doc, slug));
-              toast.success(slug ? `CTA now uses ${slug.toUpperCase()}` : "Keyword detached");
+              // The design says the word people comment ("mfm-ideasheet" → IDEASHEET).
+              const word = dmCommentWord(brand, slug);
+              setDmKeyword(word);
+              apply(() => applyDmKeyword(storeApi.getState().doc, word));
+              toast.success(word ? `CTA now uses ${word.toUpperCase()}` : "Keyword detached");
             }}
           />
         )}
