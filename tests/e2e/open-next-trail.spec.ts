@@ -65,7 +65,9 @@ test("a bounce to the list after Open next, and the post reopened, are both mark
     await page.goto(`/starter-story/content/${threadsId}`);
     await expect.poll(() => marks("publish:open-next:reopened-same")).toBe(sameBefore + 1);
     expect(await page.evaluate(() => sessionStorage.getItem("hs:publish-open-next-landed"))).toBeNull();
-    // Nothing on screen changed: the post page as it always was.
+    // Nothing on screen changed: the post page as it always was (and the
+    // Threads preview's placeholder reads "…", not "\\u2026").
+    await expect(page.getByText("Start a thread…")).toBeVisible();
     if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT, fullPage: true });
 
     // Back on the list again: the trail is spent, no second bounce.
