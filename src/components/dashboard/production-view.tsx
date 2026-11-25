@@ -18,6 +18,7 @@ import { useUrlState } from "@/lib/hooks/use-url-state";
 import { useRememberListUrl } from "@/lib/hooks/use-remember-list-url";
 import { readNextRows } from "@/lib/my-work/next-rows";
 import { ProductionListKeys, ProductionPeek, rowAfter } from "./production-peek";
+import { applyTrail, onListOpened, readLanded } from "@/lib/publish/open-next-trail";
 import { trackUsage } from "@/lib/usage/track";
 import { waitBucket } from "@/lib/usage/wait-bucket";
 import { ReportCache } from "@/lib/content-list/report-cache";
@@ -206,6 +207,12 @@ export function ProductionView({ brand, currentUserId }: ProductionViewProps) {
   useEffect(() => {
     setNextIds(new Set(readNextRows()));
   }, []);
+  // Back here seconds after "Then open next" landed on a post: a bounce
+  // (publish-one-trip M5, open-next-trail.ts).
+  useEffect(() => {
+    const mark = applyTrail(onListOpened(readLanded(), Date.now()));
+    if (mark) trackUsage(mark, brand);
+  }, [brand]);
   const showsNextRow = !loading && items.some((i) => nextIds.has(i.id));
   useEffect(() => {
     if (showsNextRow) trackUsage("production:next-row", brand);
