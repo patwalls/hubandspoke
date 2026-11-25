@@ -14,6 +14,7 @@ import {
 import type { NotificationItem } from "@/lib/notifications/to-item";
 import { PostTypeTag } from "@/components/my-work/up-next";
 import { notificationText } from "@/lib/notifications/text";
+import { NOTIFICATIONS_CHANGED_EVENT } from "@/lib/notifications/unread";
 
 type ApiShape = {
   items: NotificationItem[];
@@ -49,10 +50,13 @@ export function NotificationBell() {
     const stopPolling = startVisibleInterval(load, POLL_MS);
     const onFocus = () => void load();
     window.addEventListener("focus", onFocus);
+    // Opening a post marks its notifications read (useMarkPostNotificationsRead).
+    window.addEventListener(NOTIFICATIONS_CHANGED_EVENT, onFocus);
     return () => {
       cancelled = true;
       stopPolling();
       window.removeEventListener("focus", onFocus);
+      window.removeEventListener(NOTIFICATIONS_CHANGED_EVENT, onFocus);
     };
   }, [refetchTick]);
 

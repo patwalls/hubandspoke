@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireSession } from "@/lib/auth-guards";
-import { and, count, desc, eq, isNull } from "drizzle-orm";
+import { and, count, desc, eq, gte, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   notifications,
@@ -8,6 +8,7 @@ import {
   users,
 } from "@/lib/db/schema";
 import { toNotificationItem } from "@/lib/notifications/to-item";
+import { badgeWindowStart } from "@/lib/notifications/unread";
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
@@ -54,11 +55,16 @@ export async function GET(request: NextRequest) {
     .orderBy(desc(notifications.createdAt))
     .limit(limit);
 
+  // The badge: unread from the last 14 days only (src/lib/notifications/unread.ts).
   const [{ value: unreadCount }] = await db
     .select({ value: count() })
     .from(notifications)
     .where(
-      and(eq(notifications.userId, userId), isNull(notifications.readAt))
+      and(
+        eq(notifications.userId, userId),
+        isNull(notifications.readAt),
+        gte(notifications.createdAt, badgeWindowStart()),
+      )
     );
 
   return NextResponse.json({

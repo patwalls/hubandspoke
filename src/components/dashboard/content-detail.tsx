@@ -3,6 +3,7 @@
 import { useHydrated, formatDisplayDate } from "@/lib/hooks/use-local-date";
 import { viewsCaption } from "@/lib/views-caption";
 import React, { useRef, useState, useEffect, useCallback, useMemo } from "react";
+import { useMarkPostNotificationsRead } from "@/components/notifications/use-mark-post-notifications-read";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { BackLink } from "./back-link";
@@ -469,6 +470,8 @@ type DetailTab = (typeof DETAIL_TAB_VALUES)[number];
 
 export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, statuses, isAdmin, initialData, againstUsual = null }: ContentDetailProps) {
   const hydrated = useHydrated();
+  // You've opened the post — its notifications are no longer news.
+  useMarkPostNotificationsRead(contentId);
   // Sorted dropdown order; palette map for quick chip-color lookup.
   // Published / Scheduled are filtered OUT of the dropdown — those two
   // transitions are reachable only through the PublishScheduleDialog

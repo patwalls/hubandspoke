@@ -43,6 +43,15 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-11-25-notifications-read-on-open",
+    shippedAt: "2026-11-25T20:15:08Z",
+    kind: "fix",
+    title: "The bell only counts what's new",
+    body: "Opening a post now clears its notifications, so the red number on the bell drops as you work, even if you came in from an email. Notifications older than two weeks are still in the list, they just stop counting.",
+    href: "/notifications",
+    screen: "notifications:bell",
+  },
+  {
     id: "2026-11-24-brands-this-week",
     shippedAt: "2026-11-24T00:40:44Z",
     kind: "feature",
