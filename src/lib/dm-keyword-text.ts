@@ -7,6 +7,8 @@
  * it).
  */
 
+import { brandShortName, commentKeywordFor, usesRebrandlyDm } from "@/lib/cta-offer-brands";
+
 /** Where the caption mentions the keyword: whole word, any case. */
 export function captionMentionsKeyword(caption: string, keyword: string): boolean {
   return keywordPattern(keyword).test(caption);
@@ -67,6 +69,36 @@ export function followKeywordInCaption(caption: string, args: { prev: string | n
   const found = [...new Set((args.pool ?? []).map((s) => s.toLowerCase()))].filter((s) => s !== next.toLowerCase() && quoted(s).test(caption));
   if (found.length !== 1) return caption;
   return caption.replace(quoted(found[0]), (_m, open: string, close: string) => `${open}${next.toUpperCase()}${close}`);
+}
+
+/**
+ * `followKeywordInCaption` from the keyword dialogs, which hand over SLUGS
+ * (the attached short link and the pool). On a Rebrandly brand a slug is
+ * "<short>-<word>" ("mfm-ideasheet") while the caption says the word people
+ * comment ("IDEASHEET"), so every slug goes through `commentKeywordFor`
+ * first — otherwise the caption got "MFM-IDEASHEET" and someone retyped it.
+ * `word` is what the caption now says (upper-cased), null when the new slug
+ * has no comment word (detach, or a per-post link) and nothing changed.
+ */
+/** The word people comment for a keyword that may arrive as a slug
+ *  ("mfm-ideasheet" → "ideasheet") or already as the word ("ideasheet" —
+ *  the design editor passes words). Null for nothing, or for a per-post
+ *  link ("mfm-p-1a2b3c4d"), which is never a comment word. */
+export function dmCommentWord(brand: string | null | undefined, keyword: string | null | undefined): string | null {
+  if (!keyword) return null;
+  if (!usesRebrandlyDm(brand) || !keyword.toLowerCase().startsWith(`${brandShortName(brand!)}-`)) return keyword;
+  return commentKeywordFor(brand, keyword);
+}
+
+export function followKeywordForBrand(
+  caption: string,
+  brand: string | null | undefined,
+  args: { prev: string | null; next: string | null; pool?: readonly string[] },
+): { caption: string; word: string | null } {
+  const word = dmCommentWord(brand, args.next);
+  if (!word) return { caption, word: null };
+  const pool = (args.pool ?? []).map((s) => dmCommentWord(brand, s)).filter((w): w is string => !!w);
+  return { caption: followKeywordInCaption(caption, { prev: dmCommentWord(brand, args.prev), next: word, pool }), word: word.toUpperCase() };
 }
 
 /** What's wrong between a caption and the post's DM keyword, if anything. */
