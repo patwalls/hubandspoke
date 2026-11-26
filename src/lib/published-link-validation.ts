@@ -53,3 +53,42 @@ export function shareLinkWarning(url: string | null | undefined): string | null 
   }
   return null;
 }
+
+/**
+ * What the Publish dialog's link box shows before anything is pasted: the
+ * shape of a real link on the post's own platform, so a LinkedIn post
+ * doesn't ask for "https://x.com/…". Structural only (post type → URL
+ * shape the metrics sync reads); unknown or empty post types get a neutral
+ * "https://…".
+ */
+export function publishLinkPlaceholder(postType: string | null | undefined): string {
+  const k = (postType ?? "").toLowerCase();
+  switch (k) {
+    case "youtube_shorts":
+      return "https://youtube.com/shorts/…";
+    case "youtube_community":
+      return "https://youtube.com/post/…";
+    case "instagram_post":
+      return "https://instagram.com/p/…";
+    case "instagram_story":
+      return "https://instagram.com/stories/…";
+  }
+  switch (platformOf(postType)) {
+    case "youtube":
+      return "https://youtube.com/watch?v=…";
+    case "instagram":
+      return "https://instagram.com/reel/…";
+    case "x":
+      return "https://x.com/…/status/…";
+    case "tiktok":
+      return "https://tiktok.com/@…/video/…";
+    case "linkedin":
+      return "https://linkedin.com/feed/update/…";
+    case "threads":
+      return "https://threads.com/@…/post/…";
+    case "facebook":
+      return "https://facebook.com/…/posts/…";
+    default:
+      return "https://…";
+  }
+}
