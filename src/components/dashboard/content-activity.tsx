@@ -998,7 +998,7 @@ export function ContentActivity({ contentId, brand, refreshKey = 0, statusPalett
   );
 
   return (
-    <div className="rounded-lg border border-border bg-card p-5 space-y-5">
+    <div data-post-activity className="rounded-lg border border-border bg-card p-5 space-y-5">
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
