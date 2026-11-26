@@ -4,6 +4,10 @@ import { dirname } from "node:path";
 
 const AUTH_FILE = "tests/e2e/.auth/user.json";
 
+// Login needs no video (and video needs Playwright's separate ffmpeg
+// download) — matches playwright.config.ts's opt-in E2E_VIDEO default.
+setup.use({ video: process.env.E2E_VIDEO === "1" ? "retain-on-failure" : "off" });
+
 /**
  * Run once before any other e2e project.
  *

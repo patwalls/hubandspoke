@@ -7,6 +7,8 @@ import { useMarkPostNotificationsRead } from "@/components/notifications/use-mar
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { BackLink } from "./back-link";
+import { DerivativesSortHeader, useDerivativesSort } from "./derivatives-sort-header";
+import { sortDerivativeRows } from "@/lib/derivatives-sort";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { ChevronDownIcon, CopyIcon, DownloadIcon, ExternalLinkIcon, FileTextIcon, FilmIcon, GitBranchIcon, GitMerge, LinkIcon, MoreHorizontalIcon, PencilIcon, RefreshCwIcon, RepeatIcon, Share2Icon, SkullIcon, SparklesIcon, Trash2Icon, TrendingUpIcon, UploadIcon } from "lucide-react";
@@ -473,6 +475,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
   const hydrated = useHydrated();
   // You've opened the post — its notifications are no longer news.
   useMarkPostNotificationsRead(contentId);
+  const [derivativesSort, setDerivativesSort] = useDerivativesSort(brand);
   // Sorted dropdown order; palette map for quick chip-color lookup.
   // Published / Scheduled are filtered OUT of the dropdown — those two
   // transitions are reachable only through the PublishScheduleDialog
@@ -4184,24 +4187,17 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
                     <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
                       Status
                     </th>
-                    <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground whitespace-nowrap">
-                      Published
-                    </th>
-                    <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
-                      Views
-                    </th>
-                    <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
-                      Likes
-                    </th>
-                    <th className="px-3 py-2.5 text-left font-mono uppercase tracking-wider text-[10px] text-muted-foreground">
-                      Comments
-                    </th>
+                    <DerivativesSortHeader label="Published" column="published" sort={derivativesSort} onSort={setDerivativesSort} />
+                    <DerivativesSortHeader label="Views" column="views" sort={derivativesSort} onSort={setDerivativesSort} />
+                    <DerivativesSortHeader label="Likes" column="likes" sort={derivativesSort} onSort={setDerivativesSort} />
+                    <DerivativesSortHeader label="Comments" column="comments" sort={derivativesSort} onSort={setDerivativesSort} />
                   </tr>
                 </thead>
                 <tbody>
-                  {mergedRows.map((d) => (
+                  {sortDerivativeRows(mergedRows, derivativesSort).map((d) => (
                     <tr
                       key={d.key}
+                      data-testid="derivative-row"
                       className="border-b border-border/50 hover:bg-accent/30 transition-colors"
                     >
                       <td className="px-3 py-2 max-w-[200px] sm:max-w-[360px]">
