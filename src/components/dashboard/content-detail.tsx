@@ -137,6 +137,7 @@ import { recordVisit } from "@/lib/hooks/use-recent-items";
 import { startVisibleInterval } from "@/lib/visible-interval";
 import { validatePublishedLinkPlatform } from "@/lib/published-link-validation";
 import { trackUsage } from "@/lib/usage/track";
+import { usePostReadMarks } from "./use-post-read-marks";
 import { leaveRun, readRun, saveRun } from "@/lib/production/run";
 import { nextAfterPublish, READY, type MyWorkNext, type PublishNext } from "@/lib/publish/next-after-publish";
 import { assignedNoticeText } from "@/lib/assigned-notice";
@@ -522,6 +523,7 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
     | { kind: "error"; message: string }
   >({ kind: "idle" });
   const [activityRefreshKey, setActivityRefreshKey] = useState(0);
+  usePostReadMarks(data?.item?.id, brand);
 
   const [draft, setDraft] = useState<DraftRow | null>(null);
   const [liveContent, setLiveContent] = useState<ContentDraftContent | null>(
