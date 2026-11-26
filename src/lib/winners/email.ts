@@ -126,6 +126,8 @@ export function buildWinnersEmail(input: WinnersEmailInput): WinnersEmail | null
       `Dashboard: ${baseUrl}/${b.slug}`,
     ]),
     "",
+    "You get this on Mondays when something won.",
+    `Turn this email off: ${baseUrl}/winners-email`,
     "— Hub & Spoke",
   ].join("\n");
 
@@ -179,7 +181,7 @@ export function buildWinnersEmail(input: WinnersEmailInput): WinnersEmail | null
   const html = `
       <p>${escapeHtml(greeting)}</p>
       <p>Last week's posts that beat their own account's usual, and why.</p>${brandHtml}
-      <p style="color:#999;font-size:12px;margin-top:24px;">Compared on views (likes where the platform hides views) against the same account's median for that post type over the 90 days before. You get this on Mondays when something won.</p>
+      <p style="color:#999;font-size:12px;margin-top:24px;">Compared on views (likes where the platform hides views) against the same account's median for that post type over the 90 days before. You get this on Mondays when something won. <a href="${baseUrl}/winners-email" style="color:#999;">Turn it off</a>.</p>
       <p style="color:#999;font-size:12px;">— Hub &amp; Spoke</p>
     `;
 

@@ -28,7 +28,7 @@ import { getScorecardData } from "@/lib/services/scorecard";
 import { getAiSpendSpikes, type AiSpendSpike } from "@/lib/services/ai-spend";
 import { sendDailyScorecardEmail, sendMyWorkDigestEmail, sendWinnersEmail } from "@/lib/email";
 import { buildWinnersEmail } from "@/lib/winners/email";
-import { firstNameOf, loadWinnersEmailBrands } from "@/lib/services/winners/weekly-email";
+import { firstNameOf, loadWinnersEmailBrands, loadWinnersEmailRecipients } from "@/lib/services/winners/weekly-email";
 import { appBaseUrl, loadMyWorkDigest } from "@/lib/my-work/queries";
 import { isFeatureEnabled } from "@/lib/feature-flags";
 import { db } from "@/lib/db";
@@ -458,17 +458,12 @@ export const myWorkDigestTask: Task = async (_payload, helpers) => {
 /**
  * Monday winners email ("what's working" M4). Reads every brand's winners and
  * format scoreboard once, then one email per person with the `winnersEmail`
- * flag (not deactivated). No winner anywhere → no email. Each send is wrapped
+ * flag who hasn't turned it off (`loadWinnersEmailRecipients`). No winner anywhere → no email. Each send is wrapped
  * and the task never throws after the reads, so a retry can't double-send.
  */
 export const winnersEmailTask: Task = async (_payload, helpers) => {
   const start = Date.now();
-  const people = (
-    await db
-      .select({ id: users.id, email: users.email, name: users.name })
-      .from(users)
-      .where(isNull(users.deactivatedAt))
-  ).filter((u) => isFeatureEnabled("winnersEmail", u));
+  const people = await loadWinnersEmailRecipients();
   if (people.length === 0) {
     helpers.logger.info("winners-email no recipients");
     return;

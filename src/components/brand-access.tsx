@@ -23,7 +23,7 @@ import { createContext, useContext } from "react";
 import { usePathname } from "next/navigation";
 
 // Top-level dashboard segments that are not a brand slug.
-const NON_BRAND_SEGMENTS = new Set(["all", "admin", "settings", "my-work", "notifications", "coverage"]);
+const NON_BRAND_SEGMENTS = new Set(["all", "admin", "settings", "my-work", "notifications", "coverage", "winners-email"]);
 
 type Editable = "all" | readonly string[];
 

@@ -143,11 +143,18 @@ export default async function MyWorkPage() {
       <div>
         <div className="flex items-baseline justify-between gap-3">
           <h1 className="text-xl font-semibold text-foreground">My Work</h1>
-          {isFeatureEnabled("myWorkDigest", session.user) && (
-            <Link href="/my-work/email" className="text-xs text-muted-foreground hover:text-foreground hover:underline">
-              Morning email
-            </Link>
-          )}
+          <span className="flex items-baseline gap-3">
+            {isFeatureEnabled("myWorkDigest", session.user) && (
+              <Link href="/my-work/email" className="text-xs text-muted-foreground hover:text-foreground hover:underline">
+                Morning email
+              </Link>
+            )}
+            {isFeatureEnabled("winnersEmail", session.user) && (
+              <Link href="/winners-email" className="text-xs text-muted-foreground hover:text-foreground hover:underline">
+                Monday email
+              </Link>
+            )}
+          </span>
         </div>
         <p className="text-xs text-muted-foreground mt-0.5">
           Everything you&apos;re on the hook for, across every brand.

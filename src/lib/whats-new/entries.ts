@@ -43,6 +43,15 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-11-26-winners-email-everyone",
+    shippedAt: "2026-11-26T15:30:42Z",
+    kind: "feature",
+    title: "Last week's winners, in your inbox on Mondays",
+    body: "Every Monday morning you'll get one email with last week's posts that beat their own account's usual on every brand, with a line on why each one worked, plus the formats that keep winning. No email in a week when nothing won. Don't want it? Turn it off on the Monday email page, linked at the bottom of every email.",
+    href: "/winners-email",
+    screen: "/winners-email",
+  },
+  {
     id: "2026-11-25-notifications-read-on-open",
     shippedAt: "2026-11-25T20:15:08Z",
     kind: "fix",

@@ -9,7 +9,7 @@
 
 // First path segments that are real top-level routes, not a brand slug.
 // `all` is deliberately absent — it's the synthetic "All content" brand.
-const TOP_LEVEL = new Set(["admin", "coverage", "developers", "my-work", "notifications", "settings"]);
+const TOP_LEVEL = new Set(["admin", "coverage", "developers", "my-work", "notifications", "settings", "winners-email"]);
 
 // Query params that change what the screen shows (a tab, a view mode).
 const KEPT_PARAMS = ["tab", "v"];

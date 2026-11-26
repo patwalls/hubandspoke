@@ -44,7 +44,7 @@ CRON ENTRIES (src/jobs/crontab.ts, UTC)
   Mon 11:00  idea-auto-close        → close clip-idea Idea rows nobody touched in 60 days (Killed + `killed` event `bulk: "auto-close"`, `run: <date>`; one tx per brand); Undo per run on the queue's History tab. Off: IDEA_AUTO_CLOSE=off
   14:00 UTC  format-editor-rules    → Haiku (~10 calls/week): per format with ≥ 4 draft → published rewrites in 60d and rules older than 6.5 days, write 3–5 "what editors keep changing" rules to formats.editor_rules (shown on the format page; people add them to the Skill)
   */3h :40   winner-notes           → Haiku (one call per NEW winner, ≤ 20 per brand): for each of the week's posts that beat their usual (strip + post page) with no note, write one "why it won" sentence (winner vs. the account's 5 posts nearest its median) to production_items.win_note
-  Mon 13:00  winners-email          → per `winnersEmail`-flagged user: last week's strip winners (with win_note) + top formats from the 4-week scoreboard + quiet channels (30 d, mostly no likes), every enabled brand; no winners → no email
+  Mon 13:00  winners-email          → every active user who hasn't turned it off (/winners-email): last week's strip winners (with win_note) + top formats from the 4-week scoreboard + quiet channels (30 d, mostly no likes), every enabled brand; no winners → no email
   (home Mac, hourly) yt-archive launchd cron → archive-yt-local.ts: yt-dlp → prod S3 + prod DB. NOT on the worker dyno — see home-machine/yt-archive/. Runs `--brands=auto` (2026-08-20): brand list resolved from the DB each run = every brand with an active YouTube account, so onboarding a brand in the settings UI is enough
   (home Mac, hourly) H&S OPS LOOP — `/go` (usually via `cx hubandspoke --go`) runs
     `.claude/commands/lap.md` on repeat through the shared fresh-context runner
@@ -1205,14 +1205,19 @@ v2 (LLM-recommended source × target pairs admitted to the queue at ≥70 confid
   linked posts in 30 days and ≥ half at 0 likes — `quietChannels` in
   `src/lib/channel-reach.ts`; worst 3 in the email, channels-worth-it M4).
   Quiet channels alone never send the email. Read once, shared
-  across recipients. Recipients = users with the `winnersEmail` flag (Pat +
-  the e2e user while dogfooded) and `deactivated_at IS NULL`.
+  across recipients. Recipients = `loadWinnersEmailRecipients`: every user
+  with `deactivated_at IS NULL` and `winners_email_enabled = true` (the
+  `winnersEmail` flag is `everyone` since 2026-11-26, idea eaa54a — Pat-only
+  from 10-31 until then). Opt-out: each email's footer links to
+  `/winners-email`, which shows the email and flips the column
+  (`PATCH /api/winners-email`).
 - **Outputs:** one HubSpot SMTP send per recipient; no winner on any brand →
   no email. No DB writes, no LLM calls (the "Why:" lines are `win_note`).
 - **Idempotency:** per-person sends are wrapped and the task never throws after
   the reads, so graphile never retries into a double send.
-- **Preview:** `GET /api/winners-email/preview` (flag-gated) renders the exact
-  email; `?send=me` sends it to yourself.
+- **Preview:** `/winners-email` (the on/off page) and
+  `GET /api/winners-email/preview` (flag-gated) render the exact email;
+  `?send=me` sends it to yourself.
 
 ### `clip-idea-drought-watch` — silent clip-idea generation failure alert
 - **Trigger:** cron `30 15 * * *` (daily at 15:30 UTC ≈ 11:30am ET). Added

@@ -144,7 +144,14 @@ export function WinnersStrip({ brand }: { brand: string }) {
         <div id="winners-body" className="border-t border-border px-4 pb-3 pt-2">
           <p className="mb-1 text-xs text-muted-foreground">
             Views (likes where the platform hides views) against the same account&apos;s median for that post
-            type over 90 days.
+            type over 90 days.{" "}
+            <Link
+              href="/winners-email"
+              onClick={() => trackUsage("home:winners:email", brand)}
+              className="underline-offset-2 hover:text-foreground hover:underline"
+            >
+              Get these by email on Mondays
+            </Link>
           </p>
           <ol className="divide-y divide-border">
             {winners.map((w) => {

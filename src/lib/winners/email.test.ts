@@ -98,4 +98,11 @@ describe("buildWinnersEmail", () => {
       expect(e.text).not.toContain("@acct3");
     });
   });
+
+  it("links every email to its off switch, in both the HTML and the text", () => {
+    const e = buildWinnersEmail({ ...base, brands: [brand("a", [w("Hit", 3)])] })!;
+    expect(e.html).toContain('<a href="https://app.test/winners-email"');
+    expect(e.html).toContain("Turn it off");
+    expect(e.text).toContain("Turn this email off: https://app.test/winners-email");
+  });
 });
