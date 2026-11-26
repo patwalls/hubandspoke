@@ -6,7 +6,8 @@ import { ChevronDown } from "lucide-react";
 import { trackUsage } from "@/lib/usage/track";
 import { paceSummary, type BrandPaceRow, type Pace } from "@/lib/brand-pace/pace";
 
-const OPEN_KEY = "hs:brand-pace-open";
+export const BRAND_PACE_OPEN_KEY = "hs:brand-pace-open";
+const OPEN_KEY = BRAND_PACE_OPEN_KEY;
 const compact = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 });
 
 const PACE_LABEL: Record<Pace, string> = {
