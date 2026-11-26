@@ -1928,6 +1928,12 @@ export const users = pgTable(
     myWorkDigestEnabled: boolean("my_work_digest_enabled")
       .notNull()
       .default(true),
+    // Monday winners email: opt-out, so default true (sent to every active
+    // user since 2026-11-26). Flipped by the person on /winners-email, which
+    // every email's footer links to.
+    winnersEmailEnabled: boolean("winners_email_enabled")
+      .notNull()
+      .default(true),
     invitedBy: uuid("invited_by").references((): AnyPgColumn => users.id, {
       onDelete: "set null",
     }),

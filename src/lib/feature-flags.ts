@@ -97,11 +97,16 @@ const FLAGS = {
   /**
    * Monday winners email ("what's working" M4): last week's posts that beat
    * their usual on every brand, with why, plus the formats that keep winning.
-   * Pat-only while it's dogfooded. See docs/automation.md → `winners-email`.
+   * See docs/automation.md → `winners-email`.
    */
   winnersEmail: {
     emails: ["patrickswalls@gmail.com", "e2e@local.test"],
     envVar: "FEATURE_WINNERS_EMAIL_EMAILS",
+    // Rolled out to every account (2026-11-26, idea eaa54a): Pat-only since
+    // 10-31, and 7 people only ever read the dashboard. Each person can turn
+    // it off on /winners-email (users.winners_email_enabled). The allowlist
+    // stays so flipping this back off restores Pat-only.
+    everyone: true,
   },
   /**
    * Cross-post picker: a target whose cross-posts always get handed to one

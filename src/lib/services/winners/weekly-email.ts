@@ -5,9 +5,10 @@
  * rules are in `src/lib/winners/email.ts`; the send is the `winners-email`
  * task. Brand reads are shared across recipients — only the greeting differs.
  */
-import { asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { brands } from "@/lib/db/schema";
+import { brands, users } from "@/lib/db/schema";
+import { isFeatureEnabled } from "@/lib/feature-flags";
 import { getFormatScoreboard, getRecentWinners } from "@/lib/db/winners";
 import type { WinnersEmailBrand } from "@/lib/winners/email";
 import { quietChannels, REACH_WINDOW_DAYS, type QuietChannelRow } from "@/lib/channel-reach";
@@ -66,4 +67,14 @@ export async function loadWinnersEmailBrands(): Promise<WinnersEmailBrand[]> {
 
 export function firstNameOf(name: string | null): string | null {
   return name?.trim().split(/\s+/)[0] || null;
+}
+
+/** Who gets Monday's email: active people with the `winnersEmail` flag who
+ *  haven't turned it off on /winners-email. */
+export async function loadWinnersEmailRecipients(): Promise<{ id: string; email: string; name: string | null }[]> {
+  const rows = await db
+    .select({ id: users.id, email: users.email, name: users.name })
+    .from(users)
+    .where(and(isNull(users.deactivatedAt), eq(users.winnersEmailEnabled, true)));
+  return rows.filter((u) => isFeatureEnabled("winnersEmail", u));
 }

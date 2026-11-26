@@ -15,6 +15,7 @@ describe("screenFor", () => {
 
   it("keeps top-level routes as they are", () => {
     expect(screenFor("/my-work")).toEqual({ screen: "/my-work", brand: null });
+    expect(screenFor("/winners-email")).toEqual({ screen: "/winners-email", brand: null });
     expect(screenFor("/settings/users")).toEqual({ screen: "/settings/users", brand: null });
     expect(screenFor("/")).toEqual({ screen: "/", brand: null });
   });
