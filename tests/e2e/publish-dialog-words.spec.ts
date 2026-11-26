@@ -15,6 +15,7 @@ test("publish dialog speaks the post's platform", async ({ page }) => {
         title: `E2E LinkedIn post ${stamp}`,
         platform: ["linkedin"],
         postType: "linkedin",
+        publishedDate: new Date().toISOString().slice(0, 10),
         brand: "starter-story",
       },
     });
