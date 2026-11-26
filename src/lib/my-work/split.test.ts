@@ -173,4 +173,19 @@ describe("upNext", () => {
     expect(upNext(mixed, "xp-a", { repostedFromItemId: null, pillarContentItemId: null })).toMatchObject({ next: { id: "rv-old" }, sameSource: false });
     expect(upNext(mixed, "xp-a", { repostedFromItemId: "nope" })).toMatchObject({ next: { id: "rv-old" }, sameSource: false, siblings: [] });
   });
+  it("offers a post's cross-posts in the order this person publishes them", () => {
+    const xp = (id: string, postType: string) => ({ ...row(id, "Ready To Publish"), repostedFromItemId: "src", postType });
+    // Created in one batch: oldest-touched order is arbitrary (TikTok first here).
+    const split = {
+      toReview: [],
+      yourTurn: [xp("li", "linkedin"), xp("fb", "facebook_post"), xp("tt", "tiktok")],
+      waitingOnOthers: [],
+    };
+    const order = new Map([["linkedin", 0.2], ["facebook_post", 0.8], ["tiktok", 1]]);
+    const out = upNext(split, "threads-just-published", { repostedFromItemId: "src" }, order);
+    expect(out.next?.id).toBe("li");
+    expect(out.siblings.map((r) => r.id)).toEqual(["li", "fb", "tt"]);
+    // No history yet: the order it always had.
+    expect(upNext(split, "x", { repostedFromItemId: "src" }).siblings.map((r) => r.id)).toEqual(["tt", "fb", "li"]);
+  });
 });

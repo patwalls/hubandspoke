@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { requireSession } from "@/lib/auth-guards";
-import { getMyWork, type MyWorkItem } from "@/lib/my-work/queries";
+import { getMyWork, getPublishOrder, type MyWorkItem } from "@/lib/my-work/queries";
 import { upNext } from "@/lib/my-work/split";
 import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
@@ -20,7 +20,8 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * (when that flips, the page offers the next one). Siblings of the current
  * post (same post cross-posted, same video clipped) come first, and
  * `sameSource` says so; `siblings` lists all of them still waiting (with
- * their post type, since cross-posts share one title). Fetched when the
+ * their post type, since cross-posts share one title), in the order this
+ * person usually publishes a post's platforms in. Fetched when the
  * page's status or editor changes, never on a timer.
  */
 export async function GET(req: NextRequest) {
@@ -30,7 +31,7 @@ export async function GET(req: NextRequest) {
   if (!userId) return NextResponse.json({ next: null, remaining: 0, currentWaiting: false });
   const raw = req.nextUrl.searchParams.get("current");
   const current = raw && UUID_RE.test(raw) ? raw : null;
-  const [split, links] = await Promise.all([
+  const [split, links, order] = await Promise.all([
     getMyWork(userId),
     current
       ? db
@@ -43,8 +44,9 @@ export async function GET(req: NextRequest) {
           .limit(1)
           .then((rows) => rows[0] ?? null)
       : null,
+    current ? getPublishOrder(userId) : null,
   ]);
-  const { next, remaining, currentWaiting, sameSource, siblings } = upNext(split, current, links);
+  const { next, remaining, currentWaiting, sameSource, siblings } = upNext(split, current, links, order);
   const brief = (r: MyWorkItem) => ({
     id: r.id,
     title: r.title,
