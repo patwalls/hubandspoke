@@ -630,6 +630,12 @@ other, so a Next upgrade never needs a hand cache clear. A `.next` that is a
 link (the broker links gitignored entries in from Pat's checkout) is replaced
 by a real one, never cleared through. Test: `src/app/loop-e2e-deps.test.ts`.
 
+**No video by default.** Recording video needs Playwright's separate ffmpeg
+download; when that cache entry vanished on the Mac (2026-11-26) every run
+died in `auth.setup` before any assertion. So `video` is `off` unless
+`E2E_VIDEO=1` (then `retain-on-failure`). Failure screenshots and traces
+need no ffmpeg. Test: `src/test/playwright-config.test.ts`.
+
 **Visual verification from Claude Code.** `@playwright/mcp` is registered
 in `.mcp.json` as the `playwright` server. From inside Claude Code,
 `mcp__playwright__browser_navigate` + `mcp__playwright__browser_snapshot`
