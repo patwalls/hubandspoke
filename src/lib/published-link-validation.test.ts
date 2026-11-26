@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
+import { inferPlatformFromUrl, platformOf } from "./platform-url";
 import {
+  publishLinkPlaceholder,
   shareLinkWarning,
   validatePublishedLinkPlatform,
 } from "./published-link-validation";
@@ -79,5 +81,36 @@ describe("shareLinkWarning", () => {
     expect(shareLinkWarning("")).toBeNull();
     expect(shareLinkWarning("facebook.com/share/p/x")).toBeNull();
     expect(shareLinkWarning(null)).toBeNull();
+  });
+});
+
+describe("publishLinkPlaceholder", () => {
+  // The Publish dialog showed "https://x.com/…" on every post, LinkedIn and
+  // Instagram included (2026-11). The hint must name the post's own platform.
+  const postTypes = [
+    "youtube_long",
+    "youtube_shorts",
+    "youtube_community",
+    "instagram_reel",
+    "instagram_post",
+    "instagram_story",
+    "x",
+    "tiktok",
+    "linkedin",
+    "threads",
+    "facebook_post",
+  ];
+  it.each(postTypes)("%s: the placeholder is a link on its own platform", (pt) => {
+    const sample = publishLinkPlaceholder(pt).replaceAll("…", "abc123");
+    expect(inferPlatformFromUrl(sample)).toBe(platformOf(pt));
+  });
+
+  it("never offers an X link for a LinkedIn post", () => {
+    expect(publishLinkPlaceholder("linkedin")).not.toMatch(/x\.com/);
+  });
+
+  it("says nothing platform-specific when the post type is unknown", () => {
+    expect(publishLinkPlaceholder(null)).toBe("https://…");
+    expect(publishLinkPlaceholder("newsletter")).toBe("https://…");
   });
 });

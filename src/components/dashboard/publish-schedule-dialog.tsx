@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { trackUsage } from "@/lib/usage/track";
 import {
+  publishLinkPlaceholder,
   shareLinkWarning,
   validatePublishedLinkPlatform,
 } from "@/lib/published-link-validation";
@@ -307,7 +308,7 @@ export function PublishScheduleDialog({
               <Input
                 id="publish-link"
                 type="url"
-                placeholder="https://x.com/…"
+                placeholder={publishLinkPlaceholder(postType)}
                 value={link}
                 onChange={(e) => setLink(e.target.value)}
                 onKeyDown={(e) => {
@@ -365,8 +366,8 @@ export function PublishScheduleDialog({
                 onChange={(e) => setPublishedDate(e.target.value)}
               />
               <p className="text-[11px] text-muted-foreground">
-                Defaults to today. Same-day sort order is broken by the
-                separate `publishedAt` timestamp the server stamps once.
+                Defaults to today. Change it if the post went live on
+                another day.
               </p>
             </div>
           </div>
