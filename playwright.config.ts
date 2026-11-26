@@ -38,6 +38,9 @@ if (existsSync(ENV_FILE)) {
  *   See `docs/conventions.md` for how to seed via `scripts/seed-user.mjs`.
  *
  * Optional env:
+ *   - E2E_VIDEO=1 — record a video of failing tests (needs
+ *     `npx playwright install ffmpeg`; off by default so a missing ffmpeg
+ *     never fails a run).
  *   - E2E_BASE_URL — override the dev server target. Default
  *     `http://localhost:3000`.
  *
@@ -60,7 +63,11 @@ export default defineConfig({
     baseURL: process.env.E2E_BASE_URL ?? "http://localhost:3000",
     trace: "on-first-retry",
     screenshot: "only-on-failure",
-    video: "retain-on-failure",
+    // Video needs Playwright's separate ffmpeg download. When that cache
+    // entry went missing on the Mac (2026-11-26), every run died at login
+    // before a single assertion — so video is opt-in (E2E_VIDEO=1) and a
+    // run never depends on it. Failure screenshots + traces need no ffmpeg.
+    video: process.env.E2E_VIDEO === "1" ? "retain-on-failure" : "off",
   },
   projects: [
     // Logs in once + writes session cookie to disk. Other projects depend
