@@ -21,6 +21,8 @@
  * Generate), so counting them buried real work under thousands of rows.
  */
 
+import { inPublishOrder } from "./publish-order";
+
 export const YOUR_TURN_STATUSES = ["Assigned", "Ready To Publish"] as const;
 export const OFF_PLATE_STATUSES = ["Published", "Killed", "Idea"] as const;
 
@@ -126,16 +128,22 @@ export function isSibling(row: SourceLinks, of: SourceLinks | null): boolean {
  * jump the line, because a curator publishing five cross-posts went back to
  * the production list to find each next one. `sameSource` says the next one
  * is a sibling, and `siblings` lists every one still waiting, so the card can
- * name each by platform (they all share the post's title).
+ * name each by platform (they all share the post's title). `publishOrder`
+ * (this person's `publishRanks`) puts the siblings in the order they usually
+ * publish a post's platforms in.
  */
 export function upNext<R extends MyWorkRow & SourceLinks>(
   split: MyWorkSplit<R>,
   currentId: string | null,
   siblingsOf: SourceLinks | null = null,
+  publishOrder: ReadonlyMap<string, number> | null = null,
 ): { next: R | null; remaining: number; currentWaiting: boolean; sameSource: boolean; siblings: R[] } {
   const all = [...split.toReview, ...[...split.yourTurn].reverse()];
   const queue = all.filter((r) => r.id !== currentId);
-  const siblings = queue.filter((r) => isSibling(r, siblingsOf));
+  const siblings = inPublishOrder(
+    queue.filter((r) => isSibling(r, siblingsOf)),
+    publishOrder,
+  );
   const sibling = siblings[0] ?? null;
   const next = sibling ?? queue[0] ?? null;
   return {

@@ -12,6 +12,7 @@ import {
 } from "./split";
 import { htmlToPlainText } from "@/lib/comments/sanitize";
 import { rowNews, type RowNews } from "./news";
+import { publishRanks } from "./publish-order";
 import { buildMyWorkDigest, DIGEST_WINS, previousDigestSend, type DigestWin } from "./digest";
 import type { WinNote } from "@/lib/db/schema";
 
@@ -303,4 +304,33 @@ export async function getStatusSinceMany(itemIds: string[]): Promise<Map<string,
     )
     .orderBy(contentEvents.contentItemId, desc(contentEvents.createdAt));
   return new Map(rows.map((r) => [r.itemId, r.at]));
+}
+
+const PUBLISH_ORDER_WINDOW_DAYS = 30;
+
+/**
+ * This person's usual cross-post publish order (`publishRanks`): their Ready
+ * To Publish → Published moves in the last 30 days, grouped by post family.
+ * Read when Up next / "Then open next" asks for the siblings of a post.
+ */
+export async function getPublishOrder(userId: string): Promise<Map<string, number>> {
+  const rows = await db
+    .select({
+      family: sql<string>`COALESCE(${productionItems.repostedFromItemId}, ${productionItems.id})`,
+      postType: productionItems.postType,
+      at: contentEvents.createdAt,
+    })
+    .from(contentEvents)
+    .innerJoin(productionItems, eq(productionItems.id, contentEvents.contentItemId))
+    .where(
+      and(
+        eq(contentEvents.userId, userId),
+        eq(contentEvents.eventType, "status_change"),
+        sql`${contentEvents.payload}->>'from' = 'Ready To Publish'`,
+        sql`${contentEvents.payload}->>'to' = 'Published'`,
+        sql`${contentEvents.createdAt} > now() - make_interval(days => ${PUBLISH_ORDER_WINDOW_DAYS})`,
+      ),
+    )
+    .limit(1000);
+  return publishRanks(rows);
 }
