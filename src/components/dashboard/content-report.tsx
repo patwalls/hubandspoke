@@ -6,6 +6,7 @@ import { format, subDays } from "date-fns";
 import { FilterPills, type FilterAccount } from "./filter-pills";
 import { MetricTiles } from "./metric-tiles";
 import { BrandPaceStrip } from "./brand-pace-strip";
+import { CompareBrandsLink } from "./compare-brands-link";
 import { WinnersStrip } from "./winners-strip";
 import { PeriodTable, type GroupDim } from "./period-table";
 import type { ContentReportData } from "@/types";
@@ -216,13 +217,16 @@ export function ContentReport({ brand }: { brand: string }) {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-xl sm:text-2xl font-semibold text-foreground">
-          Content Command Center
-        </h1>
-        <p className="text-xs sm:text-sm text-muted-foreground mt-1">
-          Track content production across all platforms
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-xl sm:text-2xl font-semibold text-foreground">
+            Content Command Center
+          </h1>
+          <p className="text-xs sm:text-sm text-muted-foreground mt-1">
+            Track content production across all platforms
+          </p>
+        </div>
+        <CompareBrandsLink brand={brand} />
       </div>
 
       {/* Error banner */}
