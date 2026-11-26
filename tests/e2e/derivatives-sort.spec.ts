@@ -1,6 +1,8 @@
 import { test, expect } from "@playwright/test";
 import postgres from "postgres";
 
+test.use({ video: process.env.E2E_VIDEO === "1" ? "retain-on-failure" : "off" });
+
 // A video's Derivatives tab: clicking "Views" puts the best-performing piece
 // made from it on top, the choice survives a reload (per browser), and a
 // second click goes back to the tab's usual order.
