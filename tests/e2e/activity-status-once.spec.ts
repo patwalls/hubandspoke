@@ -20,9 +20,9 @@ test("the post's Activity skips a status change to the same status", async ({ pa
   expect(res.ok(), await res.text()).toBeTruthy();
   const id = (await res.json()).id as string;
 
-  // Created Published → back to Ready To Publish → Published, then the same
-  // status again (must not add a row): two real flips.
-  for (const status of ["Ready To Publish", "Published", "Published"]) {
+  // Created Published → Review → Ready To Publish, then the same status again
+  // (must not add a row): two real flips.
+  for (const status of ["Review", "Ready To Publish", "Ready To Publish"]) {
     const put = await page.request.put("/api/production-items", {
       data: { id, status },
     });
