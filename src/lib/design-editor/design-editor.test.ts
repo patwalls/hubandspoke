@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseDesignDoc, pageVideo, resizeCanvas, DEFAULT_CROP, IG_SQUARE, PHOTO_PLACEHOLDER, type DesignCaptionsElement, type DesignTextElement } from "./doc";
+import { parseDesignDoc, pageVideo, resizeCanvas, DEFAULT_CROP, IG_SQUARE, PHOTO_PLACEHOLDER, type DesignCaptionsElement, type DesignDoc, type DesignTextElement } from "./doc";
 import { layoutDesignText, coverGeometry, cropForOffset, textEditorMetrics } from "./layout";
 import { buildPlaybookTemplate } from "./playbook-template";
 import { buildTechStackTemplate } from "./tech-stack-template";
@@ -191,12 +191,37 @@ describe("fillTemplate", () => {
     const t = buildTechStackTemplate();
     const withKw = fillTemplate(t, fillFor(t), { ...withSource, dmKeyword: "bootstrap" });
     const cta = withKw.pages[3].elements.find((e) => e.name === "CTA") as DesignTextElement;
-    expect(cta.spans[0].text).toBe('comment "BOOTSTRAP" and i\'ll DM you the full video.');
+    expect(cta.spans.map((s) => s.text).join("")).toBe('comment "BOOTSTRAP" and i\'ll DM you the full video.');
     expect(cta.slot).toEqual({ kind: "dmKeyword", hint: 'comment "{{keyword}}" and i\'ll DM you the full video.' });
     const none = fillTemplate(t, fillFor(t), withSource);
     expect((none.pages[3].elements.find((e) => e.name === "CTA") as DesignTextElement).spans[0].text).toContain("{{keyword}}");
     const swapped = applyDmKeyword(withKw, "dailywin");
-    expect((swapped.pages[3].elements.find((e) => e.name === "CTA") as DesignTextElement).spans[0].text).toContain('"DAILYWIN"');
+    expect((swapped.pages[3].elements.find((e) => e.name === "CTA") as DesignTextElement).spans.map((s) => s.text).join("")).toContain('"DAILYWIN"');
+  });
+
+  it("DM keyword: the keyword comes out bold, quotes and all — what editors did by hand on nearly every CTA", () => {
+    const t = buildTechStackTemplate();
+    const withKw = fillTemplate(t, fillFor(t), { ...withSource, dmKeyword: "bootstrap" });
+    const cta = withKw.pages[3].elements.find((e) => e.name === "CTA") as DesignTextElement;
+    expect(cta.spans).toEqual([{ text: "comment " }, { text: '"BOOTSTRAP"', bold: true }, { text: " and i'll DM you the full video." }]);
+    // Detached → the token stays visible, plain.
+    const detached = applyDmKeyword(withKw, null);
+    expect((detached.pages[3].elements.find((e) => e.name === "CTA") as DesignTextElement).spans).toEqual([{ text: 'comment "{{keyword}}" and i\'ll DM you the full video.' }]);
+  });
+
+  it("DM keyword: swapping the keyword keeps the look someone gave it (colour instead of bold)", () => {
+    const t = buildTechStackTemplate();
+    const withKw = fillTemplate(t, fillFor(t), { ...withSource, dmKeyword: "bootstrap" });
+    const recolored: DesignDoc = {
+      ...withKw,
+      pages: withKw.pages.map((p) => ({
+        ...p,
+        elements: p.elements.map((e) => (e.name === "CTA" && e.type === "text" ? { ...e, spans: [{ text: 'comment "' }, { text: "BOOTSTRAP", color: "#6B5BFF" }, { text: '" and i\'ll DM you the full video.' }] } : e)),
+      })),
+    };
+    const swapped = applyDmKeyword(recolored, "dailywin");
+    const cta = swapped.pages[3].elements.find((e) => e.name === "CTA") as DesignTextElement;
+    expect(cta.spans).toEqual([{ text: "comment " }, { text: '"DAILYWIN"', color: "#6B5BFF" }, { text: " and i'll DM you the full video." }]);
   });
 
   it("reflowStacks leaves pages without stacks alone", () => {
