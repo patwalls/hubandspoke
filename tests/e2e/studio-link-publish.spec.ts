@@ -3,7 +3,7 @@ import postgres from "postgres";
 
 // Editors hand Shorts back as a YouTube Studio link; the live Short has the
 // same video id. The publish boxes (In Production peek, the post page's
-// Publish dialog) offer that public link in one click.
+// Publish dialog) offer that public link in one click; the dialog fills it in.
 test("a Short handed back as a Studio link offers its live link when publishing", async ({ page }) => {
   const sql = postgres(process.env.DATABASE_URL!, { max: 1 });
   const tag = `E2E StudioLink ${Date.now()}`;
@@ -49,20 +49,34 @@ test("a Short handed back as a Studio link offers its live link when publishing"
     // The peek shows the comment as written, not "Review &amp; publish."
     await expect(page.getByText("Review & publish.", { exact: false })).toBeVisible();
     await expect(page.getByText("&amp;", { exact: false })).toHaveCount(0);
-    if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT });
     await offer.getByRole("button", { name: "Use youtube.com/shorts/e2eVid_0-Ab" }).click();
     await expect(box.getByRole("textbox")).toHaveValue("https://youtube.com/shorts/e2eVid_0-Ab");
     await expect(offer).toHaveCount(0);
     const [still] = await sql`SELECT status FROM production_items WHERE id = ${id}`;
     expect(still.status).toBe("Review");
 
-    // Post page: the Publish dialog makes the same offer, and Publish saves it.
+    // Post page: the Publish dialog opens with the live link already in the
+    // box, selected — a paste would replace it, Enter alone publishes.
     await page.goto(`/starter-story/content/${id}`);
     await page.getByRole("button", { name: "Publish or Schedule" }).first().click();
     const dialog = page.getByRole("dialog", { name: "Publish or Schedule" });
+    const input = dialog.getByLabel("Published link");
+    await expect(input).toHaveValue("https://youtube.com/shorts/e2eVid_0-Ab");
+    await expect(dialog.getByTestId("publish-studio-filled")).toContainText(
+      "Filled from Noa's YouTube Studio link",
+    );
+    await expect
+      .poll(() =>
+        input.evaluate((el: HTMLInputElement) => [el.selectionStart, el.selectionEnd, el.value.length]),
+      )
+      .toEqual([0, 38, 38]);
+    if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT });
+    // Cleared by hand: it stays empty, and the one-click offer is back.
+    await input.fill("");
+    await expect(dialog.getByRole("button", { name: "Use youtube.com/shorts/e2eVid_0-Ab" })).toBeVisible();
+    await expect(input).toHaveValue("");
     await dialog.getByRole("button", { name: "Use youtube.com/shorts/e2eVid_0-Ab" }).click();
-    await expect(dialog.getByLabel("Published link")).toHaveValue("https://youtube.com/shorts/e2eVid_0-Ab");
-    await dialog.getByRole("button", { name: "Publish", exact: true }).click();
+    await input.press("Enter");
     await expect(dialog).toBeHidden();
     const [row2] = await sql`SELECT status, published_link FROM production_items WHERE id = ${id}`;
     expect(row2.status).toBe("Published");
