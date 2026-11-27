@@ -377,7 +377,9 @@ For each task below: **Trigger · Files · Inputs · Outputs · Downstream · Ru
 - **Tier policy (`reconcile.ts`):** score **≥85** → auto-merge
   (`reconcileScheduledIntoPublished`: Scheduled item is pinned as merge keeper,
   absorbs the synced row, flips to Published with the real link/date/thumbnail,
-  emits `status_change` + `content_changed`, schedules velocity snapshots);
+  emits `status_change` + `content_changed` (`reconcile-publish-events.ts`: no
+  `status_change` when the item was already Published, e.g. the link was pasted
+  first), schedules velocity snapshots);
   **55–84** → upsert a `scheduled_match_suggestions` row (pending) for human
   Confirm/Reject at `/[brand]/scheduled`; **<55** → leave Scheduled, retry.
 - **Surface window vs. abandon horizon:** unmatched past the surface window —

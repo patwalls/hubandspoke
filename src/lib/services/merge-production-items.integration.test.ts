@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { contentComments } from "@/lib/db/schema";
+import { contentComments, contentEvents } from "@/lib/db/schema";
 import {
   createTestAccount,
   createTestComment,
   createTestProductionItem,
 } from "@/test/factories";
-import { mergeProductionItems } from "./merge-production-items";
+import {
+  mergeProductionItems,
+  reconcileScheduledIntoPublished,
+} from "./merge-production-items";
 
 describe("mergeProductionItems", () => {
   // Regression: the repoint list used `production_item_id` for tables keyed on
@@ -29,5 +32,45 @@ describe("mergeProductionItems", () => {
       .from(contentComments)
       .where(eq(contentComments.id, comment.id));
     expect(after.contentItemId).toBe(keeper.id);
+  });
+});
+
+describe("reconcileScheduledIntoPublished", () => {
+  async function statusChanges(itemId: string) {
+    return db
+      .select({ payload: contentEvents.payload })
+      .from(contentEvents)
+      .where(
+        and(
+          eq(contentEvents.contentItemId, itemId),
+          eq(contentEvents.eventType, "status_change"),
+        ),
+      );
+  }
+
+  // Regression (prod 2026-11-25): the link was pasted first (item already
+  // Published), the sync then matched the live post and the post's Activity
+  // read "changed status from Published to Published".
+  it("writes no status change when the planning item is already Published", async () => {
+    const acct = await createTestAccount({ platform: "facebook", isActive: true });
+    const planned = await createTestProductionItem({ accountId: acct.id, status: "Published" });
+    const synced = await createTestProductionItem({ accountId: acct.id, status: "Published" });
+
+    const r = await reconcileScheduledIntoPublished(planned.id, synced.id, null);
+
+    expect(r.success).toBe(true);
+    expect(await statusChanges(planned.id)).toEqual([]);
+  });
+
+  it("records Scheduled → Published when the planning item was Scheduled", async () => {
+    const acct = await createTestAccount({ platform: "facebook", isActive: true });
+    const planned = await createTestProductionItem({ accountId: acct.id, status: "Scheduled" });
+    const synced = await createTestProductionItem({ accountId: acct.id, status: "Published" });
+
+    await reconcileScheduledIntoPublished(planned.id, synced.id, null);
+
+    expect((await statusChanges(planned.id)).map((e) => e.payload)).toEqual([
+      { type: "status_change", from: "Scheduled", to: "Published" },
+    ]);
   });
 });
