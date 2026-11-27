@@ -6,10 +6,8 @@ import {
 } from "@/lib/db/schema";
 import { eq, and, count } from "drizzle-orm";
 import { sql } from "drizzle-orm";
-import {
-  recordContentChanges,
-  type ContentChange,
-} from "@/lib/services/content-revisions";
+import { recordContentChanges } from "@/lib/services/content-revisions";
+import { reconcilePublishChanges } from "@/lib/services/reconcile-publish-events";
 import { scheduleVelocitySnapshots } from "@/jobs/tasks/capture-velocity-snapshot";
 
 export interface MergeResult {
@@ -386,27 +384,7 @@ export async function reconcileScheduledIntoPublished(
       })
       .where(eq(productionItems.id, scheduledId));
 
-    const changes: ContentChange[] = [
-      {
-        target: { kind: "production_item_field", field: "status" },
-        from: scheduled.status,
-        to: "Published",
-      },
-    ];
-    if (scheduled.publishedLink !== synced.publishedLink) {
-      changes.push({
-        target: { kind: "production_item_field", field: "publishedLink" },
-        from: scheduled.publishedLink,
-        to: synced.publishedLink,
-      });
-    }
-    if (scheduled.publishedDate !== synced.publishedDate) {
-      changes.push({
-        target: { kind: "production_item_field", field: "publishedDate" },
-        from: scheduled.publishedDate,
-        to: synced.publishedDate,
-      });
-    }
+    const { changes, statusChange } = reconcilePublishChanges(scheduled, synced);
     await recordContentChanges({
       tx,
       contentItemId: scheduledId,
@@ -414,16 +392,14 @@ export async function reconcileScheduledIntoPublished(
       source: { kind: "sync", system: "account-content" },
       changes,
     });
-    await tx.insert(contentEvents).values({
-      contentItemId: scheduledId,
-      userId,
-      eventType: "status_change",
-      payload: {
-        type: "status_change",
-        from: scheduled.status,
-        to: "Published",
-      },
-    });
+    if (statusChange) {
+      await tx.insert(contentEvents).values({
+        contentItemId: scheduledId,
+        userId,
+        eventType: "status_change",
+        payload: { type: "status_change", ...statusChange },
+      });
+    }
   });
 
   // Mirror the publish route: schedule the early velocity checkpoints.

@@ -1,5 +1,6 @@
 "use client";
 
+import { isNoopStatusChange } from "@/lib/services/reconcile-publish-events";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
@@ -972,7 +973,7 @@ export function ContentActivity({ contentId, brand, refreshKey = 0, statusPalett
       item.payload.type !== "content_changed" ||
       item.payload.target.kind !== "production_item_field" ||
       item.payload.target.field !== "status",
-  );
+  ).filter((item) => item.kind !== "event" || !isNoopStatusChange(item.payload));
 
   // Filter only `content_changed` events whose source.kind is non-user.
   // All other event variants (status_change, item_created, tool_action,
