@@ -120,3 +120,21 @@ export function liveLinkFromStudio(
     ? `https://youtube.com/shorts/${m[1]}`
     : `https://www.youtube.com/watch?v=${m[1]}`;
 }
+
+/**
+ * What the Publish dialog's link box should be filled with from a Studio
+ * offer: the offer's live link, once per opening, and only while the box is
+ * empty (never over something the person typed or pasted, and not again
+ * after they cleared it). Null = leave the box alone. The reviewer comes back
+ * from Studio with the public link on the clipboard and pastes it — the
+ * filled text is selected, so that paste replaces it, and Enter alone
+ * publishes.
+ */
+export function studioPrefill(
+  link: string,
+  offerUrl: string | null | undefined,
+  alreadyFilled: boolean,
+): string | null {
+  if (!offerUrl || alreadyFilled || link.trim() !== "") return null;
+  return offerUrl;
+}

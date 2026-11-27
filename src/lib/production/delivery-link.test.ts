@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { deliveryLabel, linksInComment, liveLinkFromStudio, pickDeliveryLink } from "./delivery-link";
+import { deliveryLabel, linksInComment, liveLinkFromStudio, pickDeliveryLink, studioPrefill } from "./delivery-link";
 
 const mention = '<span data-type="mention" data-id="u1" class="mention">@Rita</span>';
 
@@ -81,5 +81,23 @@ describe("liveLinkFromStudio", () => {
     expect(liveLinkFromStudio("https://studio.youtube.com/video/short/edit", "youtube_shorts")).toBeNull();
     expect(liveLinkFromStudio("https://www.canva.com/design/D/view", "youtube_shorts")).toBeNull();
     expect(liveLinkFromStudio("not a url", "youtube_shorts")).toBeNull();
+  });
+});
+
+describe("studioPrefill", () => {
+  const url = "https://youtube.com/shorts/NT-BHHKJ11g";
+  it("fills an empty box with the offer's live link", () => {
+    expect(studioPrefill("", url, false)).toBe(url);
+    expect(studioPrefill("   ", url, false)).toBe(url);
+  });
+  it("never overwrites a link the person typed or pasted", () => {
+    expect(studioPrefill("https://youtube.com/shorts/other12345", url, false)).toBeNull();
+  });
+  it("fills only once per opening, so a cleared box stays empty", () => {
+    expect(studioPrefill("", url, true)).toBeNull();
+  });
+  it("does nothing without an offer", () => {
+    expect(studioPrefill("", null, false)).toBeNull();
+    expect(studioPrefill("", undefined, false)).toBeNull();
   });
 });

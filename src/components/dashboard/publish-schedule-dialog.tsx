@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { AlertTriangle } from "lucide-react";
@@ -22,7 +22,8 @@ import {
   validatePublishedLinkPlatform,
 } from "@/lib/published-link-validation";
 import { useCanEditBrand } from "@/components/brand-access";
-import { StudioLinkOffer, useStudioLiveLink } from "./studio-live-link";
+import { StudioLinkOffer, useStudioLiveLink, type StudioOffer } from "./studio-live-link";
+import { studioPrefill } from "@/lib/production/delivery-link";
 import { postTypeDisplay } from "@/lib/platforms";
 import {
   readOpenNextPref,
@@ -135,6 +136,9 @@ export function PublishScheduleDialog({
   const [noDate, setNoDate] = useState<boolean>(initialNoDate ?? false);
   const [submitting, setSubmitting] = useState(false);
   const [openNextOn, setOpenNextOn] = useState(true);
+  const linkInput = useRef<HTMLInputElement>(null);
+  // The Studio offer, once it filled the box this opening (null = not yet).
+  const [prefilled, setPrefilled] = useState<StudioOffer | null>(null);
 
   // Reset form state every time the dialog opens. Without this an edit
   // session on item A leaks its values into a subsequent edit on item B.
@@ -147,6 +151,7 @@ export function PublishScheduleDialog({
     setNoDate(initialNoDate ?? false);
     setSubmitting(false);
     setOpenNextOn(readOpenNextPref());
+    setPrefilled(null);
   }, [
     open,
     isAlreadyScheduled,
@@ -158,7 +163,20 @@ export function PublishScheduleDialog({
 
   // Handed back as a YouTube Studio link: offer the live link (studio-live-link).
   const studio = useStudioLiveLink(itemId, currentStatus, postType, open && !initialLink);
+  // The reviewer comes back from Studio with the public link copied and
+  // pastes it, so a one-click offer under the box went unused: fill the box
+  // instead, selected, so their paste replaces it and Enter alone publishes.
+  useEffect(() => {
+    if (!open || !studio) return;
+    const url = studioPrefill(link, studio.url, prefilled !== null);
+    if (!url) return;
+    setLink(url);
+    setPrefilled(studio);
+    requestAnimationFrame(() => linkInput.current?.select());
+  }, [open, studio, link, prefilled]);
+  // Cleared it? The one-click offer is back under the box.
   const studioOffer = studio && !link.trim() ? studio : null;
+  const showPrefilled = prefilled !== null && link.trim() === prefilled.url;
 
   const linkValid = useMemo(() => {
     const t = link.trim();
@@ -196,6 +214,7 @@ export function PublishScheduleDialog({
       const payload: Record<string, unknown> = { mode };
       if (mode === "publish") {
         payload.link = link.trim();
+        if (showPrefilled) trackUsage("publish:studio-link:filled", brand);
         if (publishedDate) payload.publishedDate = publishedDate;
       } else {
         payload.noDate = noDate;
@@ -307,6 +326,7 @@ export function PublishScheduleDialog({
               <Label htmlFor="publish-link">Published link</Label>
               <Input
                 id="publish-link"
+                ref={linkInput}
                 type="url"
                 placeholder={publishLinkPlaceholder(postType)}
                 value={link}
@@ -339,6 +359,14 @@ export function PublishScheduleDialog({
                     {shareWarn}
                     {shareOk ? " Save again to use it anyway." : null}
                   </span>
+                </p>
+              ) : showPrefilled ? (
+                <p
+                  className="text-[11px] text-muted-foreground"
+                  data-testid="publish-studio-filled"
+                >
+                  Filled from {prefilled.by ? `${prefilled.by}'s` : "the"} YouTube Studio
+                  link (same video). Paste over it if the live link is different.
                 </p>
               ) : studioOffer ? (
                 <StudioLinkOffer offer={studioOffer} brand={brand} where="dialog" onUse={setLink} />
