@@ -235,7 +235,42 @@ function dmPattern(el: DesignTextElement): string {
 function substituteDmKeyword(el: DesignTextElement, keyword: string | null): DesignTextElement {
   const pattern = dmPattern(el);
   if (!keyword) return { ...el, spans: [{ text: pattern }] };
-  return { ...el, spans: [{ text: pattern.split(DM_KEYWORD_TOKEN).join(keyword.toUpperCase()) }] };
+  return { ...el, spans: dmKeywordSpans(pattern, keyword.toUpperCase(), keywordLook(el)) };
+}
+
+type SpanLook = Pick<DesignSpan, "bold" | "color">;
+
+/** How the keyword is drawn. Editors bolded the keyword by hand on nearly
+ *  every exported CTA (designs-right-first-export, 2026-11), so a fresh CTA
+ *  starts bold. A CTA someone already styled (a bold or coloured span next
+ *  to plain text) keeps that look when the keyword is swapped. */
+function keywordLook(el: DesignTextElement): SpanLook {
+  if (el.spans.length > 1) {
+    const styled = el.spans.find((s) => s.bold || s.color);
+    if (styled) return { ...(styled.bold ? { bold: true } : {}), ...(styled.color ? { color: styled.color } : {}) };
+  }
+  return { bold: true };
+}
+
+/** `comment "{{keyword}}" and …` → plain / styled `"WORD"` / plain. The
+ *  quotes around the token go with the keyword, as editors draw it. */
+export function dmKeywordSpans(pattern: string, word: string, look: SpanLook): DesignSpan[] {
+  const parts = pattern.split(DM_KEYWORD_TOKEN);
+  const spans: DesignSpan[] = [];
+  parts.forEach((part, i) => {
+    let text = part;
+    if (i < parts.length - 1) {
+      const next = parts[i + 1];
+      const quoted = text.endsWith('"') && next.startsWith('"');
+      if (quoted) text = text.slice(0, -1);
+      if (text) spans.push({ text });
+      spans.push({ text: quoted ? `"${word}"` : word, ...look });
+      if (quoted) parts[i + 1] = next.slice(1);
+    } else if (text) {
+      spans.push({ text });
+    }
+  });
+  return spans;
 }
 
 /** Re-substitute every DM-keyword element after the post's keyword changed. */
