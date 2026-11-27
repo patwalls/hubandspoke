@@ -18,7 +18,12 @@ import {
   markJobStarted,
   setPoolId,
 } from "./worker-identity";
-import { RECONCILE_INTERVAL_MS, reconcileLocks, shouldReportReconcile } from "./lock-reconcile";
+import {
+  judgeReconcileFailure,
+  RECONCILE_INTERVAL_MS,
+  reconcileLocks,
+  shouldReportReconcile,
+} from "./lock-reconcile";
 import { workerLogger } from "./worker-logger";
 import { isBlockedError } from "./blocked";
 import { installLlmCallRecorder } from "@/lib/llm/record";
@@ -93,6 +98,7 @@ async function main() {
   // logs at boot and then every 15th pass (log drain cap), so "a clean line
   // in the last 15 min" is the proof the reconciler is alive.
   let cleanPasses = 0;
+  let transientStreak = 0;
   const reconcile = async (reason: string) => {
     const poolId = getPoolId();
     if (!poolId) return;
@@ -103,6 +109,10 @@ async function main() {
         bootAt: getBootAt(),
         inFlight: getInFlightJobs().map((j) => ({ id: j.id, queueId: j.queueId })),
       });
+      if (transientStreak > 0) {
+        console.log(`[worker] lock-reconcile(${reason}) recovered after ${transientStreak} dropped-connection pass(es)`);
+        transientStreak = 0;
+      }
       if (r.acted || r.foreignLiveHolders.length > 0) {
         const summary =
           `orphans=${r.orphanHolders.join(",") || "-"} ` +
@@ -124,8 +134,19 @@ async function main() {
         console.log(`[worker] lock-reconcile(${reason}) clean`);
       }
     } catch (err) {
+      // A dropped DB connection (Postgres maintenance/failover) is retried by
+      // the next pass; it pages only if it persists (judgeReconcileFailure).
+      const verdict = judgeReconcileFailure(err, transientStreak);
+      transientStreak = verdict.transientStreak;
+      if (transientStreak > 0 && !verdict.report) {
+        console.warn(`[worker] lock-reconcile(${reason}) dropped connection (${transientStreak} in a row), retrying next pass:`, String(err));
+        return;
+      }
       console.error(`[worker] lock-reconcile(${reason}) failed:`, err);
-      Sentry.captureException(err, { tags: { source: "graphile-worker", kind: "lock-reconcile" } });
+      Sentry.captureException(err, {
+        tags: { source: "graphile-worker", kind: "lock-reconcile" },
+        extra: { transientStreak },
+      });
     }
   };
   await reconcile("boot");

@@ -2596,6 +2596,17 @@ warning (`shouldReportReconcile` in `lock-reconcile.ts`, unit-tested). Unit-test
 (`lock-reconcile.test.ts`), integration-tested against the real graphile
 tables (`lock-reconcile.integration.test.ts`).
 
+**A failed pass (2026-11-26, HUBANDSPOKE-D / GlitchTip #93):** Heroku Postgres
+maintenance kills every connection and the new primary is briefly in recovery
+(`57P01`, then `25006 cannot execute LISTEN during recovery`, then
+`read ECONNRESET`). A pass that lands there is a log line
+(`lock-reconcile(interval) dropped connection (N in a row)`), and the next pass
+60 s later uses a fresh client. It pages only after
+`TRANSIENT_FAILURES_BEFORE_REPORT` (5) dropped-connection passes in a row, once
+per streak. Any other error (SQL, a bug) still pages on the first failure.
+`isTransientDbError` / `judgeReconcileFailure` in `lock-reconcile.ts`,
+unit-tested against the pg error shapes from that maintenance.
+
 The `worker-heartbeat` task now also publishes the live pool id
 (`worker_heartbeat.pool_id`) so the web dyno can judge locks too.
 
