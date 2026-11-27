@@ -9,15 +9,16 @@ import { mkdtemp, readFile, rm, stat, writeFile } from "fs/promises";
 import os from "os";
 import path from "path";
 import type { Task } from "graphile-worker";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNotNull, ne } from "drizzle-orm";
 import satori from "satori";
 import { Resvg } from "@resvg/resvg-js";
 import { imageSize } from "image-size";
 import { db } from "@/lib/db";
-import { designRenders, productionItems, transcripts } from "@/lib/db/schema";
+import { designRenders, productionItemMedia, productionItems, transcripts } from "@/lib/db/schema";
 import { bucketName, buildKey, getPresignedGetUrl, putObject, putObjectFromFile } from "@/lib/s3";
 import { recordToolAction } from "@/lib/services/content-events";
-import { installDesignMedia } from "@/lib/services/design-editor/install-design-media";
+import { DESIGN_EDITOR_SOURCE_PREFIX, installDesignMedia } from "@/lib/services/design-editor/install-design-media";
+import { reusableVideoPages, type PreviousExport, type RenderedPageOutput } from "@/lib/design-editor/reuse-pages";
 import { downloadToFile, probeSource, runFfmpeg } from "@/lib/services/ffmpeg-process";
 import { pageVideo, parseDesignDoc, type DesignImageSource, type DesignPage } from "@/lib/design-editor/doc";
 import { fontsUsed, pageToSatoriTree, videoPageLayers, type ResolvedChannels, type ResolvedImages } from "@/lib/design-editor/render-tree";
@@ -78,6 +79,9 @@ export const designRenderTask: Task = async (rawPayload, helpers) => {
     };
     const [itemRow] = await db.select({ brand: productionItems.brand }).from(productionItems).where(eq(productionItems.id, render.productionItemId)).limit(1);
     const brandChannels = await loadBrandChannels(itemRow?.brand ?? "starter-story");
+    // A re-export keeps an unchanged video slide from the last export
+    // (src/lib/design-editor/reuse-pages.ts) instead of re-cutting it.
+    const reuse = reusableVideoPages(doc, await loadPreviousExport(render.designDocId, render.id));
 
     for (const [i, page] of doc.pages.entries()) {
       const images: ResolvedImages = {};
@@ -104,6 +108,9 @@ export const designRenderTask: Task = async (rawPayload, helpers) => {
         const s3Key = buildKey(render.productionItemId, `design-page-${i + 1}.png`);
         await putObject(s3Key, png, "image/png");
         pages.push({ s3Key, sizeBytes: png.length, kind: "image", contentType: "image/png", posterS3Key: null });
+      } else if (reuse.has(i)) {
+        helpers.logger.info(`design-render page=${i + 1} video reused from the previous export`);
+        pages.push(reuse.get(i)!);
       } else {
         words ??= await loadSourceWords(render.productionItemId);
         const layers = videoPageLayers(page);
@@ -163,16 +170,17 @@ export const designRenderTask: Task = async (rawPayload, helpers) => {
       .set({ status: "done", progress: 100, error: null, outputKeys: pages.map((p) => p.s3Key), renderSeconds: renderSeconds.toFixed(1), heartbeatAt: new Date(), finishedAt: new Date() })
       .where(eq(designRenders.id, render.id));
     const videos = pages.filter((p) => p.kind === "video").length;
+    const reused = reuse.size;
     await recordToolAction({
       contentItemId: render.productionItemId,
       userId: render.requestedByUserId,
       tool: "design-editor",
       action: "design_rendered",
       status: "success",
-      label: `${pages.length}-slide post rendered${videos ? ` (${videos} video)` : ""} — ready to review.`,
-      meta: { renderId: render.id, pages: pages.length, videos },
+      label: `${pages.length}-slide post rendered${videos ? ` (${videos} video${reused ? `, ${reused} kept from the last export` : ""})` : ""} — ready to review.`,
+      meta: { renderId: render.id, pages: pages.length, videos, reusedVideos: reused, renderSeconds: Number(renderSeconds.toFixed(1)) },
     });
-    helpers.logger.info(`design-render ok render=${render.id} pages=${pages.length} videos=${videos} in ${renderSeconds.toFixed(1)}s`);
+    helpers.logger.info(`design-render ok render=${render.id} pages=${pages.length} videos=${videos} reused=${reused} in ${renderSeconds.toFixed(1)}s`);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await db.update(designRenders).set({ status: "failed", error: message.slice(0, 1000), finishedAt: new Date() }).where(eq(designRenders.id, render.id));
@@ -181,6 +189,33 @@ export const designRenderTask: Task = async (rawPayload, helpers) => {
     await rm(workDir, { recursive: true, force: true });
   }
 };
+
+/** The design's last finished export (not this one), with each page's
+ *  output as installed on the item — null when there is none or it can't be
+ *  read (then everything renders fresh). */
+async function loadPreviousExport(designDocId: string, renderId: string): Promise<PreviousExport | null> {
+  const [prev] = await db
+    .select({ id: designRenders.id, doc: designRenders.doc, finishedAt: designRenders.finishedAt, outputKeys: designRenders.outputKeys })
+    .from(designRenders)
+    .where(and(eq(designRenders.designDocId, designDocId), ne(designRenders.id, renderId), eq(designRenders.status, "done"), isNotNull(designRenders.finishedAt)))
+    .orderBy(desc(designRenders.finishedAt))
+    .limit(1);
+  if (!prev?.finishedAt || !Array.isArray(prev.outputKeys)) return null;
+  const parsed = parseDesignDoc(prev.doc);
+  if (!parsed.ok) return null;
+  const media = await db
+    .select({ s3Key: productionItemMedia.s3Key, sizeBytes: productionItemMedia.sizeBytes, kind: productionItemMedia.kind, contentType: productionItemMedia.contentType, posterS3Key: productionItemMedia.posterS3Key })
+    .from(productionItemMedia)
+    .where(eq(productionItemMedia.sourceUrl, `${DESIGN_EDITOR_SOURCE_PREFIX}${prev.id}`));
+  const byKey = new Map(media.map((m) => [m.s3Key, m]));
+  const outputs = prev.outputKeys.map((key): RenderedPageOutput | null => {
+    const m = byKey.get(key);
+    return m && (m.kind === "image" || m.kind === "video")
+      ? { s3Key: m.s3Key, sizeBytes: Number(m.sizeBytes ?? 0), kind: m.kind, contentType: m.contentType, posterS3Key: m.posterS3Key ?? null }
+      : null;
+  });
+  return { doc: parsed.doc, finishedAt: prev.finishedAt, outputs };
+}
 
 async function rasterize(page: DesignPage, canvas: { width: number; height: number }, images: ResolvedImages, transparent: boolean, channels: ResolvedChannels = {}): Promise<Buffer> {
   const svg = await satori(pageToSatoriTree(page, canvas, images, { transparent, channels }) as never, {

@@ -43,6 +43,15 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-11-27-design-reexport-fast",
+    shippedAt: "2026-11-27T11:15:25Z",
+    kind: "feature",
+    title: "Re-exporting a design is quick when the video slide didn't change",
+    body: "Fixed one slide after exporting? Export again and the video slide is kept from your last export instead of being cut again, so the post is ready in seconds instead of about half a minute.",
+    screen: "modal:design-editor",
+    audience: { flag: "designEditor", usersOf: ["modal:design-editor"] },
+  },
+  {
     id: "2026-11-26-winners-email-everyone",
     shippedAt: "2026-11-26T15:30:42Z",
     kind: "feature",
