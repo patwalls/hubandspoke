@@ -217,3 +217,56 @@ export function shouldReportReconcile(reason: string, r: ReconcileResult): boole
   if (!r.acted) return false;
   return reason !== "boot";
 }
+
+// ── Failed passes ─────────────────────────────────────────────────────────
+// Heroku Postgres maintenance (or a failover) kills every open connection,
+// and for a few seconds the new primary is still in recovery. A reconcile
+// pass that lands in that window fails with a connection error even though
+// nothing is wrong with the worker or the queue — the next pass, 60 s later,
+// gets a fresh client from the pool. HUBANDSPOKE-D (GlitchTip #93,
+// 2026-11-26 18:03Z) paged on exactly one such pass. So: a dropped
+// connection is a log line, and it pages only when it keeps happening for
+// TRANSIENT_FAILURES_BEFORE_REPORT passes in a row (the database is really
+// gone, and /api/health/queue would be red by then too). Anything else — a
+// SQL error, a bug in this file — still reports on the first failure.
+
+/** Consecutive transient failures (one pass a minute) before we page. */
+export const TRANSIENT_FAILURES_BEFORE_REPORT = 5;
+
+// Node socket errors and the SQLSTATEs Postgres sends when it is going away
+// or not ready yet: 57P01 admin_shutdown ("terminating connection due to
+// administrator command"), 57P02 crash_shutdown, 57P03 cannot_connect_now,
+// 08xxx connection exceptions, 25006 read-only (a replica still in recovery).
+const TRANSIENT_NODE_CODES = new Set(["ECONNRESET", "ECONNREFUSED", "EPIPE", "ETIMEDOUT", "ENOTFOUND", "EAI_AGAIN"]);
+const TRANSIENT_SQLSTATE = /^(57P0[123]|08\d{3}|25006)$/;
+// pg's own client-side messages for a dead socket carry no code.
+const TRANSIENT_PG_MESSAGES = [
+  "Connection terminated",
+  "Client has encountered a connection error",
+  "timeout exceeded when trying to connect",
+];
+
+export function isTransientDbError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const code = (err as { code?: unknown }).code;
+  if (typeof code === "string" && (TRANSIENT_NODE_CODES.has(code) || TRANSIENT_SQLSTATE.test(code))) {
+    return true;
+  }
+  const message = (err as { message?: unknown }).message;
+  if (typeof message === "string" && TRANSIENT_PG_MESSAGES.some((m) => message.includes(m))) return true;
+  const cause = (err as { cause?: unknown }).cause;
+  return cause !== undefined && cause !== err && isTransientDbError(cause);
+}
+
+/**
+ * What to do with a failed pass, given how many transient failures in a row
+ * came before it. Returns the new streak so the caller can keep it.
+ */
+export function judgeReconcileFailure(
+  err: unknown,
+  priorTransientStreak: number,
+): { report: boolean; transientStreak: number } {
+  if (!isTransientDbError(err)) return { report: true, transientStreak: 0 };
+  const transientStreak = priorTransientStreak + 1;
+  return { report: transientStreak === TRANSIENT_FAILURES_BEFORE_REPORT, transientStreak };
+}

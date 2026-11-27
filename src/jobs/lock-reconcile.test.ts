@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { classifyLocks, shouldReportReconcile, type LockRow } from "./lock-reconcile";
+import {
+  classifyLocks,
+  isTransientDbError,
+  judgeReconcileFailure,
+  shouldReportReconcile,
+  TRANSIENT_FAILURES_BEFORE_REPORT,
+  type LockRow,
+} from "./lock-reconcile";
 
 const boot = new Date("2026-10-15T17:28:00Z");
 const now = new Date("2026-10-15T17:40:00Z");
@@ -93,5 +100,66 @@ describe("shouldReportReconcile", () => {
   it("stays quiet on a clean pass", () => {
     expect(shouldReportReconcile("interval", clean)).toBe(false);
     expect(shouldReportReconcile("boot", clean)).toBe(false);
+  });
+});
+
+// The shapes pg actually throws when Heroku Postgres restarts under us
+// (HUBANDSPOKE-D, 2026-11-26 maintenance: breadcrumbs show 57P01, then
+// 25006 "cannot execute LISTEN during recovery", then the socket reset).
+function sysErr(code: string, message: string) {
+  return Object.assign(new Error(message), { code, errno: -104, syscall: "read" });
+}
+function pgErr(code: string, message: string) {
+  return Object.assign(new Error(message), { code, severity: "FATAL" });
+}
+
+describe("isTransientDbError", () => {
+  it.each([
+    ["socket reset (the GlitchTip #93 error)", sysErr("ECONNRESET", "read ECONNRESET")],
+    ["refused while the server restarts", sysErr("ECONNREFUSED", "connect ECONNREFUSED 10.0.0.1:5432")],
+    ["admin shutdown", pgErr("57P01", "terminating connection due to administrator command")],
+    ["server starting up", pgErr("57P03", "the database system is starting up")],
+    ["still in recovery", pgErr("25006", "cannot execute LISTEN during recovery")],
+    ["connection failure", pgErr("08006", "connection failure")],
+    ["pg client: socket closed", new Error("Connection terminated unexpectedly")],
+    ["pg client: dead client reused", new Error("Client has encountered a connection error and is not queryable")],
+    ["wrapped in a cause", new Error("pass failed", { cause: sysErr("ECONNRESET", "read ECONNRESET") })],
+  ])("%s → transient", (_label, err) => {
+    expect(isTransientDbError(err)).toBe(true);
+  });
+
+  it.each([
+    ["SQL syntax error", pgErr("42601", "syntax error at or near \"selec\"")],
+    ["missing table (graphile schema changed)", pgErr("42P01", "relation \"graphile_worker._private_jobs\" does not exist")],
+    ["a bug in our code", new TypeError("Cannot read properties of undefined (reading 'getTime')")],
+    ["not an error at all", "boom"],
+    ["null", null],
+  ])("%s → not transient", (_label, err) => {
+    expect(isTransientDbError(err)).toBe(false);
+  });
+});
+
+describe("judgeReconcileFailure", () => {
+  const reset = sysErr("ECONNRESET", "read ECONNRESET");
+
+  it("does not page on a single dropped connection", () => {
+    expect(judgeReconcileFailure(reset, 0)).toEqual({ report: false, transientStreak: 1 });
+  });
+
+  it("pages once when the database stays unreachable for the threshold, not on every pass after", () => {
+    let streak = 0;
+    const reports: boolean[] = [];
+    for (let i = 0; i < TRANSIENT_FAILURES_BEFORE_REPORT + 3; i++) {
+      const v = judgeReconcileFailure(reset, streak);
+      streak = v.transientStreak;
+      reports.push(v.report);
+    }
+    expect(reports.filter(Boolean)).toHaveLength(1);
+    expect(reports[TRANSIENT_FAILURES_BEFORE_REPORT - 1]).toBe(true);
+  });
+
+  it("pages immediately on a non-connection error and resets the streak", () => {
+    const sqlErr = pgErr("42601", "syntax error");
+    expect(judgeReconcileFailure(sqlErr, 3)).toEqual({ report: true, transientStreak: 0 });
   });
 });
