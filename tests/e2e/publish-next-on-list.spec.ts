@@ -55,18 +55,28 @@ test("after two quick returns to the list, Publish lands there with the next row
     };
 
     // Two landings, each followed straight away by a trip back to the list.
+    // (Which sibling comes next is open-next's business; follow it.)
+    const left = new Set(ids);
+    const landedOn = async (from: string) => {
+      await expect(page).not.toHaveURL(new RegExp(`/content/${from}$`));
+      await expect(page).toHaveURL(/\/starter-story\/content\/[0-9a-f-]{36}$/);
+      return page.url().split("/").pop()!;
+    };
+    let current = ids[0];
     await page.goto("/starter-story/production");
-    await page.locator(`[data-production-row="${ids[0]}"] a[data-row-open]`).click();
-    await expect(page).toHaveURL(new RegExp(`/starter-story/content/${ids[0]}$`));
+    await page.locator(`[data-production-row="${current}"] a[data-row-open]`).click();
+    await expect(page).toHaveURL(new RegExp(`/starter-story/content/${current}$`));
     for (let n = 0; n < 2; n++) {
       await publish(page, n);
       await expect(dialog.getByTestId("publish-open-next")).toContainText("Then open");
       await dialog.locator("#publish-link").press("Enter");
-      await expect(page).toHaveURL(new RegExp(`/starter-story/content/${ids[n + 1]}$`));
+      left.delete(current);
+      current = await landedOn(current);
+      expect(left.has(current)).toBe(true);
       // …and the post opened again from its row, as they do.
       await page.goto("/starter-story/production");
-      await page.locator(`[data-production-row="${ids[n + 1]}"] a[data-row-open]`).click();
-      await expect(page).toHaveURL(new RegExp(`/starter-story/content/${ids[n + 1]}$`));
+      await page.locator(`[data-production-row="${current}"] a[data-row-open]`).click();
+      await expect(page).toHaveURL(new RegExp(`/starter-story/content/${current}$`));
     }
     expect(await page.evaluate(() => JSON.parse(localStorage.getItem("hs:publish-open-next-habit") ?? "{}").bounces)).toBe(2);
 
@@ -75,18 +85,20 @@ test("after two quick returns to the list, Publish lands there with the next row
     await expect(dialog.getByTestId("publish-open-next")).toContainText("Then mark it on In Production");
     await expect(dialog.getByTestId("publish-open-next-post-instead")).toBeVisible();
     await dialog.locator("#publish-link").press("Enter");
+    left.delete(current);
+    const [last] = [...left];
 
-    // …and lands there: the Facebook row marked Next, under the cursor.
+    // …and lands there: the last sibling's row marked Next, under the cursor.
     await expect(page).toHaveURL(/\/starter-story\/production/);
     const next = page.getByTestId("production-next-row");
     await expect(next).toHaveCount(1);
-    await expect(next).toHaveAttribute("data-production-row", ids[3]);
+    await expect(next).toHaveAttribute("data-production-row", last);
     await expect(next).toHaveAttribute("data-focused", "");
     if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT, fullPage: true });
 
     // Enter opens it.
     await page.keyboard.press("Enter");
-    await expect(page).toHaveURL(new RegExp(`/starter-story/content/${ids[3]}$`));
+    await expect(page).toHaveURL(new RegExp(`/starter-story/content/${last}$`));
 
   } finally {
     await sql.end();
