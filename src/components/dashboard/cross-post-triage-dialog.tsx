@@ -30,6 +30,7 @@ import { isNotionAuthoritative } from "@/lib/platform";
 import { usualTargetKeys, type TargetCommonalityRow } from "@/lib/cross-post-usual";
 import { channelReachLabel, type ChannelReach } from "@/lib/channel-reach";
 import { trackUsage } from "@/lib/usage/track";
+import { backgroundBucket, instantOutcome } from "@/lib/cross-post-instant";
 import {
   PLATFORM_FIELD_SCHEMAS,
   type PlatformKey,
@@ -149,6 +150,18 @@ interface CrossPostTriagePanelProps {
    *  clears its own selection state and stays mounted. */
   onSubmitted?: () => void;
   onActioned: () => void;
+  /** Queue rows pass this to make the submit instant: called the moment
+   *  "Cross-post N" is clicked (the row hides itself), the dialog closes,
+   *  and the creates run behind (src/lib/cross-post-instant.ts). Without
+   *  it the submit waits in the dialog as before (content-page tab). */
+  onSubmitStarted?: () => void;
+  /** Instant mode: the creates didn't all land. Gate failures → the row
+   *  reopens the dialog with them (`initialGateFailures`); empty → the row
+   *  just comes back (an error toast already said why). */
+  onSubmitFailed?: (gateFailures: GateFailure[]) => void;
+  /** Gate failures to open with — the instant submit's refusals, so the
+   *  "I'll do it manually" banner survives the dialog having closed. */
+  initialGateFailures?: GateFailure[];
 }
 
 interface CrossPostTriageDialogProps
@@ -195,7 +208,7 @@ function platformSortIndex(platform: string): number {
 /** Per-target gate failure that survives in dialog state so we can render
  *  the "I'll do it manually" affordance inline (instead of a toast that
  *  drops the user back at the dialog with no recoverable action). */
-interface GateFailure {
+export interface GateFailure {
   key: string;
   accountHandle: string;
   postType: PostType;
@@ -218,6 +231,9 @@ export function CrossPostTriagePanel({
   showSecondaryFooter = true,
   onSubmitted,
   onActioned,
+  onSubmitStarted,
+  onSubmitFailed,
+  initialGateFailures,
 }: CrossPostTriagePanelProps) {
   // The candidate's own brand — `brand` is "all" on the cross-brand queue.
   const canEdit = useCanEditBrand(candidate.brand || (brand === "all" ? null : brand));
@@ -227,7 +243,7 @@ export function CrossPostTriagePanel({
   const [manualSubmitting, setManualSubmitting] = useState(false);
   const [showAll, setShowAll] = useState(false);
   const [assigneeUserId, setAssigneeUserId] = useState<string>("");
-  const [gateFailures, setGateFailures] = useState<GateFailure[]>([]);
+  const [gateFailures, setGateFailures] = useState<GateFailure[]>(initialGateFailures ?? []);
   const [assignableUsers, setAssignableUsers] = useState<
     Array<{ id: string; name: string | null; email: string; avatarUrl: string | null }>
   >([]);
@@ -241,6 +257,12 @@ export function CrossPostTriagePanel({
     setAssigneeUserId("");
     setGateFailures([]);
   }, [candidate.id]);
+
+  // The instant submit's refusals arrive after the dialog closed; the row
+  // reopens it with them (the dialog may still be mounted from its close).
+  useEffect(() => {
+    if (initialGateFailures && initialGateFailures.length > 0) setGateFailures(initialGateFailures);
+  }, [initialGateFailures]);
 
   // Warm the source the moment someone starts choosing targets: if it still
   // needs enriching (or its video archived), that runs while they finish
@@ -538,9 +560,78 @@ export function CrossPostTriagePanel({
     return { created, skipped, gateFailures: gateFails, hardErrors };
   }
 
+  /** Instant queue submit: the row and dialog go away now, the creates run
+   *  behind, and the outcome decides what comes back (cross-post-instant.ts).
+   *  Everything it needs is captured here — the dialog unmounts right away. */
+  async function submitInBackground(keys: string[]) {
+    const markBrand = candidate.brand || brand;
+    const n = keys.length;
+    const toastId = toast.loading(`Cross-posting to ${n} channel${n === 1 ? "" : "s"}…`);
+    trackUsage("cross-post:instant-submit", markBrand);
+    const startedAt = Date.now();
+    onSubmitStarted?.();
+    clearAndClose();
+    try {
+      const { created, skipped, gateFailures: gateFails, hardErrors } =
+        await submitTargets(keys, { manual: false });
+      trackUsage(`cross-post:background:${backgroundBucket(Date.now() - startedAt)}`, markBrand);
+      const outcome = instantOutcome({
+        created: created.length,
+        skipped,
+        gateFailures: gateFails.length,
+        hardErrors: hardErrors.length,
+      });
+      const failed = gateFails.length + hardErrors.length;
+      if (outcome === "reopen") {
+        if (created.length > 0 || skipped > 0) {
+          showSubmitToast({ created, skipped, failed, brand, id: toastId });
+        } else {
+          toast.dismiss(toastId);
+        }
+        if (hardErrors.length > 0) {
+          toast.error(hardErrors.slice(0, 2).join("\n\n"), { duration: 10_000 });
+        }
+        trackUsage("cross-post:instant-reopened", markBrand);
+        onSubmitFailed?.(gateFails);
+        return;
+      }
+      if (outcome === "restore") {
+        toast.error(
+          `Failed to cross-post (${hardErrors.length} target${hardErrors.length === 1 ? "" : "s"}).`,
+          {
+            id: toastId,
+            description: [...hardErrors.slice(0, 2), "The post is back in the queue."].join("\n\n"),
+            duration: 12_000,
+          },
+        );
+        onSubmitFailed?.([]);
+        return;
+      }
+      showSubmitToast({ created, skipped, failed, brand, id: toastId });
+      const dismissRes = await fetch(
+        `/api/production-items/${candidate.id}/cross-post-dismiss`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) },
+      ).catch(() => null);
+      if (!dismissRes?.ok) {
+        toast.warning("Cross-posts created, but failed to remove from queue.");
+      }
+      onActioned();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to submit cross-posts", {
+        id: toastId,
+        description: "The post is back in the queue.",
+      });
+      onSubmitFailed?.([]);
+    }
+  }
+
   async function handleSubmit() {
     if (!canEdit) return;
     const keys = Array.from(selected);
+    if (onSubmitStarted && dismissAfterSubmit && keys.length > 0) {
+      void submitInBackground(keys);
+      return;
+    }
     setSubmitting(true);
     setGateFailures([]);
     try {
@@ -1155,8 +1246,10 @@ function showSubmitToast(args: {
   skipped: number;
   failed: number;
   brand: string;
+  /** Replace this toast (the instant submit's "Cross-posting…" spinner). */
+  id?: string | number;
 }) {
-  const { created, skipped, failed, brand } = args;
+  const { created, skipped, failed, brand, id } = args;
   const okCount = created.length;
   if (okCount === 0 && skipped === 0) {
     // All failed — handled by the caller's error path.
@@ -1193,6 +1286,7 @@ function showSubmitToast(args: {
             }
           : undefined,
         duration: 7000,
+        id,
       }
     );
     return;
@@ -1214,6 +1308,7 @@ function showSubmitToast(args: {
             window.open(`/${brand}/production`, "_blank", "noopener"),
         },
         duration: 7000,
+        id,
       }
     );
     return;
@@ -1226,6 +1321,7 @@ function showSubmitToast(args: {
     {
       description: "Removing this candidate from the queue.",
       duration: 5000,
+      id,
     }
   );
 }

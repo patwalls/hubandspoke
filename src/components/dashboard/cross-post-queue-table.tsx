@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { AccountBadge } from "@/components/ui/account-badge";
-import { CrossPostTriageDialog } from "./cross-post-triage-dialog";
+import { CrossPostTriageDialog, type GateFailure } from "./cross-post-triage-dialog";
 import type { TargetCommonalityRow } from "@/lib/cross-post-usual";
 import type { ChannelReach } from "@/lib/channel-reach";
 import type {
@@ -277,6 +277,11 @@ function CrossPostQueueRow({
   onActioned: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  // Instant submit (cross-post-instant M4): the row hides the moment
+  // "Cross-post N" is clicked and stays mounted so a refusal can bring it
+  // back with the dialog reopened on the "I'll do it manually" banner.
+  const [pending, setPending] = useState(false);
+  const [reopenFailures, setReopenFailures] = useState<GateFailure[] | null>(null);
 
   // Badge: stacked ratio + signal so the operator knows which checkpoint
   // triggered (early-velocity rocket vs late-bloomer lifetime hit). "NEW"
@@ -292,7 +297,10 @@ function CrossPostQueueRow({
     : "bg-muted text-muted-foreground border-border";
 
   return (
-    <tr className="border-b border-border/50 hover:bg-accent/30 transition-colors">
+    <tr
+      className={`border-b border-border/50 hover:bg-accent/30 transition-colors${pending ? " hidden" : ""}`}
+      data-pending={pending ? "true" : undefined}
+    >
       <td className="px-3 py-2">
         <div className="flex flex-wrap gap-1 min-w-0">
           <AccountBadge
@@ -373,13 +381,25 @@ function CrossPostQueueRow({
         {relativeAge(item.publishedAt ?? item.publishedDate)}
         <CrossPostTriageDialog
           open={open}
-          onOpenChange={setOpen}
+          onOpenChange={(next) => {
+            setOpen(next);
+            if (!next) setReopenFailures(null);
+          }}
           candidate={item}
           brandAccounts={brandAccounts}
           brand={brand}
           targetCommonality={targetCommonality}
           channelReach={channelReach}
           onActioned={onActioned}
+          onSubmitStarted={() => setPending(true)}
+          onSubmitFailed={(failures) => {
+            setPending(false);
+            if (failures.length > 0) {
+              setReopenFailures(failures);
+              setOpen(true);
+            }
+          }}
+          initialGateFailures={reopenFailures ?? undefined}
         />
       </td>
     </tr>
