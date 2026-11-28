@@ -31,3 +31,20 @@ export function backgroundBucket(ms: number): "under-2s" | "2-5s" | "5s-plus" {
   if (ms < 5000) return "2-5s";
   return "5s-plus";
 }
+
+/** The post page's Cross-post tab (M5) settles per channel: the ones that
+ *  were created (or already existed) read "Created", gate refusals go to the
+ *  banner (not re-ticked — the banner's "I'll do it manually" retries them),
+ *  and the rest failed outright, so they come back ticked for one-click retry. */
+export function tabSettle(
+  keys: string[],
+  doneKeys: string[],
+  gateKeys: string[],
+): { created: string[]; reselect: string[] } {
+  const done = new Set(doneKeys);
+  const gate = new Set(gateKeys);
+  return {
+    created: keys.filter((k) => done.has(k)),
+    reselect: keys.filter((k) => !done.has(k) && !gate.has(k)),
+  };
+}

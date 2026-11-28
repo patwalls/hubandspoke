@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { ExternalLinkIcon } from "lucide-react";
+import { ExternalLinkIcon, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -30,7 +30,7 @@ import { isNotionAuthoritative } from "@/lib/platform";
 import { usualTargetKeys, type TargetCommonalityRow } from "@/lib/cross-post-usual";
 import { channelReachLabel, type ChannelReach } from "@/lib/channel-reach";
 import { trackUsage } from "@/lib/usage/track";
-import { backgroundBucket, instantOutcome } from "@/lib/cross-post-instant";
+import { backgroundBucket, instantOutcome, tabSettle } from "@/lib/cross-post-instant";
 import {
   PLATFORM_FIELD_SCHEMAS,
   type PlatformKey,
@@ -244,6 +244,9 @@ export function CrossPostTriagePanel({
   const [showAll, setShowAll] = useState(false);
   const [assigneeUserId, setAssigneeUserId] = useState<string>("");
   const [gateFailures, setGateFailures] = useState<GateFailure[]>(initialGateFailures ?? []);
+  // Tab-embed instant submit: channels whose create is in flight / landed.
+  const [creatingKeys, setCreatingKeys] = useState<Set<string>>(new Set());
+  const [createdKeys, setCreatedKeys] = useState<Set<string>>(new Set());
   const [assignableUsers, setAssignableUsers] = useState<
     Array<{ id: string; name: string | null; email: string; avatarUrl: string | null }>
   >([]);
@@ -445,7 +448,7 @@ export function CrossPostTriagePanel({
     // Acts on the currently-visible targets so "Select all" while collapsed
     // doesn't quietly check the hidden ones.
     const selectableKeys = visibleTargets
-      .filter((t) => !t.existing)
+      .filter((t) => !t.existing && !creatingKeys.has(pairKey(t)) && !createdKeys.has(pairKey(t)))
       .map((t) => pairKey(t));
     setSelected((prev) => {
       const allSelected =
@@ -475,8 +478,11 @@ export function CrossPostTriagePanel({
     skipped: number;
     gateFailures: GateFailure[];
     hardErrors: string[];
+    /** Keys that ended created or already-existing (409). */
+    doneKeys: string[];
   }> {
     const created: Array<{ productionItemId: string; accountHandle: string }> = [];
+    const doneKeys: string[] = [];
     let skipped = 0;
     const gateFails: GateFailure[] = [];
     const hardErrors: string[] = [];
@@ -541,6 +547,7 @@ export function CrossPostTriagePanel({
     );
     for (const r of results) {
       if (r.status === "fulfilled") {
+        if (r.value.kind !== "gate") doneKeys.push(r.value.key);
         if (r.value.kind === "ok") {
           created.push({
             productionItemId: r.value.productionItemId,
@@ -557,7 +564,66 @@ export function CrossPostTriagePanel({
         if (message && !hardErrors.includes(message)) hardErrors.push(message);
       }
     }
-    return { created, skipped, gateFailures: gateFails, hardErrors };
+    return { created, skipped, gateFailures: gateFails, hardErrors, doneKeys };
+  }
+
+  /** Instant submit on the post page's Cross-post tab (cross-post-instant
+   *  M5): the panel stays mounted, so instead of locking every control on
+   *  "Cross-posting…" the picked channels turn "Creating…" at once and the
+   *  rest of the panel stays usable. When the creates settle: done channels
+   *  read "Created" until the reload marks them "Already cross-posted",
+   *  gate refusals get the usual banner, failed ones are re-ticked. */
+  async function submitInTab(keys: string[]) {
+    const markBrand = candidate.brand || brand;
+    const n = keys.length;
+    trackUsage("cross-post:tab-instant-submit", markBrand);
+    const startedAt = Date.now();
+    setCreatingKeys((prev) => new Set([...prev, ...keys]));
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const k of keys) next.delete(k);
+      return next;
+    });
+    setGateFailures([]);
+    const toastId = toast.loading(`Cross-posting to ${n} channel${n === 1 ? "" : "s"}…`);
+    try {
+      const { created, skipped, gateFailures: gateFails, hardErrors, doneKeys } =
+        await submitTargets(keys, { manual: false });
+      trackUsage(`cross-post:tab-background:${backgroundBucket(Date.now() - startedAt)}`, markBrand);
+      const settled = tabSettle(keys, doneKeys, gateFails.map((g) => g.key));
+      setCreatedKeys((prev) => new Set([...prev, ...settled.created]));
+      if (settled.reselect.length > 0) {
+        setSelected((prev) => new Set([...prev, ...settled.reselect]));
+      }
+      if (gateFails.length > 0) setGateFailures(gateFails);
+      const failed = gateFails.length + hardErrors.length;
+      if (created.length > 0 || skipped > 0) {
+        showSubmitToast({ created, skipped, failed, brand, id: toastId });
+      } else {
+        toast.dismiss(toastId);
+      }
+      if (hardErrors.length > 0) {
+        toast.error(
+          `Failed to cross-post (${hardErrors.length} target${hardErrors.length === 1 ? "" : "s"}).`,
+          {
+            description: [...hardErrors.slice(0, 2), "They're still ticked — try again."].join("\n\n"),
+            duration: 12_000,
+          },
+        );
+      }
+      if (settled.created.length > 0) onActioned();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to submit cross-posts", {
+        id: toastId,
+      });
+      setSelected((prev) => new Set([...prev, ...keys]));
+    } finally {
+      setCreatingKeys((prev) => {
+        const next = new Set(prev);
+        for (const k of keys) next.delete(k);
+        return next;
+      });
+    }
   }
 
   /** Instant queue submit: the row and dialog go away now, the creates run
@@ -630,6 +696,11 @@ export function CrossPostTriagePanel({
     const keys = Array.from(selected);
     if (onSubmitStarted && dismissAfterSubmit && keys.length > 0) {
       void submitInBackground(keys);
+      return;
+    }
+    // Tab embed (no wrapping dialog, no queue row): stay mounted, go instant.
+    if (!onSubmitted && !onSubmitStarted && !dismissAfterSubmit && keys.length > 0) {
+      void submitInTab(keys);
       return;
     }
     setSubmitting(true);
@@ -779,14 +850,14 @@ export function CrossPostTriagePanel({
   }
 
   const visibleSelectableKeys = visibleTargets
-    .filter((t) => !t.existing)
+    .filter((t) => !t.existing && !creatingKeys.has(pairKey(t)) && !createdKeys.has(pairKey(t)))
     .map((t) => pairKey(t));
   // "Select usual": the targets this format goes to in most of its recent
   // cross-posts (cross-post-usual.ts). Looks past VISIBLE_LIMIT — a hidden
   // usual target auto-expands the list via hasHiddenSelected.
   const usualKeys = usualTargetKeys(
     candidate.format ? targetCommonality?.[candidate.format] : undefined,
-    targets.filter((t) => !t.existing).map((t) => pairKey(t)),
+    targets.filter((t) => !t.existing && !creatingKeys.has(pairKey(t)) && !createdKeys.has(pairKey(t))).map((t) => pairKey(t)),
   );
   const usualAllSelected =
     usualKeys.length > 0 && usualKeys.every((k) => selected.has(k));
@@ -929,7 +1000,9 @@ export function CrossPostTriagePanel({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {visibleTargets.map((t) => {
                 const key = pairKey(t);
-                const isDone = !!t.existing;
+                const isCreating = !t.existing && creatingKeys.has(key);
+                const isCreated = !t.existing && !isCreating && createdKeys.has(key);
+                const isDone = !!t.existing || isCreating || isCreated;
                 const isChecked = selected.has(key);
                 return (
                   <label
@@ -993,7 +1066,24 @@ export function CrossPostTriagePanel({
                         → {(usualEditorFor(key)!.name ?? "usual editor").split(" ")[0]}
                       </span>
                     )}
-                    {isDone && (
+                    {isCreating && (
+                      <span
+                        className="inline-flex items-center gap-1 text-[10px] text-muted-foreground whitespace-nowrap"
+                        data-testid="cross-post-creating"
+                      >
+                        <Loader2 className="size-3 animate-spin" aria-hidden />
+                        Creating…
+                      </span>
+                    )}
+                    {isCreated && (
+                      <span
+                        className="text-[10px] text-emerald-700 dark:text-emerald-400 whitespace-nowrap"
+                        data-testid="cross-post-created"
+                      >
+                        Created · just now
+                      </span>
+                    )}
+                    {!!t.existing && (
                       <span
                         className="text-[10px] text-muted-foreground whitespace-nowrap"
                         title={

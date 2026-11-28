@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { backgroundBucket, instantOutcome } from "./cross-post-instant";
+import { backgroundBucket, instantOutcome, tabSettle } from "./cross-post-instant";
 
 describe("instantOutcome", () => {
   it("is done when every target was created or already existed", () => {
@@ -27,5 +27,16 @@ describe("backgroundBucket", () => {
     expect(backgroundBucket(2000)).toBe("2-5s");
     expect(backgroundBucket(4999)).toBe("2-5s");
     expect(backgroundBucket(5000)).toBe("5s-plus");
+  });
+});
+
+describe("tabSettle", () => {
+  it("re-ticks only the channels that failed outright, never gate refusals or done ones", () => {
+    // a created, b refused by the readiness gate (banner retries it), c a 500.
+    expect(tabSettle(["a", "b", "c"], ["a"], ["b"])).toEqual({ created: ["a"], reselect: ["c"] });
+  });
+
+  it("counts an already-existing channel (409) as created", () => {
+    expect(tabSettle(["a", "b"], ["a", "b"], [])).toEqual({ created: ["a", "b"], reselect: [] });
   });
 });
