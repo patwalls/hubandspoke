@@ -48,10 +48,18 @@ test("after two quick returns to the list, Publish lands there with the next row
       await popup.getByRole("button", { name: "Got it" }).click();
     });
     const dialog = page.getByRole("dialog", { name: "Publish or Schedule" });
+    // The dialog refuses a link from another platform than the post's.
+    const linkFor = (id: string, n: number) =>
+      ({
+        [ids[0]]: `https://www.linkedin.com/feed/update/e2e-next-list-${stamp}-${n}`,
+        [ids[1]]: `https://www.threads.com/@starter_story/post/e2e${stamp}${n}`,
+        [ids[2]]: `https://x.com/starterstory/status/${stamp}${n}`,
+        [ids[3]]: `https://www.facebook.com/starterstory/posts/${stamp}${n}`,
+      })[id];
     const publish = async (p: Page, n: number) => {
       await p.getByRole("button", { name: "Publish or Schedule" }).first().click();
       await expect(dialog.getByTestId("publish-open-next")).toBeVisible();
-      await dialog.locator("#publish-link").fill(`https://www.linkedin.com/feed/update/e2e-next-list-${stamp}-${n}`);
+      await dialog.locator("#publish-link").fill(linkFor(p.url().split("/").pop()!, n));
     };
 
     // Two landings, each followed straight away by a trip back to the list.
@@ -139,7 +147,7 @@ test("'open the post instead' sends Publish to the next post again", async ({ pa
     await expect(dialog.getByTestId("publish-open-next")).toContainText("Then open this post's next platform");
     // The checkbox didn't flip with the click.
     await expect(dialog.getByTestId("publish-open-next").getByRole("checkbox")).toBeChecked();
-    await dialog.locator("#publish-link").fill(`https://www.linkedin.com/feed/update/e2e-post-instead-${stamp}`);
+    await dialog.locator("#publish-link").fill(`https://www.linkedin.com/feed/update/e2e-post-instead-${stamp}`); // a is the LinkedIn one
     await dialog.locator("#publish-link").press("Enter");
     await expect(page).toHaveURL(new RegExp(`/starter-story/content/${b}$`));
   } finally {
