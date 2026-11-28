@@ -134,6 +134,15 @@ import { assignAllIds } from "@/lib/derivatives/assign-all";
 import { UpNext } from "@/components/my-work/up-next";
 import { RunNextCard } from "@/components/dashboard/production-run-nav";
 import { writeLanded } from "@/lib/publish/open-next-trail";
+import {
+  listHref,
+  onLanding,
+  prefersList,
+  readHabit,
+  rememberedProductionList,
+  saveHabit,
+} from "@/lib/publish/landing-habit";
+import { rememberNextRows } from "@/lib/my-work/next-rows";
 import { renderInstructions } from "@/lib/utils/markdown";
 import { recordVisit } from "@/lib/hooks/use-recent-items";
 import { startVisibleInterval } from "@/lib/visible-interval";
@@ -1441,13 +1450,25 @@ export function ContentDetail({ brand, contentId, accounts, shortLinksBaseUrl, s
   }, [publishDialogOpen, isReadyItem, contentId, brand]);
   const goToNextAfterPublish = useCallback(
     (next: PublishNext) => {
-      trackUsage(`publish:open-next:${next.from}`, brand);
-      // Where they go from the landing says which fix is next (M5).
-      writeLanded({ id: next.id, from: next.from, at: Date.now() });
       // The published post leaves the run, so the next page counts the
-      // smaller Ready group (RunNextCard does this when you stay).
+      // smaller Ready group (RunNextCard does this when you stay), and back
+      // on the list the cursor starts on the next post's row.
       const left = leaveRun(readRun(brand), contentId);
       if (left) saveRun({ ...left.run, current: next.id });
+      const habit = readHabit();
+      if (prefersList(habit)) {
+        // This browser goes back to the list after every landing (M7,
+        // landing-habit.ts): land there, with the next row marked.
+        trackUsage("publish:open-next:to-list", brand);
+        writeLanded(null);
+        rememberNextRows([next.id]);
+        router.push(listHref(next.brand, next.brand === brand ? rememberedProductionList(brand) : null));
+        return;
+      }
+      trackUsage(`publish:open-next:${next.from}`, brand);
+      saveHabit(onLanding(habit));
+      // Where they go from the landing says which fix is next (M5).
+      writeLanded({ id: next.id, from: next.from, at: Date.now() });
       router.push(`/${next.brand}/content/${next.id}`);
     },
     [brand, contentId, router],

@@ -30,6 +30,7 @@ import {
   saveOpenNextPref,
   type PublishNext,
 } from "@/lib/publish/next-after-publish";
+import { optOut, prefersList, readHabit, saveHabit } from "@/lib/publish/landing-habit";
 
 // The one and only path to status='Published' / status='Scheduled'. The
 // generic PUT /api/production-items route rejects those status values
@@ -136,6 +137,9 @@ export function PublishScheduleDialog({
   const [noDate, setNoDate] = useState<boolean>(initialNoDate ?? false);
   const [submitting, setSubmitting] = useState(false);
   const [openNextOn, setOpenNextOn] = useState(true);
+  // This browser always went back to the list after landing (landing-habit.ts):
+  // the next post is marked there instead of opened.
+  const [nextOnList, setNextOnList] = useState(false);
   const linkInput = useRef<HTMLInputElement>(null);
   // The Studio offer, once it filled the box this opening (null = not yet).
   const [prefilled, setPrefilled] = useState<StudioOffer | null>(null);
@@ -151,6 +155,7 @@ export function PublishScheduleDialog({
     setNoDate(initialNoDate ?? false);
     setSubmitting(false);
     setOpenNextOn(readOpenNextPref());
+    setNextOnList(prefersList(readHabit()));
     setPrefilled(null);
   }, [
     open,
@@ -492,9 +497,26 @@ export function PublishScheduleDialog({
               }}
             />
             <span className="min-w-0 truncate">
-              Then open {openNext.from === "same-post" ? "this post's next platform" : "the next Ready post"}:{" "}
+              {nextOnList
+                ? "Then mark it on In Production: "
+                : `Then open ${openNext.from === "same-post" ? "this post's next platform" : "the next Ready post"}: `}
               <span className="font-medium text-foreground">{nextLabel(openNext)}</span>
             </span>
+            {nextOnList && (
+              <button
+                type="button"
+                data-testid="publish-open-next-post-instead"
+                className="shrink-0 underline underline-offset-2 hover:text-foreground"
+                onClick={(e) => {
+                  e.preventDefault();
+                  saveHabit(optOut());
+                  setNextOnList(false);
+                  trackUsage("publish:open-next:post-instead", brand);
+                }}
+              >
+                open the post instead
+              </button>
+            )}
           </label>
         )}
 
