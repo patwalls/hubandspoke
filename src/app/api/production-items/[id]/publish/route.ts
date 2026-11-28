@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { invalidateReportCaches } from "@/lib/invalidate-report-caches";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { contentEvents, productionItems } from "@/lib/db/schema";
@@ -314,6 +315,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     return row;
   });
+  // In Production / Content must show the new status now, not in a minute.
+  invalidateReportCaches({ brands: [inserted?.brand] });
 
   // Schedule the 15m / 30m / 1h / 2h / 4h velocity snapshots. Mirrors the
   // POST + PUT routes (src/app/api/production-items/route.ts:357, :1110).

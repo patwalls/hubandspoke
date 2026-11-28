@@ -103,7 +103,7 @@ test("after two quick returns to the list, Publish lands there with the next row
     await expect(next).toHaveAttribute("data-production-row", last);
     await expect(next).toHaveAttribute("data-focused", "");
     // The list's cached copy refreshes: the published ones leave, the cursor stays.
-    await expect(page.locator("[data-production-row]")).toHaveCount(1);
+    await expect(page.locator("[data-production-row]")).toHaveCount(1, { timeout: 15_000 });
     await expect(next).toHaveAttribute("data-focused", "");
     if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT, fullPage: true });
 

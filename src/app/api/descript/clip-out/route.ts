@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { invalidateReportCaches } from "@/lib/invalidate-report-caches";
 import { eq } from "drizzle-orm";
 import { requireBrandEdit } from "@/lib/auth-guards";
 import { brandOfFormat, brandOfProductionItem } from "@/lib/brand-access";
@@ -161,6 +162,7 @@ export async function POST(request: NextRequest) {
         derivativeItemId,
       });
 
+      invalidateReportCaches({ brands: [item.brand] });
       return NextResponse.json({
         mode: "descript_clip",
         triggerId: trigger.id,
@@ -223,6 +225,7 @@ export async function POST(request: NextRequest) {
     })
     .returning({ id: repurposeTriggers.id });
 
+  invalidateReportCaches({ brands: [item.brand] });
   return NextResponse.json({
     mode: "manual_task",
     triggerId: trigger.id,

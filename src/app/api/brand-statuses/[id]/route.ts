@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { invalidateReportCaches } from "@/lib/invalidate-report-caches";
 import { and, eq, sql } from "drizzle-orm";
 import { requireBrandEdit } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
@@ -122,6 +123,8 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
         }
         return updated;
       });
+      // A rename moves every item; a pipeline-column flip regroups the list.
+      invalidateReportCaches({ brands: [existing.brandSlug] });
       return NextResponse.json({ status: result });
     } catch (err) {
       const code = (err as { code?: string })?.code;
