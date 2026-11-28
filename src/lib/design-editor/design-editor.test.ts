@@ -7,7 +7,7 @@ import { buildStoryTemplate } from "./story-template";
 import { buildTmzTemplate } from "./tmz-template";
 import { buildAppsTemplate } from "./apps-template";
 import { DESIGN_PRESETS } from "./templates";
-import { applyDmKeyword, applyHighlights, applyPhotoPick, fillTemplate, preferFounderPhoto, listSlots, reflowStacks, type DesignFill, type DesignFillValue } from "./template-fill";
+import { aiCtaPattern, applyDmKeyword, applyHighlights, hasDmKeywordSlot, applyPhotoPick, fillTemplate, preferFounderPhoto, listSlots, reflowStacks, type DesignFill, type DesignFillValue } from "./template-fill";
 import { formatFollowers, layoutChannel, resolveChannel } from "./channel";
 import { fontsUsed, pageToSatoriTree, videoPageLayers } from "./render-tree";
 import { buildDesignCaptionCues, activeCue } from "./captions";
@@ -222,6 +222,52 @@ describe("fillTemplate", () => {
     const swapped = applyDmKeyword(recolored, "dailywin");
     const cta = swapped.pages[3].elements.find((e) => e.name === "CTA") as DesignTextElement;
     expect(cta.spans).toEqual([{ text: "comment " }, { text: '"DAILYWIN"', color: "#6B5BFF" }, { text: " and i'll DM you the full video." }]);
+  });
+
+  describe("an older format whose CTA the AI writes (saved before the DM-keyword slot)", () => {
+    // What a saved tech-stack format holds: the CTA is an `ai` slot with a
+    // sample keyword, not the `dmKeyword` slot.
+    function aiCtaTemplate(): DesignDoc {
+      const t = buildTechStackTemplate();
+      return {
+        ...t,
+        pages: t.pages.map((p) => ({
+          ...p,
+          elements: p.elements.map((e) => (e.name === "CTA" && e.type === "text" ? { ...e, spans: [{ text: 'comment "BSC" and i\'ll DM you the full video.' }], slot: { kind: "ai" as const, hint: "The CTA." } } : e)),
+        })),
+      };
+    }
+    const ctaOf = (doc: DesignDoc) => doc.pages[3].elements.find((e) => e.name === "CTA") as DesignTextElement;
+
+    it("fills the post's keyword bold and keeps following keyword swaps", () => {
+      const t = aiCtaTemplate();
+      const doc = fillTemplate(t, fillFor(t, { CTA: 'comment "BUSTEM" and i\'ll DM you the full video.' }), { ...withSource, dmKeyword: "leveragekit" });
+      // The AI invented its own word; the post's keyword replaces it, bold.
+      expect(ctaOf(doc).spans).toEqual([{ text: "comment " }, { text: '"LEVERAGEKIT"', bold: true }, { text: " and i'll DM you the full video." }]);
+      expect(ctaOf(doc).slot).toEqual({ kind: "dmKeyword", hint: 'comment "{{keyword}}" and i\'ll DM you the full video.' });
+      expect(ctaOf(applyDmKeyword(doc, "firstsale")).spans[1]).toEqual({ text: '"FIRSTSALE"', bold: true });
+    });
+
+    it("no keyword on the post yet → the placeholder shows, like the built-in CTA", () => {
+      const t = aiCtaTemplate();
+      const doc = fillTemplate(t, fillFor(t, { CTA: 'comment "BUSTEM" and i\'ll DM you the full video.' }), withSource);
+      expect(ctaOf(doc).spans.map((s) => s.text).join("")).toBe('comment "{{keyword}}" and i\'ll DM you the full video.');
+    });
+
+    it("counts as a DM-keyword template, so the post gets a keyword before drafting", () => {
+      expect(hasDmKeywordSlot(aiCtaTemplate())).toBe(true);
+      // An AI slot with no quoted keyword in its sample is ordinary text.
+      const t = buildPlaybookTemplate();
+      const noCta = { ...t, pages: t.pages.map((p) => ({ ...p, elements: p.elements.filter((e) => e.slot?.kind !== "dmKeyword") })) };
+      expect(hasDmKeywordSlot(noCta)).toBe(false);
+    });
+
+    it("aiCtaPattern: the post's keyword where quoted, else the one quoted keyword, else nothing", () => {
+      expect(aiCtaPattern('comment "bootstrap" to get it', "bootstrap")).toBe('comment "{{keyword}}" to get it');
+      expect(aiCtaPattern('comment "COPY" and i\'ll DM you', "bootstrap")).toBe('comment "{{keyword}}" and i\'ll DM you');
+      expect(aiCtaPattern("comment below and i'll DM you", null)).toBeNull();
+      expect(aiCtaPattern('comment "SAAS" or "MRR"', null)).toBeNull();
+    });
   });
 
   it("reflowStacks leaves pages without stacks alone", () => {

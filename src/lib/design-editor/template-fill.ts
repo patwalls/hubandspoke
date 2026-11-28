@@ -190,6 +190,11 @@ function fillElement(el: DesignElement, byKey: Map<string, DesignFillValue>, ctx
       if (el.type === "text") {
         const text = value?.text?.trim() ?? "";
         if (!text) return null;
+        // A CTA the AI writes (formats saved before the DM-keyword slot)
+        // becomes a real DM-keyword element: the post's keyword, bold, and
+        // it follows later keyword swaps like the built-in CTA does.
+        const pattern = isAiKeywordCta(el) ? aiCtaPattern(text, ctx.dmKeyword ?? null) : null;
+        if (pattern) return substituteDmKeyword({ ...el, slot: { kind: "dmKeyword", hint: pattern } }, ctx.dmKeyword ?? null);
         return { ...el, spans: applyHighlights(text, value?.highlights ?? []) };
       }
       if (el.type === "video") {
@@ -225,6 +230,36 @@ function fillElement(el: DesignElement, byKey: Map<string, DesignFillValue>, ctx
       // token stays visible so nobody ships a CTA with a hole in it.
       return el.type === "text" ? substituteDmKeyword({ ...el, slot: { kind: "dmKeyword", hint: dmPattern(el) } }, ctx.dmKeyword ?? null) : el;
   }
+}
+
+/** A quoted keyword as a CTA spells it: `"GROWTHHACK"` (capitals, digits,
+ *  dashes — an identifier, matched structurally). */
+const QUOTED_KEYWORD = /"([A-Z0-9][A-Z0-9_-]{2,})"/g;
+
+/** An `ai` text slot whose template sample quotes one keyword
+ *  (`comment "BSC" and i'll DM you…`): a CTA saved before the `dmKeyword`
+ *  slot existed. Editors swapped and bolded its keyword by hand on every
+ *  post (designs-right-first-export, 2026-11). */
+export function isAiKeywordCta(el: DesignElement): el is DesignTextElement {
+  if (el.type !== "text" || el.slot?.kind !== "ai") return false;
+  const sample = el.spans.map((s) => s.text).join("");
+  return [...sample.matchAll(QUOTED_KEYWORD)].length === 1;
+}
+
+/** The AI's CTA with its keyword turned back into the token: the post's
+ *  keyword where the AI quoted it, else the one quoted keyword it wrote
+ *  (it invents one when the post had none). Null when there is no single
+ *  keyword to swap — the text then stays as written. */
+export function aiCtaPattern(text: string, keyword: string | null): string | null {
+  if (keyword) {
+    const quoted = `"${keyword.toUpperCase()}"`;
+    const at = text.toUpperCase().indexOf(quoted);
+    if (at >= 0) return `${text.slice(0, at)}"${DM_KEYWORD_TOKEN}"${text.slice(at + quoted.length)}`;
+  }
+  const found = [...text.matchAll(QUOTED_KEYWORD)];
+  if (found.length !== 1) return null;
+  const m = found[0];
+  return `${text.slice(0, m.index)}"${DM_KEYWORD_TOKEN}"${text.slice(m.index! + m[0].length)}`;
 }
 
 /** The CTA's wording with the token, kept in `slot.hint` after filling. */
@@ -284,8 +319,10 @@ export function applyDmKeyword(doc: DesignDoc, keyword: string | null): DesignDo
   };
 }
 
+/** Does filling this template put a DM keyword on the post? Counts the
+ *  older AI-written CTAs too, so their post gets a keyword up front. */
 export function hasDmKeywordSlot(doc: DesignDoc): boolean {
-  return doc.pages.some((p) => p.elements.some((el) => el.slot?.kind === "dmKeyword"));
+  return doc.pages.some((p) => p.elements.some((el) => el.slot?.kind === "dmKeyword" || isAiKeywordCta(el)));
 }
 
 /** Cutout slots still waiting for their picture. */
