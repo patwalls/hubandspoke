@@ -19,6 +19,7 @@ import { useRememberListUrl } from "@/lib/hooks/use-remember-list-url";
 import { readNextRows } from "@/lib/my-work/next-rows";
 import { ProductionListKeys, ProductionPeek, rowAfter } from "./production-peek";
 import { applyTrail, onListOpened, readLanded } from "@/lib/publish/open-next-trail";
+import { onBounce, readHabit, saveHabit } from "@/lib/publish/landing-habit";
 import { trackUsage } from "@/lib/usage/track";
 import { waitBucket } from "@/lib/usage/wait-bucket";
 import { ReportCache } from "@/lib/content-list/report-cache";
@@ -212,6 +213,8 @@ export function ProductionView({ brand, currentUserId }: ProductionViewProps) {
   useEffect(() => {
     const mark = applyTrail(onListOpened(readLanded(), Date.now()));
     if (mark) trackUsage(mark, brand);
+    // Enough of these in a row and Publish lands here instead (M7).
+    if (mark === "publish:open-next:back-to-list") saveHabit(onBounce(readHabit()));
   }, [brand]);
   const showsNextRow = !loading && items.some((i) => nextIds.has(i.id));
   useEffect(() => {

@@ -14,6 +14,7 @@
 // for every clippable format on the brand.
 
 import { NextRequest, NextResponse } from "next/server";
+import { invalidateReportCaches } from "@/lib/invalidate-report-caches";
 import { requireBrandEdit } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
@@ -86,5 +87,6 @@ export async function POST(request: NextRequest) {
     console.error("recordItemCreated failed for upload-recording:", err);
   }
 
+  invalidateReportCaches({ brands: [brand] });
   return NextResponse.json({ id: created.id }, { status: 201 });
 }

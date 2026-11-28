@@ -13,6 +13,7 @@
 // call SC again, to avoid burning a second credit.
 
 import { NextRequest, NextResponse } from "next/server";
+import { invalidateReportCaches } from "@/lib/invalidate-report-caches";
 import { requireBrandEdit } from "@/lib/auth-guards";
 import { db } from "@/lib/db";
 import { productionItems } from "@/lib/db/schema";
@@ -133,6 +134,7 @@ export async function POST(request: NextRequest) {
       console.error("youtube-download enqueue failed (non-fatal):", err);
     }
 
+    invalidateReportCaches({ brands: [brand] });
     return NextResponse.json({ id: created.id }, { status: 201 });
   } catch (err) {
     console.error("upload-external-link failed:", err);

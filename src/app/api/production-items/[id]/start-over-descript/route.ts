@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { invalidateReportCaches } from "@/lib/invalidate-report-caches";
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
@@ -240,6 +241,7 @@ async function runStartOver(id: string, actorUserId: string) {
     })
     .where(eq(clipIdeas.id, item.sourceClipIdeaId));
 
+  invalidateReportCaches({ brands: [item.brand] });
   const formatSlug = item.format ? formatNameToSlug(item.format) : null;
 
   return NextResponse.json({
